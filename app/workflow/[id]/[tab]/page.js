@@ -1,9 +1,10 @@
 import StandaloneShell from '@/components/StandaloneShell';
+import { getAgencyShellConfig } from '@/src/lib/agencyMode';
 
 export const metadata = {
   title: 'Workflow — Open Generative AI',
 };
 
 export default function WorkflowTabPage() {
-  return <StandaloneShell />;
+  return <StandaloneShell {...getAgencyShellConfig()} />;
 }

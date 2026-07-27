@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, getUserBalance } from 'studio';
@@ -233,18 +233,35 @@ const NAVIGATION_CATEGORIES = [
 
 const EXPLORE_APPS_TAB = TABS.find((tab) => tab.id === 'apps');
 
-const getNavigationCategory = (tabId) => (
-  NAVIGATION_CATEGORIES.find((category) => category.tabIds.includes(tabId))
-);
-
 const STORAGE_KEY = 'muapi_key';
 
-export default function StandaloneShell() {
+export default function StandaloneShell({ agencyMode = false, allowedTabIds = null }) {
   const params = useParams();
   const router = useRouter();
   const slug = params?.slug || []; 
   const idFromParams = params?.id;
   const tabFromParams = params?.tab;
+  const enabledTabIds = useMemo(() => (
+    agencyMode
+      ? new Set((allowedTabIds && allowedTabIds.length > 0 ? allowedTabIds : ['image', 'marketing']))
+      : null
+  ), [agencyMode, allowedTabIds]);
+  const visibleTabs = useMemo(() => (
+    agencyMode ? TABS.filter((tab) => enabledTabIds.has(tab.id)) : TABS
+  ), [agencyMode, enabledTabIds]);
+  const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
+  const navigationCategories = useMemo(() => (
+    NAVIGATION_CATEGORIES
+      .map((category) => ({
+        ...category,
+        tabIds: category.tabIds.filter((tabId) => visibleTabIds.has(tabId)),
+      }))
+      .filter((category) => category.tabIds.length > 0)
+  ), [visibleTabIds]);
+  const exploreAppsTab = agencyMode ? null : EXPLORE_APPS_TAB;
+  const getVisibleNavigationCategory = useCallback((tabId) => (
+    navigationCategories.find((category) => category.tabIds.includes(tabId))
+  ), [navigationCategories]);
 
   // Helper to extract workflow details precisely from either route structure
   const getWorkflowInfo = useCallback(() => {
@@ -263,13 +280,18 @@ export default function StandaloneShell() {
 
   // Initialize activeTab from URL slug/params or default to 'image'
   const getInitialTab = () => {
-    if (idFromParams || slug.includes('workflow')) return 'workflows';
-    if (slug.includes('agents')) return 'agents';
-    if (slug.includes('design-agent')) return 'design-agent';
-    if (slug.includes('apps')) return 'apps';
-    const firstSegment = slug[0];
-    if (firstSegment && TABS.find(t => t.id === firstSegment)) return firstSegment;
-    return 'image';
+    let candidate = 'image';
+    if (idFromParams || slug.includes('workflow')) candidate = 'workflows';
+    else if (slug.includes('agents')) candidate = 'agents';
+    else if (slug.includes('design-agent')) candidate = 'design-agent';
+    else if (slug.includes('apps')) candidate = 'apps';
+    else {
+      const firstSegment = slug[0];
+      if (firstSegment && visibleTabs.find(t => t.id === firstSegment)) candidate = firstSegment;
+    }
+
+    if (visibleTabIds.has(candidate)) return candidate;
+    return visibleTabs[0]?.id || 'image';
   };
   
   const [apiKey, setApiKey] = useState(null);
@@ -291,9 +313,9 @@ export default function StandaloneShell() {
   });
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [expandedCategoryId, setExpandedCategoryId] = useState(() => (
-    getNavigationCategory(getInitialTab())?.id || NAVIGATION_CATEGORIES[0].id
+    getVisibleNavigationCategory(getInitialTab())?.id || navigationCategories[0]?.id || null
   ));
-  const activeCategory = getNavigationCategory(activeTab);
+  const activeCategory = getVisibleNavigationCategory(activeTab);
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed(prev => {
@@ -323,6 +345,12 @@ export default function StandaloneShell() {
     }
   }, [activeCategory?.id]);
 
+  useEffect(() => {
+    if (!visibleTabIds.has(activeTab)) {
+      setActiveTab(visibleTabs[0]?.id || 'image');
+    }
+  }, [activeTab, visibleTabIds, visibleTabs]);
+
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState(null);
@@ -345,14 +373,14 @@ export default function StandaloneShell() {
   }, []);
 
   const makeSuccessCallback = useCallback((tabId) => (data) => {
-    const tab = TABS.find(t => t.id === tabId);
+    const tab = visibleTabs.find(t => t.id === tabId);
     pushNotification({ type: 'success', tabId, label: tab?.label || tabId, data });
-  }, [pushNotification]);
+  }, [pushNotification, visibleTabs]);
 
   const makeErrorCallback = useCallback((tabId) => (message) => {
-    const tab = TABS.find(t => t.id === tabId);
+    const tab = visibleTabs.find(t => t.id === tabId);
     pushNotification({ type: 'error', tabId, label: tab?.label || tabId, message });
-  }, [pushNotification]);
+  }, [pushNotification, visibleTabs]);
 
   // Popstate event listener to sync tab state with URL on back/forward navigation
   useEffect(() => {
@@ -360,13 +388,13 @@ export default function StandaloneShell() {
       const path = window.location.pathname;
       const segments = path.split('/').filter(Boolean);
       const tabId = segments[1] || 'image';
-      if (TABS.find(t => t.id === tabId)) {
+      if (visibleTabs.find(t => t.id === tabId)) {
         setActiveTab(tabId);
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [visibleTabs]);
 
   const handleTabChange = (tabId) => {
     window.history.pushState(null, '', `/studio/${tabId}`);
@@ -423,6 +451,11 @@ export default function StandaloneShell() {
 
   useEffect(() => {
     setHasMounted(true);
+    if (agencyMode) {
+      setApiKey(null);
+      setBalance(null);
+      return;
+    }
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       setApiKey(stored);
@@ -430,21 +463,23 @@ export default function StandaloneShell() {
       // Sync cookie immediately on mount to establish identity for background requests
       document.cookie = `muapi_key=${stored}; path=/; max-age=31536000; SameSite=Lax`;
     }
-  }, [fetchBalance]);
+  }, [agencyMode, fetchBalance]);
 
   const handleKeySave = useCallback((key) => {
+    if (agencyMode) return;
     localStorage.setItem(STORAGE_KEY, key);
     setApiKey(key);
     fetchBalance(key);
     document.cookie = `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax`;
-  }, [fetchBalance]);
+  }, [agencyMode, fetchBalance]);
 
   const handleKeyChange = useCallback(() => {
+    if (agencyMode) return;
     localStorage.removeItem(STORAGE_KEY);
     setApiKey(null);
     setBalance(null);
     document.cookie = "muapi_key=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-  }, []);
+  }, [agencyMode]);
 
   // Inject API key into all outgoing Axios requests (prop-based approach)
   // We use an interceptor to be selective and NOT send the key to external domains like S3
@@ -452,7 +487,7 @@ export default function StandaloneShell() {
     // Safety: Clear any global defaults that might have been set previously
     delete axios.defaults.headers.common['x-api-key'];
 
-    if (!apiKey) return;
+    if (agencyMode || !apiKey) return;
 
     const interceptorId = axios.interceptors.request.use((config) => {
       // Check if URL is local/proxied
@@ -469,14 +504,14 @@ export default function StandaloneShell() {
     return () => {
       axios.interceptors.request.eject(interceptorId);
     };
-  }, [apiKey]);
+  }, [agencyMode, apiKey]);
 
   // Poll for balance every 30 seconds if key is present
   useEffect(() => {
-    if (!apiKey) return;
+    if (agencyMode || !apiKey) return;
     const interval = setInterval(() => fetchBalance(apiKey), 30000);
     return () => clearInterval(interval);
-  }, [apiKey, fetchBalance]);
+  }, [agencyMode, apiKey, fetchBalance]);
 
   // Drag and Drop Handlers
   const handleDragOver = useCallback((e) => {
@@ -521,9 +556,11 @@ export default function StandaloneShell() {
     </div>
   );
 
-  if (!apiKey) {
+  if (!agencyMode && !apiKey) {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
+
+  const studioApiKey = agencyMode ? null : apiKey;
 
   return (
     <div 
@@ -636,30 +673,34 @@ export default function StandaloneShell() {
           <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-xs text-white/60">
             <span className="w-1.5 h-1.5 rounded-full bg-[#22d3ee]" />
             <span className="font-medium text-white/80">
-              {TABS.find(t => t.id === activeTab)?.label || 'Studio'}
+              {visibleTabs.find(t => t.id === activeTab)?.label || 'Studio'}
             </span>
           </div>
 
           {/* Right: Actions */}
           <div className="flex-shrink-0 flex items-center gap-3">
-            <div className="flex items-center gap-2.5 bg-white/5 px-3 py-1.5 rounded-full border border-white/5 transition-colors">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-xs font-bold text-white/90">
-                ${balance !== null ? `${balance}` : '---'}
-              </span>
-            </div>
+            {!agencyMode && (
+              <>
+                <div className="flex items-center gap-2.5 bg-white/5 px-3 py-1.5 rounded-full border border-white/5 transition-colors">
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-xs font-bold text-white/90">
+                    ${balance !== null ? `${balance}` : '---'}
+                  </span>
+                </div>
 
-            <button
-              onClick={() => setShowSettings(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 bg-white/5 text-[13px] font-bold text-white/80 hover:text-white hover:bg-white/10 hover:border-white/20 transition-colors"
-              aria-label="Settings"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-              <span className="hidden sm:inline">Settings</span>
-            </button>
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 bg-white/5 text-[13px] font-bold text-white/80 hover:text-white hover:bg-white/10 hover:border-white/20 transition-colors"
+                  aria-label="Settings"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                  <span className="hidden sm:inline">Settings</span>
+                </button>
+              </>
+            )}
           </div>
         </header>
       )}
@@ -685,7 +726,7 @@ export default function StandaloneShell() {
           >
             <nav aria-label="Studio navigation" className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none py-2 px-2">
               <div className="space-y-1">
-                {NAVIGATION_CATEGORIES.map((category) => {
+                {navigationCategories.map((category) => {
                   const isCategoryActive = activeCategory?.id === category.id;
                   const isCollapsed = isSidebarCollapsed && !isMobileOpen;
                   const isCategoryOpen = !isCollapsed && expandedCategoryId === category.id;
@@ -750,7 +791,7 @@ export default function StandaloneShell() {
                           className="mt-1 ml-2 pl-2 border-l border-white/[0.08] space-y-1 max-h-64 overflow-y-auto scrollbar-none"
                         >
                           {category.tabIds.map((tabId) => {
-                            const tab = TABS.find((item) => item.id === tabId);
+                            const tab = visibleTabs.find((item) => item.id === tabId);
                             if (!tab) return null;
                             const isActive = activeTab === tab.id;
 
@@ -785,31 +826,31 @@ export default function StandaloneShell() {
                 })}
               </div>
 
-              {EXPLORE_APPS_TAB && (
+              {exploreAppsTab && (
                 <div className="mt-3 pt-3 border-t border-white/[0.07]">
                   <a
-                    href={`/studio/${EXPLORE_APPS_TAB.id}`}
-                    onClick={(event) => handleNavigationItemClick(event, EXPLORE_APPS_TAB.id)}
-                    aria-current={activeTab === EXPLORE_APPS_TAB.id ? 'page' : undefined}
-                    aria-label={EXPLORE_APPS_TAB.label}
-                    title={isSidebarCollapsed && !isMobileOpen ? EXPLORE_APPS_TAB.label : undefined}
+                    href={`/studio/${exploreAppsTab.id}`}
+                    onClick={(event) => handleNavigationItemClick(event, exploreAppsTab.id)}
+                    aria-current={activeTab === exploreAppsTab.id ? 'page' : undefined}
+                    aria-label={exploreAppsTab.label}
+                    title={isSidebarCollapsed && !isMobileOpen ? exploreAppsTab.label : undefined}
                     className={`
                       group relative flex items-center rounded-xl transition-all duration-150 text-[13px] font-semibold
                       ${isSidebarCollapsed && !isMobileOpen ? 'h-11 w-11 justify-center mx-auto' : 'px-3 py-2.5 w-full gap-3'}
-                      ${activeTab === EXPLORE_APPS_TAB.id
+                      ${activeTab === exploreAppsTab.id
                         ? 'bg-gradient-to-r from-[#22d3ee]/15 to-purple-500/10 text-[#22d3ee] border border-[#22d3ee]/20'
                         : 'text-white/60 hover:text-white hover:bg-white/[0.04] border border-transparent'
                       }
                     `}
                   >
-                    {activeTab === EXPLORE_APPS_TAB.id && (
+                    {activeTab === exploreAppsTab.id && (
                       <span className="absolute left-0 top-2 bottom-2 w-1 bg-gradient-to-b from-[#22d3ee] to-[#a855f7] rounded-r-full" />
                     )}
-                    <span className={`flex-shrink-0 ${activeTab === EXPLORE_APPS_TAB.id ? 'text-[#22d3ee]' : 'text-white/50 group-hover:text-white'}`}>
-                      {EXPLORE_APPS_TAB.icon}
+                    <span className={`flex-shrink-0 ${activeTab === exploreAppsTab.id ? 'text-[#22d3ee]' : 'text-white/50 group-hover:text-white'}`}>
+                      {exploreAppsTab.icon}
                     </span>
                     {(!isSidebarCollapsed || isMobileOpen) && (
-                      <span className="truncate">{EXPLORE_APPS_TAB.label}</span>
+                      <span className="truncate">{exploreAppsTab.label}</span>
                     )}
                   </a>
                 </div>
@@ -820,50 +861,78 @@ export default function StandaloneShell() {
 
         {/* Studio Content */}
         <div className="flex-1 min-h-0 h-full relative overflow-hidden bg-[#030303]">
-        <div className={activeTab === 'image' ? "h-full w-full" : "hidden"}>
-          <ImageStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />
-        </div>
-        <div className={activeTab === 'video' ? "h-full w-full" : "hidden"}>
-          <VideoStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} />
-        </div>
-        <div className={activeTab === 'clipping' ? "h-full w-full" : "hidden"}>
-          <ClippingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />
-        </div>
-        <div className={activeTab === 'vibe-motion' ? "h-full w-full" : "hidden"}>
-          <VibeMotionStudio apiKey={apiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />
-        </div>
-        <div className={activeTab === 'lipsync' ? "h-full w-full" : "hidden"}>
-          <LipSyncStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />
-        </div>
-        <div className={activeTab === 'body-swap' ? "h-full w-full" : "hidden"}>
-          <RecastStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />
-        </div>
-        <div className={activeTab === 'cinema' ? "h-full w-full" : "hidden"}>
-          <CinemaStudio apiKey={apiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />
-        </div>
-        <div className={activeTab === 'audio' ? "h-full w-full" : "hidden"}>
-          <AudioStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />
-        </div>
-        <div className={activeTab === 'marketing' ? "h-full w-full" : "hidden"}>
-          <MarketingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} />
-        </div>
-        <div className={activeTab === 'workflows' ? "h-full w-full" : "hidden"}>
-          <WorkflowStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-        </div>
-        <div className={activeTab === 'agents' ? "h-full w-full" : "hidden"}>
-          <AgentStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-        </div>
-        <div className={activeTab === 'design-agent' ? "h-full w-full" : "hidden"}>
-          {activeTab === 'design-agent' && (
-            <DesignAgentStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-          )}
-        </div>
-        <div className={activeTab === 'apps' ? "h-full w-full" : "hidden"}>
-          <AppsStudio apiKey={apiKey} />
-        </div>
-        <div className={activeTab === 'ai-influencer' ? "h-full w-full" : "hidden"}>
-          <AiInfluencerStudio apiKey={apiKey} />
-        </div>
+        {visibleTabIds.has('image') && (
+          <div className={activeTab === 'image' ? "h-full w-full" : "hidden"}>
+            <ImageStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />
+          </div>
+        )}
+        {visibleTabIds.has('video') && (
+          <div className={activeTab === 'video' ? "h-full w-full" : "hidden"}>
+            <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} />
+          </div>
+        )}
+        {visibleTabIds.has('clipping') && (
+          <div className={activeTab === 'clipping' ? "h-full w-full" : "hidden"}>
+            <ClippingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />
+          </div>
+        )}
+        {visibleTabIds.has('vibe-motion') && (
+          <div className={activeTab === 'vibe-motion' ? "h-full w-full" : "hidden"}>
+            <VibeMotionStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />
+          </div>
+        )}
+        {visibleTabIds.has('lipsync') && (
+          <div className={activeTab === 'lipsync' ? "h-full w-full" : "hidden"}>
+            <LipSyncStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />
+          </div>
+        )}
+        {visibleTabIds.has('body-swap') && (
+          <div className={activeTab === 'body-swap' ? "h-full w-full" : "hidden"}>
+            <RecastStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />
+          </div>
+        )}
+        {visibleTabIds.has('cinema') && (
+          <div className={activeTab === 'cinema' ? "h-full w-full" : "hidden"}>
+            <CinemaStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />
+          </div>
+        )}
+        {visibleTabIds.has('audio') && (
+          <div className={activeTab === 'audio' ? "h-full w-full" : "hidden"}>
+            <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />
+          </div>
+        )}
+        {visibleTabIds.has('marketing') && (
+          <div className={activeTab === 'marketing' ? "h-full w-full" : "hidden"}>
+            <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} />
+          </div>
+        )}
+        {visibleTabIds.has('workflows') && (
+          <div className={activeTab === 'workflows' ? "h-full w-full" : "hidden"}>
+            <WorkflowStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+          </div>
+        )}
+        {visibleTabIds.has('agents') && (
+          <div className={activeTab === 'agents' ? "h-full w-full" : "hidden"}>
+            <AgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+          </div>
+        )}
+        {visibleTabIds.has('design-agent') && (
+          <div className={activeTab === 'design-agent' ? "h-full w-full" : "hidden"}>
+            {activeTab === 'design-agent' && (
+              <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+            )}
+          </div>
+        )}
+        {visibleTabIds.has('apps') && (
+          <div className={activeTab === 'apps' ? "h-full w-full" : "hidden"}>
+            <AppsStudio apiKey={studioApiKey} />
+          </div>
+        )}
+        {visibleTabIds.has('ai-influencer') && (
+          <div className={activeTab === 'ai-influencer' ? "h-full w-full" : "hidden"}>
+            <AiInfluencerStudio apiKey={studioApiKey} />
+          </div>
+        )}
       </div>
     </div>
 
@@ -942,7 +1011,7 @@ export default function StandaloneShell() {
       `}</style>
 
       {/* Settings Modal */}
-      {showSettings && (
+      {!agencyMode && showSettings && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-8 w-full max-w-sm shadow-2xl">
             <h2 className="text-white font-bold text-lg mb-2">Settings</h2>
