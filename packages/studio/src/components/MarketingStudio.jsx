@@ -165,6 +165,9 @@ function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = 
 
 function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo = false, onPreview = null }) {
   const ref = useRef(null);
+  const popoverStyle = isVideo
+    ? { backdropFilter: "none", WebkitBackdropFilter: "none" }
+    : undefined;
   
   useEffect(() => {
     if (!isOpen) return;
@@ -181,6 +184,7 @@ function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo
     <PromptPopover
       ref={ref}
       className="w-[420px] max-w-[calc(100vw-2rem)]"
+      style={popoverStyle}
     >
       <PromptPopoverHeader className="mb-3">{title}</PromptPopoverHeader>
       <div className="grid grid-cols-3 gap-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
@@ -212,7 +216,7 @@ function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo
             )}
 
             {isVideo ? (
-              <video src={item.url} autoPlay loop muted className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500" />
+              <video src={item.url} autoPlay loop muted playsInline preload="metadata" className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500" />
             ) : (
               <img src={item.url} className="w-full aspect-square object-cover group-hover:scale-105 transition-all duration-500" alt={item.name} />
             )}
@@ -938,3 +942,4 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
     </div>
   );
 }
+

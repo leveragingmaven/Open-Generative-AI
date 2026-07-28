@@ -36,3 +36,10 @@ out/
 .env
 .env.*
 !.env.example
+
+# Playwright debugging
+.playwright-cli/
+output/playwright/
+
+# Agent temporary files
+.agents/
