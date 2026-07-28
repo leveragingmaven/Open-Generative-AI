@@ -91,6 +91,56 @@ Legacy/Electron-oriented studio components also exist under `src/components`.
 - i18n/settings labels: `src/lib/i18n.js`
 - Electron local inference services: `electron/lib/*`
 
+## Architecture Notes
+
+Detailed audit: `docs/ASSET_ARCHITECTURE.md`
+
+### Shared Asset Services
+
+- Primary React studio API wrapper: `packages/studio/src/muapi.js`.
+- Legacy/Electron API wrapper: `src/lib/muapi.js`.
+- Upload proxy validation: `src/lib/uploadProxyTarget.js`.
+- Upload proxy routes:
+  - `app/api/app/[[...path]]/route.js`
+  - `app/api/v1/get_upload_url/route.js`
+  - `app/api/upload-binary/route.js`
+  - `app/api/v1/upload-binary/route.js`
+- Legacy upload history: `src/lib/uploadHistory.js`.
+- Legacy pending jobs: `src/lib/pendingJobs.js`.
+- Local inference asset/model bridge: `src/lib/localInferenceClient.js`.
+- Workflow download helper and model catalogs: `packages/Vibe-Workflow/packages/workflow-builder/src/components/utility.jsx`.
+
+### Shared Asset Flow
+
+- React studios generally generate assets through `packages/studio/src/muapi.js`, receive hosted result URLs, then store recent entries in per-studio state and `localStorage`.
+- Uploads are not fully unified. React studios use `uploadFile()` from the studio MuAPI wrapper, workflow and agent packages use signed upload URLs, Design Agent uses `/api/v1/get_upload_url` plus `/api/v1/upload-binary`, and local Wan2GP uploads go through Electron IPC.
+- Workflow builder assets are represented as node `resultUrl`, `outputs`, and `outputHistory`.
+- Design Agent assets are session-backed and identified by `{ asset_label, url, kind }`.
+- Agent chat assets are attached to backend conversation history and downloaded through signed URL helpers.
+
+### Recommended Integration Points
+
+- Future shared asset service location: `packages/studio/src/services/assetService.js`.
+- Possible future hook location: `packages/studio/src/hooks/useAssetHistory.js`.
+- Best future Creative Library connection points:
+  - after successful React studio upload;
+  - after React studio generation result URL is received;
+  - when workflow nodes append `outputHistory`;
+  - when `NodeFlow.jsx` maps backend run history to node data;
+  - after Design Agent registers or loads session assets;
+  - when Agent chat hydrates generated media parts;
+  - when legacy `UploadPicker.js` saves upload history.
+
+### Technical Debt Discovered
+
+- No shared normalized asset record exists.
+- Upload progress and signed-upload handling are duplicated across studios, workflow nodes, Design Agent, and agent chat.
+- Download helpers are duplicated across studio components, workflow utilities, Design Agent canvas, and agent chat.
+- Per-studio history persistence uses independent localStorage keys and similar load/save/delete logic.
+- Polling exists in multiple independent implementations.
+- Asset rendering and type handling are split between direct media elements, custom players, canvas nodes, and workflow renderers.
+- Legacy DOM-built studios and React package studios maintain parallel asset flows.
+
 ### API Wrappers And Upload Services
 
 - `packages/studio/src/muapi.js`
