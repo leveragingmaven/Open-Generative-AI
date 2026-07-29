@@ -41,3 +41,10 @@
 | --- | --- | --- | --- | --- |
 | MSYNC-001 | Fixed | Complete | Creative Studio had no dedicated MavenSync Hub launch/context/asset handoff adapter boundary. | Added optional MavenSync integration modules under `packages/studio/src/lib/mavensync`, with standalone fallback and Image Studio reference asset registration. |
 | MSYNC-002 | Open | External / Hub Blocked | Hub backend launch/context/asset/publishing-status endpoints are not implemented in this repository. | Documented required/proposed endpoint contract in `docs/MAVENSYNC_INTEGRATION.md`; Creative Studio adapters remain disabled-safe until Hub API base URL and backend endpoints are available. |
+
+## MuAPI Publishing
+
+| ID | Classification | Status | Finding | Resolution / Notes |
+| --- | --- | --- | --- | --- |
+| PUB-001 | Fixed | Complete | Creative Studio had only a placeholder publishing boundary and no normalized MuAPI publishing foundation. | Added publishing provider registry, MuAPI provider adapter, draft/status normalization, platform capability registry, local publishing history, server route boundary, and focused tests. |
+| PUB-002 | Open | External / MuAPI Blocked | No Creative Studio social scheduler UI, social account connection flow, or confirmed MuAPI social publishing endpoints were found in the repository. | Live account connection, schedule, publish-now, job status, cancellation, and reschedule routes return explicit unsupported capability errors until the MuAPI social publishing contract is confirmed. |

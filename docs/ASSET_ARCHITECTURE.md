@@ -352,6 +352,8 @@ Social scheduling and publishing initiated inside Creative Studio must be execut
 
 The publishing provider boundary lives under `packages/studio/src/lib/publishing`. MuAPI is the required implementation for Creative Studio social publishing; no alternate GHL or n8n scheduler is implemented.
 
+Phase 4 extends that boundary with normalized publishing drafts, platform capabilities, local publishing history, duplicate submission protection, Hub status-report isolation, and same-origin server routes under `/api/publishing/*`. No existing Creative Studio social scheduler UI or MuAPI social endpoint implementation was found in this repository, so live operations remain explicit unsupported capability responses until the MuAPI social publishing contract is confirmed.
+
 ## Phase 1 Shared Asset Architecture Plan
 
 This section began as a planning section. Phase 2 implemented the package-level foundation described below without redesigning studio UI or changing generation workflows.

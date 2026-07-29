@@ -1,3 +1,5 @@
+import { UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
+
 export class PublishingProvider {
   constructor({ id, name }) {
     this.id = id;
@@ -5,7 +7,31 @@ export class PublishingProvider {
   }
 
   notImplemented(methodName) {
-    throw new Error(`${this.name} publishing provider does not implement ${methodName}`);
+    throw new UnsupportedPublishingCapabilityError(methodName, this.id);
+  }
+
+  connectAccount() {
+    return this.notImplemented("connectAccount");
+  }
+
+  getConnectedAccounts() {
+    return this.notImplemented("getConnectedAccounts");
+  }
+
+  disconnectAccount() {
+    return this.notImplemented("disconnectAccount");
+  }
+
+  createDraft() {
+    return this.notImplemented("createDraft");
+  }
+
+  updateDraft() {
+    return this.notImplemented("updateDraft");
+  }
+
+  deleteDraft() {
+    return this.notImplemented("deleteDraft");
   }
 
   schedulePost() {
@@ -20,11 +46,31 @@ export class PublishingProvider {
     return this.notImplemented("getScheduledPosts");
   }
 
+  getPublishingJob() {
+    return this.notImplemented("getPublishingJob");
+  }
+
+  cancelScheduledPost() {
+    return this.notImplemented("cancelScheduledPost");
+  }
+
+  reschedulePost() {
+    return this.notImplemented("reschedulePost");
+  }
+
+  getPlatformCapabilities() {
+    return this.notImplemented("getPlatformCapabilities");
+  }
+
+  normalizePublishingStatus() {
+    return this.notImplemented("normalizePublishingStatus");
+  }
+
   updateScheduledPost() {
-    return this.notImplemented("updateScheduledPost");
+    return this.reschedulePost(...arguments);
   }
 
   deleteScheduledPost() {
-    return this.notImplemented("deleteScheduledPost");
+    return this.cancelScheduledPost(...arguments);
   }
 }

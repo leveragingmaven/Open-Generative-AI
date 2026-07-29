@@ -275,6 +275,8 @@ Ownership boundary: MuAPI remains Creative Studio's publishing transport. Hub re
 
 Failure behavior: publishing transport state remains authoritative in Creative Studio/MuAPI; Hub status reporting can be retried.
 
+Creative Studio's Phase 4 publishing foundation reports status through the optional MavenSync adapter only after the MuAPI publishing provider produces a normalized job/status event. Hub reporting failure does not fail or roll back MuAPI publishing state.
+
 ## Security Decisions
 
 - No permanent authentication tokens in URLs.

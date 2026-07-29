@@ -62,4 +62,19 @@ Set the same variables in the production environment manager. Keep `MUAPI_API_KE
 
 Social scheduling and publishing initiated inside Creative Studio must continue through MuAPI publishing capability. MavenSync Hub, GHL, and n8n may coordinate campaigns and business workflows, but they do not replace the MuAPI social publishing transport used by Creative Studio.
 
+## MuAPI Social Publishing
+
+Social publishing and scheduling are routed through same-origin Creative Studio API routes under `/api/publishing/*`.
+
+`MUAPI_API_KEY`
+
+The same server-only MuAPI credential is used for future MuAPI publishing calls in Agency Mode. Do not expose it with a `NEXT_PUBLIC_` or `VITE_` prefix.
+
+Current status:
+
+- The Creative Studio publishing provider, draft normalization, local publishing history, platform capability registry, and server route boundary are implemented.
+- Live MuAPI social publishing endpoints were not present in this repository and are not claimed complete.
+- Until the MuAPI social endpoint contract is confirmed, `/api/publishing/*` live operations return explicit unsupported capability errors.
+- Do not add direct Meta, Instagram, TikTok, LinkedIn, YouTube, X, Pinterest, GHL, or n8n publishing credentials to Creative Studio.
+
 Real environment files are ignored by git. `.env.example` remains tracked as the safe template.

@@ -2,13 +2,13 @@
 
 ## Current Phase
 
-Phase 3 - MavenSync Hub Integration Foundation
+Phase 4 - MuAPI Social Publishing and Scheduler Foundation
 
 Status: Completed
 
-Goal: add the Creative Studio side of a secure MavenSync Hub integration foundation while preserving standalone operation and existing studio behavior.
+Goal: add a MuAPI-required social publishing foundation with normalized drafts, platform capabilities, server-side route boundary, local publishing history, and optional MavenSync status reporting.
 
-Latest pass: implemented optional MavenSync launch/session/context/asset handoff adapters, documented the Hub API contract, and wired Image Studio generated-asset registration as the reference path.
+Latest pass: inspected the repo for existing social scheduler code, confirmed none is implemented, and added a safe MuAPI publishing provider foundation without live social publishing side effects.
 
 ## Build Order
 
@@ -19,6 +19,7 @@ Latest pass: implemented optional MavenSync launch/session/context/asset handoff
 5. Cleanup and commit - Completed
 6. Phase 2 shared architecture foundation - Completed
 7. Phase 3 MavenSync Hub integration foundation - Completed
+8. Phase 4 MuAPI social publishing foundation - Completed
 
 ## Repository Inventory
 
@@ -176,6 +177,16 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - `useMavenSyncIntegration()` exposes optional `standalone`, `agency`, and `hub-launch` integration state.
 - Image Studio generated-image completion is the first reference integration path.
 - Publishing provider boundary exists under `packages/studio/src/lib/publishing`; MuAPI remains the required Creative Studio publishing transport.
+
+### Phase 4 MuAPI Social Publishing Foundation
+
+- Existing scheduler/social publishing inspection found no Creative Studio social scheduler UI, account connection flow, queue/calendar state, or MuAPI social publishing calls.
+- Workflow publishing and agent `is_published` fields are unrelated listing/publication features, not social scheduling.
+- Publishing provider package now includes provider registry, errors, publishing types, status normalization, platform capabilities, local publishing history, and MavenSync status reporter.
+- `MuApiPublishingProvider` supports local draft create/update, validation, duplicate in-flight submission prevention, schedule/publish submission through same-origin `/api/publishing/*`, local job/history persistence, and optional MavenSync status reporting.
+- Live account connection, schedule, publish-now, job status, cancellation, and reschedule operations route through `app/api/publishing/[[...path]]/route.js` and return explicit unsupported capability responses until MuAPI social endpoints are confirmed.
+- Platform capability registry marks unknown values as `"unknown"` rather than guessing.
+- Server route strips browser cookies, authorization, browser `x-api-key`, host, connection, and content-length headers before any future upstream MuAPI call.
 
 ### API Wrappers And Upload Services
 
@@ -385,6 +396,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Phase 3 MavenSync Hub integration foundation
   - Status: Completed.
   - Notes: added optional Hub launch/session/context/asset handoff adapters, Image Studio reference asset registration, and documentation/tests for the integration contract.
+- Phase 4 MuAPI social publishing foundation
+  - Status: Completed.
+  - Notes: added publishing provider foundation, same-origin server route boundary, normalized drafts/statuses, platform capabilities, local publishing history, and focused tests.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -408,6 +422,8 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Implemented Phase 3 MavenSync integration package and Image Studio reference asset handoff.
 - Documented Hub API contract in `docs/MAVENSYNC_INTEGRATION.md`.
 - Added focused MavenSync integration tests using Node's built-in `node:test`.
+- Implemented Phase 4 MuAPI publishing foundation and documented it in `docs/MUAPI_PUBLISHING.md`.
+- Added focused publishing foundation tests using Node's built-in `node:test`.
 
 ## In Progress
 
@@ -422,6 +438,8 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Remaining studio generation/upload/workflow/agent execution validation with real credits.
 - MavenSync Hub backend endpoints are not implemented in this repository.
 - Live Hub launch exchange, asset registration, asset return, and publishing-status reporting require the Hub backend contract to be implemented.
+- Live MuAPI social publishing endpoints and account connection flows were not present in this repository.
+- Live social scheduling/publishing validation is blocked by confirmed MuAPI social endpoint contract, credentials, and connected social accounts.
 
 ## Commit History
 
@@ -431,3 +449,4 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - `docs: complete Phase 1 validation and shared asset plan`
 - `feat: add shared studio architecture foundations`
 - `feat: add MavenSync Hub integration foundation`
+- `feat: add MuAPI social publishing foundation`
