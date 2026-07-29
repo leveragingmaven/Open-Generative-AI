@@ -317,3 +317,122 @@ Current dependencies any future Creative Library integration would need to respe
 ## Current Recommendation
 
 No functional change should be made during this audit phase. For a later implementation phase, introduce a small shared asset service in `packages/studio/src/services/assetService.js` and migrate one low-risk studio first. The initial service should wrap existing behavior rather than replace endpoints or storage.
+
+## Phase 1 Shared Asset Architecture Plan
+
+This is a planning section only. It does not implement a new service or change runtime behavior.
+
+### Duplicated Download Logic
+
+Confirmed duplicated download helpers:
+
+- `packages/studio/src/components/ImageStudio.jsx` uses `downloadImage()`.
+- `packages/studio/src/components/VideoStudio.jsx` uses local `downloadFile()`.
+- `packages/studio/src/components/CinemaStudio.jsx` includes local Blob download logic.
+- `packages/studio/src/components/AiInfluencerStudio.jsx` includes local Blob download logic.
+- `packages/studio/src/components/AudioStudio.jsx` includes local Blob download logic.
+- `packages/studio/src/components/MarketingStudio.jsx` uses local `downloadFile()`.
+- `packages/studio/src/components/VibeMotionStudio.jsx` uses local `downloadFile()`.
+- `packages/studio/src/components/LipSyncStudio.jsx` uses local `downloadFile()`.
+- `packages/studio/src/components/RecastStudio.jsx` uses local `downloadFile()`.
+- `packages/Vibe-Workflow/packages/workflow-builder/src/components/utility.jsx` exports a workflow-specific signed URL download helper.
+- `packages/Open-Poe-AI/packages/agents/src/AiAgent.jsx` has an agent-specific signed URL download helper.
+- `packages/Open-AI-Design-Agent/packages/design-agent/src/CanvasArea.jsx` has direct Blob download and canvas export logic.
+- Legacy `src/components/*Studio.js` files include parallel Blob download helpers.
+
+Plan:
+
+1. Create a shared `downloadAsset()` helper in a future `packages/studio/src/services/assetService.js`.
+2. Support direct URL Blob download first, then signed URL adapters for workflow/agent media.
+3. Keep canvas export separate because it downloads generated canvas data URLs rather than remote assets.
+4. Migrate one low-risk studio before broad replacement.
+
+### Duplicated History And Storage Logic
+
+Confirmed per-studio persistence keys:
+
+- `hg_image_studio_persistent`
+- `hg_cinema_studio_persistent`
+- `hg_video_studio_persistent`
+- `hg_clipping_studio_persistent`
+- `hg_vibe_motion_studio_persistent`
+- `hg_lipsync_studio_persistent`
+- `hg_recast_studio_persistent`
+- `hg_recast_studio_assets`
+- `hg_marketing_studio_persistent`
+- `hg_audio_studio_persistent`
+
+Additional storage paths:
+
+- `muapi_uploads` in `src/lib/uploadHistory.js`.
+- `muapi_pending_jobs` in `src/lib/pendingJobs.js`.
+- Legacy `muapi_history`, `video_history`, `cinema_history`, and `lipsync_history`.
+- Design Agent session assets and messages through backend creative-agent APIs.
+- Agent chat conversation history through backend agent APIs.
+- Workflow node history through backend run history mapped to `outputHistory`.
+
+Plan:
+
+1. Define a shared `AssetRecord` shape with `id`, `url`, `kind`, `source`, `studio`, `prompt`, `model`, `createdAt`, and optional provider metadata.
+2. Add a local history adapter that wraps existing localStorage keys without migrating data immediately.
+3. Add adapters for workflow `outputHistory`, design-agent `{ asset_label, url, kind }`, and agent message parts.
+4. Leave remote deletion semantics explicit; deleting local history should not imply remote asset deletion.
+
+### Duplicated Upload Logic
+
+Confirmed upload paths:
+
+- React studios call `uploadFile(apiKey, file, onProgress)` from `packages/studio/src/muapi.js`.
+- Workflow `UploadNode.jsx` requests `/api/app/get_file_upload_url` and posts signed form data.
+- Design Agent requests `/api/v1/get_upload_url`, posts through `/api/v1/upload-binary`, then registers session assets.
+- Agent chat and agent editing request `/api/app/get_file_upload_url` and post signed form data.
+- Legacy `UploadPicker.js` accepts a custom `uploadFn` and persists upload history.
+- Local Wan2GP uploads go through Electron IPC in `src/lib/localInferenceClient.js`.
+
+Plan:
+
+1. Define an upload adapter interface with `upload(file, { kind, onProgress, destination })`.
+2. Keep MuAPI direct upload, signed upload, design-agent registered upload, and local Wan2GP upload as separate adapters.
+3. Return normalized upload results `{ url, kind, source: 'upload', provider, raw }`.
+4. Keep paid upload execution behind explicit user actions; validation should continue using file chooser checks only.
+
+### Duplicated Provider Logic
+
+Confirmed provider duplication:
+
+- Image Studio defines provider logos, provider filtering, provider labels, and model dropdown behavior locally.
+- Video Studio defines a parallel provider logo/filter/model dropdown path.
+- Local inference provider routing exists separately in `src/lib/localModels.js` and `src/lib/localInferenceClient.js`.
+- Workflow model provider data is embedded in workflow utility model catalogs.
+
+Plan:
+
+1. Move provider metadata into a shared provider registry module.
+2. Keep model catalogs separate, but expose provider display helpers for logos, labels, and filtering.
+3. Keep local inference provider routing separate from display metadata; it controls execution, not only UI.
+4. Migrate Image and Video dropdowns together because their provider UI is structurally similar.
+
+### Proposed Module Boundaries
+
+Recommended future modules:
+
+- `packages/studio/src/services/assetService.js`
+  - Download, upload adapter selection, asset normalization, and type detection.
+- `packages/studio/src/hooks/useAssetHistory.js`
+  - Local history load/save/delete for React studio histories.
+- `packages/studio/src/providers/providerRegistry.js`
+  - Provider display metadata and provider filter helpers.
+- `packages/studio/src/services/assetAdapters/`
+  - `muapiUploadAdapter.js`
+  - `signedUploadAdapter.js`
+  - `designAgentAssetAdapter.js`
+  - `workflowAssetAdapter.js`
+  - `localInferenceAssetAdapter.js`
+
+### Migration Order
+
+1. Extract download helper only, with no behavior change.
+2. Extract provider registry for Image and Video model dropdowns.
+3. Add local history adapter behind existing per-studio keys.
+4. Add upload adapters while preserving current endpoints.
+5. Connect a future Creative Library only after asset records are normalized.

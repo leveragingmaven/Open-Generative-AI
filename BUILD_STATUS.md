@@ -8,6 +8,8 @@ Status: Completed
 
 Goal: validate the existing Open-Generative-AI Creative Studio foundation, fix production-breaking issues only, and document remaining non-blocking issues.
 
+Latest pass: completed remaining-studio validation and shared asset architecture planning without paid generation/upload side effects.
+
 ## Build Order
 
 1. Repository and route inventory - Completed
@@ -211,6 +213,27 @@ Validation method: local Next dev server, temporary local validation key, no gen
 | Workflows | `/studio/workflows` | Pass | Pass | None observed | None | UI loads | Pass | Visible create/templates/my workflows/community controls | Not submitted |
 | Explore Apps | `/studio/apps` | Pass | Pass | None observed | None | App cards load | Pass | Visible GitHub/Demo controls | External links not followed |
 
+### Remaining Studio Validation Pass
+
+Validation method: Playwright on local dev server with `AGENCY_MODE=false`, temporary local validation key, `vadoo_banner_dismissed=1`, no Generate/Shoot/Launch submissions, and no file uploads selected.
+
+Expected validation noise filtered: invalid-key `403` responses for balance and app-interest calls, plus favicon noise.
+
+| Studio | Route | Mounted | Main Controls Observed | Upload Controls | Unexpected Runtime Errors | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| Cinema Studio | `/studio/cinema` | Pass | Prompt, aspect ratio, resolution, camera/lens selector, Shoot button | File inputs mounted; no upload submitted | None observed | Validated |
+| Design Agent | `/studio/design-agent` | Pass | Session UI, chat input, zoom controls, agent canvas controls | File inputs mounted; no upload submitted | None observed | Validated |
+| AI Influencer Studio | `/studio/ai-influencer` | Pass | Face/Body/Style builder controls, prompt input, Generate controls | File inputs mounted; no upload submitted | None observed | Validated |
+| AI Clipping | `/studio/clipping` | Pass | Prompt/input field, clipping controls, generate controls | File inputs mounted; no upload submitted | None observed | Validated |
+| Vibe Motion | `/studio/vibe-motion` | Pass | Prompt/input field, motion controls, generate/edit controls | File inputs mounted; no upload submitted | None observed | Validated |
+| Lip Sync | `/studio/lipsync` | Pass | Prompt/input field, portrait/video/audio controls, generate controls | File inputs mounted; no upload submitted | None observed | Validated |
+| Body Swap | `/studio/body-swap` | Pass | Prompt/input field, video/character controls, orientation controls | File inputs mounted; no upload submitted | None observed | Validated |
+| Marketing Studio | `/studio/marketing` | Pass | Prompt/input field, UGC/avatar/ratio/resolution/duration controls | File inputs mounted; no upload submitted | None observed | Validated with known thumbnail issue |
+| Audio Studio | `/studio/audio` | Pass | Model/style/vocal/prompt controls, generate controls | File inputs mounted; no upload submitted | None observed | Validated |
+| Agents | `/studio/agents` | Pass | Templates/My Agents/My Chats/Create controls | File inputs mounted by shared shell/package; no upload submitted | None observed | Validated |
+| Workflows | `/studio/workflows` | Pass | Create workflow, templates, user/community workflow controls | File inputs mounted by shared package; no upload submitted | None observed | Validated |
+| Explore Apps | `/studio/apps` | Pass | Template cards, GitHub/Demo controls | Not applicable | None observed | Validated |
+
 ## Shared Component Checklist
 
 | Area | Files | Status | Notes |
@@ -252,6 +275,7 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Upload endpoint side effects were intentionally not exercised in Phase 1 functional smoke validation.
 - IS-002: Reference-image upload validation is externally blocked by MuAPI 403 insufficient-credit/auth responses with the validation key.
 - VS-001: Real Video Studio generation and paid upload validation are externally blocked by unavailable MuAPI credits/valid credentials.
+- RS-001: Real generation and paid upload validation remain externally blocked for Cinema, Design Agent, AI Influencer, AI Clipping, Vibe Motion, Lip Sync, Body Swap, Marketing, Audio, Agents, and Workflows.
 
 ## Known Issues
 
@@ -275,6 +299,9 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - VS-001: Video Studio paid generation and paid upload calls were not submitted.
   - Status: External / Credit Blocked.
   - Notes: Interface validation used seeded local history and did not invent successful API results.
+- RS-001: Remaining studios' real generation, workflow execution, agent execution, and paid uploads were not submitted.
+  - Status: External / Credit Blocked.
+  - Notes: Interface validation completed using non-submitting route loads, mounted controls, local validation key, and console/page-error inspection.
 - Dummy validation key causes expected `403` responses for balance and app-interest calls.
   - Status: Non-blocking.
   - Notes: No JavaScript runtime exception was observed from these failures.
@@ -312,6 +339,12 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Video Studio validation
   - Status: Passed as far as possible without paid side effects.
   - Notes: verified launch, prompt field, model selector, aspect-ratio selector, duration selector, resolution/quality selector, upload file chooser, seeded result history, result-card Download/Fullscreen actions, enlarged preview close action, navigation, and expected invalid-key 403 handling.
+- Remaining studio validation
+  - Status: Passed as far as possible without paid side effects.
+  - Notes: validated Cinema, Design Agent, AI Influencer, AI Clipping, Vibe Motion, Lip Sync, Body Swap, Marketing, Audio, Agents, Workflows, and Explore Apps route mount, main controls, upload-control presence where applicable, and unexpected console/page errors.
+- Shared asset architecture plan
+  - Status: Completed.
+  - Notes: documented duplicated download, history, storage, upload, and provider logic in `docs/ASSET_ARCHITECTURE.md`.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -327,6 +360,8 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Completed Image Studio fixes IS-001, IS-003, and IS-004.
 - Validated Video Studio interface and navigation without paid generation or upload side effects.
 - Created `BUG_BACKLOG.md` for confirmed Image Studio and Video Studio findings.
+- Completed remaining-studio validation pass for all studios not previously deep-validated.
+- Expanded shared asset architecture plan with duplicated download, history/storage, upload, and provider logic.
 
 ## In Progress
 
@@ -338,9 +373,11 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Upload side-effect tests.
 - Image Studio reference upload validation with real credits.
 - Video Studio generation/upload validation with real credits.
+- Remaining studio generation/upload/workflow/agent execution validation with real credits.
 
 ## Commit History
 
 - `docs: initialize Creative Studio build tracker and stabilize phase 1 validation`
 - `docs: document shared asset architecture`
 - `fix: complete Image Studio repairs and validate Video Studio`
+- `docs: complete Phase 1 validation and shared asset plan`

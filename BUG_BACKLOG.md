@@ -15,3 +15,15 @@
 | ID | Classification | Status | Finding | Resolution / Notes |
 | --- | --- | --- | --- | --- |
 | VS-001 | External / Credit Blocked | Blocked | Real video generation and paid upload calls cannot be validated with the available validation key. | Generation and upload submissions were intentionally not triggered. Expected 403 balance/app-interest responses were observed with the validation key. Interface validation passed using local seeded history and non-submitting UI interactions. |
+
+## Marketing Studio
+
+| ID | Classification | Status | Finding | Resolution / Notes |
+| --- | --- | --- | --- | --- |
+| MS-001 | Open | Non-blocking | Preset video thumbnails may render black/empty in the preset selector on some Chromium/GPU combinations. | Prior tracing showed assets are playable and audio can work; studio launch/load and generation controls are not blocked. |
+
+## Remaining Studio Validation
+
+| ID | Classification | Status | Finding | Resolution / Notes |
+| --- | --- | --- | --- | --- |
+| RS-001 | External / Credit Blocked | Blocked | Real generation, workflow execution, agent execution, and paid upload calls cannot be validated for the remaining studios with the available validation key. | Cinema, Design Agent, AI Influencer, AI Clipping, Vibe Motion, Lip Sync, Body Swap, Marketing, Audio, Agents, Workflows, and Explore Apps were validated for route mount, main controls, upload-control presence where applicable, navigation shell, and unexpected runtime errors without submitting paid calls. |
