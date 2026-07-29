@@ -1,5 +1,7 @@
 import { muApiProvider } from "./MuApiProvider.js";
 import { PROVIDER_IDS } from "./providerTypes.js";
+import { muApiDesignAgentProvider } from "./design/index.js";
+import { MuApiWorkflowProvider } from "./workflow/index.js";
 
 class ProviderRegistry {
   constructor() {
@@ -35,6 +37,10 @@ class ProviderRegistry {
 }
 
 export const providerRegistry = new ProviderRegistry();
+export const workflowProvider = new MuApiWorkflowProvider({
+  registryProvider: () => providerRegistry.getActiveProvider(),
+});
+export const designAgentProvider = muApiDesignAgentProvider;
 
 const active = () => providerRegistry.getActiveProvider();
 
@@ -75,3 +81,11 @@ export const getAppInterests = (apiKey) => active().getAppInterests(apiKey);
 export const runClipping = (apiKey, params) => active().runClipping(apiKey, params);
 export const runMotionGraphics = (apiKey, params) => active().runMotionGraphics(apiKey, params);
 export const runMotionGraphicsEdit = (apiKey, params) => active().runMotionGraphicsEdit(apiKey, params);
+
+export const getNormalizedWorkflowTemplates = (apiKey) => workflowProvider.getWorkflowTemplates(apiKey);
+export const validateWorkflowDefinition = (definition) => workflowProvider.validateWorkflow(definition);
+export const executeNormalizedWorkflow = (apiKey, workflowId, inputs, context) =>
+  workflowProvider.executeWorkflow(apiKey, workflowId, inputs, context);
+export const createDesignAgentSession = (input, context) => designAgentProvider.createSession(input, context);
+export const getDesignAgentSessionAssets = (sessionId, context) => designAgentProvider.getSessionAssets(sessionId, context);
+export const getDesignAgentJobs = (sessionId, context) => designAgentProvider.getDesignJob(sessionId, context);

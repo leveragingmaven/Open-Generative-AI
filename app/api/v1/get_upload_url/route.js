@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-
-const MUAPI_BASE = 'https://api.muapi.ai';
+import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
 
 function getApiKey(request) {
-    const headerKey = request.headers.get('x-api-key');
-    if (headerKey) return headerKey;
-    // Cookie-based auth removed for security (CWE-522)
-    return null;
+    const serverKey = getServerMuApiKey();
+    if (serverKey) return serverKey;
+    if (isAgencyModeEnabled()) return null;
+    return request.headers.get('x-api-key') || null;
 }
 
 function cleanHeaders(request) {
@@ -14,15 +13,21 @@ function cleanHeaders(request) {
     headers.delete('host');
     headers.delete('connection');
     headers.delete('cookie');
+    headers.delete('authorization');
+    headers.delete('x-api-key');
+    headers.delete('content-length');
     return headers;
 }
 
 export async function GET(request) {
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/app/get_file_upload_url${search}`;
+    const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/get_file_upload_url${search}`;
 
     const headers = cleanHeaders(request);
     const apiKey = getApiKey(request);
+    if (isAgencyModeEnabled() && !apiKey) {
+        return NextResponse.json({ error: 'MUAPI_API_KEY is not configured.' }, { status: 500 });
+    }
     if (apiKey) headers.set('x-api-key', apiKey);
 
     try {

@@ -56,6 +56,16 @@ Copy `.env.example` to `.env`, then paste your real `MUAPI_API_KEY` into `.env`.
 
 Run the app normally after installing dependencies. Agency Mode requests go through the same-origin Next.js API route, which injects the server-side key.
 
+## Design Agent And Workflow Studio
+
+Design Agent and Workflow Studio use the same server-only `MUAPI_API_KEY` boundary as the rest of Creative Studio.
+
+- Design Agent calls `/api/v1/creative-agent/*`.
+- Workflow Studio calls `/api/workflow/*`.
+- Workflow and agent upload helpers call `/api/app/*` or `/api/v1/get_upload_url`.
+
+These routes strip browser-readable authorization headers and prefer the server environment key. Do not store MuAPI keys in `localStorage`, cookies readable by JavaScript, query strings, `NEXT_PUBLIC_*`, or `VITE_*` variables.
+
 ## Production Deployment
 
 Set the same variables in the production environment manager. Keep `MUAPI_API_KEY` server-only and unset any `NEXT_PUBLIC_` MuAPI key variables.

@@ -286,3 +286,13 @@ Creative Studio's Phase 4 publishing foundation reports status through the optio
 - Return targets are allowlisted by origin.
 - Hub API failures degrade to standalone/agency mode.
 - Asset registration failure does not remove local Creative Studio assets.
+
+## Design Agent And Workflow Attribution
+
+Phase 5 adds normalized attribution for the active Design Agent and Workflow Studio integrations.
+
+- Design Agent sessions/assets normalize through `packages/studio/src/lib/providers/design`.
+- Workflow presets/runs/output assets normalize through `packages/studio/src/lib/providers/workflow`.
+- Browser code does not persist MuAPI service credentials for Design Agent.
+- Same-origin Design Agent and Workflow routes prefer server-side `MUAPI_API_KEY` and strip browser auth headers before forwarding.
+- Hub launch context remains optional. If Hub reporting or registration fails, local Design Agent and Workflow results remain available.

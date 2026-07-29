@@ -20,6 +20,7 @@ Latest pass: inspected the repo for existing social scheduler code, confirmed no
 6. Phase 2 shared architecture foundation - Completed
 7. Phase 3 MavenSync Hub integration foundation - Completed
 8. Phase 4 MuAPI social publishing foundation - Completed
+9. Phase 5 Design Agent and Workflow Studio integration hardening - Completed with mock validation
 
 ## Repository Inventory
 
@@ -399,6 +400,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Phase 4 MuAPI social publishing foundation
   - Status: Completed.
   - Notes: added publishing provider foundation, same-origin server route boundary, normalized drafts/statuses, platform capabilities, local publishing history, and focused tests.
+- Phase 5 Design Agent and Workflow Studio integration hardening
+  - Status: Completed with mock validation; live MuAPI execution remains externally blocked.
+  - Notes: added Design Agent and Workflow provider adapters, removed Design Agent browser key persistence, hardened same-origin proxy credential stripping, normalized Workflow outputs as shared asset records, and added focused Node tests.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -424,6 +428,8 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Added focused MavenSync integration tests using Node's built-in `node:test`.
 - Implemented Phase 4 MuAPI publishing foundation and documented it in `docs/MUAPI_PUBLISHING.md`.
 - Added focused publishing foundation tests using Node's built-in `node:test`.
+- Implemented Phase 5 Design Agent and Workflow Studio provider hardening and documented it in `docs/DESIGN_WORKFLOW_INTEGRATION.md`.
+- Added focused Design/Workflow integration tests using Node's built-in `node:test`.
 
 ## In Progress
 
@@ -440,6 +446,8 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Live Hub launch exchange, asset registration, asset return, and publishing-status reporting require the Hub backend contract to be implemented.
 - Live MuAPI social publishing endpoints and account connection flows were not present in this repository.
 - Live social scheduling/publishing validation is blocked by confirmed MuAPI social endpoint contract, credentials, and connected social accounts.
+- Live Design Agent generation, Workflow execution, and paid upload side effects remain blocked by MuAPI credits/credentials and were validated only with mocks.
+- Hub launch exchange and asset registration remain dependent on the Hub backend contract.
 
 ## Commit History
 
@@ -450,3 +458,4 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - `feat: add shared studio architecture foundations`
 - `feat: add MavenSync Hub integration foundation`
 - `feat: add MuAPI social publishing foundation`
+- `feat: harden design and workflow studio integrations`

@@ -1,20 +1,26 @@
 import { NextResponse } from 'next/server';
-
-const MUAPI_BASE = 'https://api.muapi.ai';
+import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
 
 function getApiKey(request) {
-    // Only accept x-api-key header. Cookie-based auth is removed for security:
-    // cookies without HttpOnly flag can be stolen by XSS (CWE-522).
-    const headerKey = request.headers.get('x-api-key');
-    return headerKey || null;
+    const serverKey = getServerMuApiKey();
+    if (serverKey) return serverKey;
+    if (isAgencyModeEnabled()) return null;
+    return request.headers.get('x-api-key') || null;
 }
 
 function cleanHeaders(request) {
     const headers = new Headers(request.headers);
     headers.delete('host');
     headers.delete('connection');
-    headers.delete('cookie'); // CRITICAL: Stop forwarding browser cookies to MuAPI to avoid auth conflicts
+    headers.delete('cookie');
+    headers.delete('authorization');
+    headers.delete('x-api-key');
+    headers.delete('content-length');
     return headers;
+}
+
+function missingKeyResponse() {
+    return NextResponse.json({ error: 'MUAPI_API_KEY is not configured.' }, { status: 500 });
 }
 
 export async function GET(request, { params }) {
@@ -26,11 +32,12 @@ export async function GET(request, { params }) {
     const effectivePath = path === 'get_upload_file' ? 'get_file_upload_url' : path;
     
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/app/${effectivePath}${search}`;
+    const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/${effectivePath}${search}`;
 
     const headers = cleanHeaders(request);
 
     const apiKey = getApiKey(request);
+    if (isAgencyModeEnabled() && !apiKey) return missingKeyResponse();
     if (apiKey) headers.set('x-api-key', apiKey);
 
     try {
@@ -67,11 +74,12 @@ export async function POST(request, { params }) {
     const path = pathSegments.join('/');
     
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/app/${path}${search}`;
+    const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/${path}${search}`;
 
     const headers = cleanHeaders(request);
 
     const apiKey = getApiKey(request);
+    if (isAgencyModeEnabled() && !apiKey) return missingKeyResponse();
     if (apiKey) headers.set('x-api-key', apiKey);
 
     try {
@@ -95,11 +103,12 @@ export async function DELETE(request, { params }) {
     const path = pathSegments.join('/');
     
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/app/${path}${search}`;
+    const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/${path}${search}`;
 
     const headers = cleanHeaders(request);
 
     const apiKey = getApiKey(request);
+    if (isAgencyModeEnabled() && !apiKey) return missingKeyResponse();
     if (apiKey) headers.set('x-api-key', apiKey);
 
     try {
@@ -120,11 +129,12 @@ export async function PUT(request, { params }) {
     const path = pathSegments.join('/');
     
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/app/${path}${search}`;
+    const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/${path}${search}`;
 
     const headers = cleanHeaders(request);
 
     const apiKey = getApiKey(request);
+    if (isAgencyModeEnabled() && !apiKey) return missingKeyResponse();
     if (apiKey) headers.set('x-api-key', apiKey);
 
     try {

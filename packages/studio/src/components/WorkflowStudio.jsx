@@ -4,17 +4,21 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   getTemplateWorkflows,
+  getNormalizedWorkflowTemplates,
   getUserWorkflows,
   getPublishedWorkflows,
   createWorkflow,
   updateWorkflowName,
   deleteWorkflow,
   getWorkflowInputs,
-  executeWorkflow,
+  executeNormalizedWorkflow,
+  validateWorkflowDefinition,
   getAllNodeSchemas,
   getWorkflowData,
 } from "../lib/providers/ProviderRegistry.js";
 import dynamic from "next/dynamic";
+import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
+import { notify } from "../lib/notifications/notify.js";
 
 const WorkflowUI = dynamic(() => import("./WorkflowUI"), {
   ssr: false,
@@ -128,6 +132,7 @@ function WorkflowCard({ workflow, onClick, activeTab, onRename, onDelete }) {
 export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggleHeader }) {
   const params = useParams();
   const router = useRouter();
+  const integration = useMavenSyncIntegration();
   const slug = params?.slug || [];
   const idFromParams = params?.id;     // exists on /workflow/[id]/[tab] route
   const tabFromParams = params?.tab;   // exists on /workflow/[id]/[tab] route
@@ -223,6 +228,12 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         // Process Builder State
         const nodes = results[1].status === 'fulfilled' ? results[1].value : [];
         const def = results[2].status === 'fulfilled' ? results[2].value : { nodes: [], edges: [] };
+        try {
+          validateWorkflowDefinition(def);
+        } catch (validationError) {
+          console.warn("Workflow graph validation warning:", validationError);
+          notify.warning("Workflow graph has invalid references; builder may have limited functionality.", { error: validationError });
+        }
 
         setNodeSchemas(nodes);
         setWorkflowDef(def);
@@ -377,7 +388,12 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         setLoading(true);
         let data = [];
         if (activeMainTab === "templates") {
-          data = await getTemplateWorkflows(apiKey);
+          try {
+            data = await getNormalizedWorkflowTemplates(apiKey);
+          } catch (normalizationError) {
+            console.warn("Normalized workflow templates unavailable; using raw templates.", normalizationError);
+            data = await getTemplateWorkflows(apiKey);
+          }
         } else if (activeMainTab === "my-workflows") {
           data = await getUserWorkflows(apiKey);
         } else if (activeMainTab === "published") {
@@ -412,10 +428,24 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         else inputs[key] = value;
       });
 
-      const data = await executeWorkflow(apiKey, selectedWorkflow.id, inputs);
+      const data = await executeNormalizedWorkflow(apiKey, selectedWorkflow.id, inputs, integration);
+      await Promise.allSettled(
+        (data.assets || []).map((asset) =>
+          integration.registerAsset?.({
+            ...asset,
+            metadata: {
+              ...(asset.metadata || {}),
+              studio: "workflow",
+              workflowId: selectedWorkflow.id,
+            },
+          }),
+        ),
+      );
       setResult(data);
+      notify.success("Workflow completed.");
     } catch (err) {
       console.error("Execution failed:", err);
+      notify.error("Workflow execution failed.", { error: err });
       setError(err.message || "Execution failed");
     } finally {
       setIsExecuting(false);

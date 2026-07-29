@@ -34,6 +34,8 @@
 | --- | --- | --- | --- | --- |
 | ARCH-001 | Fixed | Complete | Package studio components depended directly on MuAPI exports. | Added the provider registry and MuAPI provider implementation under `packages/studio/src/lib/providers`, then migrated package studio component imports to the provider facade. |
 | ARCH-002 | Fixed | Complete | Direct URL Blob download logic was duplicated across package studio components. | Added `downloadAsset()` under `packages/studio/src/lib/assets` and routed package studio download helpers through it while preserving existing filenames and fallback behavior. |
+| ARCH-003 | Fixed | Complete | Active Design Agent integration persisted the MuAPI key to `localStorage.token` for the vendored canvas. | Removed browser key persistence in `DesignAgentStudio.jsx`; same-origin Design Agent routes now prefer server-side `MUAPI_API_KEY`, strip browser auth headers, and keep standalone fallback outside Agency Mode. |
+| ARCH-004 | Fixed | Complete | Workflow and Design Agent had no explicit provider adapter contracts for MavenSync attribution and shared asset/job normalization. | Added Design Agent and Workflow provider adapters under `packages/studio/src/lib/providers`, plus focused tests for attribution, graph validation, status mapping, and duplicate polling. |
 
 ## MavenSync Integration
 
@@ -41,6 +43,7 @@
 | --- | --- | --- | --- | --- |
 | MSYNC-001 | Fixed | Complete | Creative Studio had no dedicated MavenSync Hub launch/context/asset handoff adapter boundary. | Added optional MavenSync integration modules under `packages/studio/src/lib/mavensync`, with standalone fallback and Image Studio reference asset registration. |
 | MSYNC-002 | Open | External / Hub Blocked | Hub backend launch/context/asset/publishing-status endpoints are not implemented in this repository. | Documented required/proposed endpoint contract in `docs/MAVENSYNC_INTEGRATION.md`; Creative Studio adapters remain disabled-safe until Hub API base URL and backend endpoints are available. |
+| MSYNC-003 | Fixed | Complete | Design Agent and Workflow outputs did not have a shared MavenSync attribution normalization path. | Added normalized Design Agent session/assets and Workflow run/output asset payloads that preserve owner, tenant, project, campaign, content plan, and launch context when available. |
 
 ## MuAPI Publishing
 

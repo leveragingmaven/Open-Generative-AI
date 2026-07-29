@@ -476,4 +476,5 @@ Implemented modules:
 3. Completed: local storage/history/metadata helper modules.
 4. Completed: reusable job manager foundation.
 5. Completed: notification wrapper foundation.
-6. Remaining: migrate workflow, agent, design-agent, and legacy package paths only with focused validation.
+6. Completed: added Design Agent and Workflow provider adapters for session/run/output asset normalization and MavenSync attribution.
+7. Remaining: migrate workflow node-level signed uploads/downloads, agent package downloads, Design Agent canvas export internals, and legacy package paths only with focused validation.
