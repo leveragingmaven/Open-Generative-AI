@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { uploadFile, generateMarketingStudioAd } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -361,8 +362,9 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
     setIsGenerating(true);
     try {
+      const recipe = buildRecipe("marketing", { prompt: prompt.trim() });
       const result = await generateMarketingStudioAd(apiKey, {
-        prompt,
+        ...recipe,
         aspect_ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,

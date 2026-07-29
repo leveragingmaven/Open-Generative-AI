@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 
 const CDN = "https://cdn.muapi.ai/influencer";
 
@@ -354,8 +355,8 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
 
   const isGenerating = externalIsGenerating || isGeneratingInternal;
 
-  // ── Build prompt from selections ──────────────────────────────────────────
-  const buildPrompt = useCallback(() => {
+  // ── Build recipe values from selections ────────────────────────────────────
+  const getPromptValues = useCallback(() => {
     const parts = [];
     Object.values(TABS_CONFIG).forEach((tab) =>
       tab.subcategories.forEach((sub) => {
@@ -363,10 +364,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
         if (opt?.promptVal) parts.push(opt.promptVal);
       })
     );
-    let prompt = "Ultra-realistic professional portrait photograph of an AI influencer character, 8k resolution, cinematic lighting, sharp detail";
-    if (parts.length) prompt += ", " + parts.join(", ");
-    if (customPrompt.trim()) prompt += ", " + customPrompt.trim();
-    return prompt;
+    return { optionPrompts: parts, customPrompt: customPrompt.trim() };
   }, [selectedOptions, customPrompt]);
 
   // ── Option selection ───────────────────────────────────────────────────────
@@ -391,15 +389,15 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
     setIsGeneratingInternal(true);
     setErrorMsg("");
 
-    const prompt = buildPrompt();
+    const recipe = buildRecipe("aiInfluencer", getPromptValues());
+    const prompt = recipe.prompt;
     try {
       let res;
       if (onGenerate) {
         res = await onGenerate({ prompt, aspectRatio, selections: selectedOptions });
       } else {
         res = await generateImage(apiKey, {
-          model: INFLUENCER_MODEL,
-          prompt,
+          ...recipe,
           aspect_ratio: aspectRatio,
         });
       }

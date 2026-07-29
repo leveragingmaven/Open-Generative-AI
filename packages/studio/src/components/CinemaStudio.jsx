@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import {
   PromptAspectRatioIcon,
   PromptAction,
@@ -19,7 +20,7 @@ import {
   promptMediaButtonClassName,
 } from "./prompt/PromptComposer.jsx";
 
-// ─── Constants (inlined from promptUtils) ───────────────────────────────────
+// ─── Recipe-backed cinematic controls ───────────────────────────────────────
 
 const CAMERA_MAP = {
   "Modular 8K Digital": "modular 8K digital cinema camera",
@@ -90,35 +91,15 @@ const LENSES = Object.keys(LENS_MAP);
 const FOCAL_LENGTHS = Object.keys(FOCAL_PERSPECTIVE).map((k) => parseInt(k));
 const APERTURES = Object.keys(APERTURE_EFFECT);
 
-function buildNanoBananaPrompt(
-  basePrompt,
-  camera,
-  lens,
-  focalLength,
-  aperture,
-) {
-  const cameraDesc = CAMERA_MAP[camera] || camera;
-  const lensDesc = LENS_MAP[lens] || lens;
-  const perspective = FOCAL_PERSPECTIVE[focalLength] || "";
-  const depthEffect = APERTURE_EFFECT[aperture] || "";
-  const qualityTags = [
-    "professional photography",
-    "ultra-detailed",
-    "8K resolution",
-  ];
-  const parts = [
-    basePrompt,
-    `shot on a ${cameraDesc}`,
-    `using a ${lensDesc} at ${focalLength}mm ${perspective ? `(${perspective})` : ""}`,
-    `aperture ${aperture}`,
-    depthEffect,
-    "cinematic lighting",
-    "natural color science",
-    "high dynamic range",
-    qualityTags.join(", "),
-  ];
-  return parts.filter((p) => p && p.trim() !== "").join(", ");
-}
+const buildNanoBananaPrompt = (basePrompt, camera, lens, focalLength, aperture) =>
+  buildRecipe("cinemaImage", {
+    prompt: basePrompt,
+    camera,
+    lens,
+    focalLength,
+    aperture,
+    reference: false,
+  }).prompt;
 
 // ─── Dropdown ────────────────────────────────────────────────────────────────
 

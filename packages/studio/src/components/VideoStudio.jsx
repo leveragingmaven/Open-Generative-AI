@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2vModels,
@@ -1125,7 +1126,8 @@ export default function VideoStudio({
           });
       } else if (imageMode) {
         const maxImgs = getMaxImagesForI2VModel(selectedModel);
-        const i2vParams = { model: selectedModel };
+        const i2vRecipe = buildRecipe("video", { prompt: trimmedPrompt });
+        const i2vParams = { ...i2vRecipe, model: selectedModel };
         if (maxImgs > 2) {
           i2vParams.images_list = uploadedImageUrls;
         } else {
@@ -1176,7 +1178,8 @@ export default function VideoStudio({
           });
       } else {
         // T2V (including extend mode)
-        const params = { model: selectedModel };
+        const videoRecipe = buildRecipe("video", { prompt: trimmedPrompt });
+        const params = { ...videoRecipe, model: selectedModel };
         if (trimmedPrompt) params.prompt = trimmedPrompt;
 
         if (isExtendMode) {

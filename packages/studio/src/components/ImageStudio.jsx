@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { generateImage, generateI2I, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -1220,9 +1221,14 @@ export default function ImageStudio({
             if (showEffectBtn && selectedEffect) genParams.name = selectedEffect;
             return await generateI2I(apiKey, genParams);
           } else {
-            const genParams = {
-              model: selectedModelId,
+            const recipe = buildRecipe("image", {
               prompt: prompt.trim(),
+              parameters: {
+                model: selectedModelId,
+              },
+            });
+            const genParams = {
+              ...recipe,
               aspect_ratio: selectedAr,
             };
             if (currentQualityField && selectedQuality) {

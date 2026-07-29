@@ -6,3 +6,5 @@ export * from "./publishingErrors.js";
 export * from "./platformCapabilities.js";
 export * from "./publishingHistory.js";
 export * from "./publishingStatusReporter.js";
+export * from "./PublishingCenterMVP.js";
+export * from "./PublishingCenterUI.js";

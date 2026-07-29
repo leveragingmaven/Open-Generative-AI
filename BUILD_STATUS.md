@@ -177,6 +177,12 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - `AssetHandoff` normalizes Creative Studio-owned generated asset references for Hub registration and preserves local assets on registration failure.
 - `useMavenSyncIntegration()` exposes optional `standalone`, `agency`, and `hub-launch` integration state.
 - Image Studio generated-image completion is the first reference integration path.
+- Cinema Studio and Image Studio use shared Creative Intelligence recipes for prompt construction.
+- Marketing Studio is migrated to the shared `marketing` recipe while preserving its existing MuAPI payload and UI flow.
+- Video Studio is migrated to the shared `video` recipe while preserving its T2V, I2V, V2V, extend, and MuAPI request flows.
+- DrawModal image editing is migrated to the shared `imageEdit` recipe while preserving its canvas merge, upload, edit payload, history, and callback flow.
+- AiInfluencerStudio is migrated to the shared `aiInfluencer` recipe while preserving its option ordering, custom prompt handling, model, aspect ratio, callback, and history flow.
+- Remaining manual prompt construction includes V2V prompt forwarding, legacy `src/components/*` studio paths, DrawModal display labels, and agent workflows.
 - Publishing provider boundary exists under `packages/studio/src/lib/publishing`; MuAPI remains the required Creative Studio publishing transport.
 
 ### Phase 4 MuAPI Social Publishing Foundation

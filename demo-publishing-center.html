@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MavenSync Publishing Center MVP</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin-bottom: 30px; }
+        .asset-item, .draft-item, .history-item { 
+            border: 1px solid #ddd; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px;
+        }
+        .assets-grid, .drafts-grid, .history-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); 
+            gap: 15px;
+        }
+        .draft-actions button {
+            margin-right: 5px;
+            margin-top: 5px;
+        }
+        .publishing-center-mvp h2 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    
+    <script type="module">
+        // Import the publishing center components
+        import { initPublishingCenter } from './src/lib/publishing/PublishingCenterUI.js';
+        
+        // Create some mock data for demonstration
+        const mockAssets = [
+            {
+                id: 'asset-1',
+                url: 'https://via.placeholder.com/150',
+                title: 'Sample Image 1',
+                description: 'A sample image for publishing',
+                type: 'image'
+            },
+            {
+                id: 'asset-2',
+                url: 'https://via.placeholder.com/150/FF0000/FFFFFF?text=Video',
+                title: 'Sample Video 1',
+                description: 'A sample video for publishing',
+                type: 'video'
+            }
+        ];
+        
+        // Mock localStorage with some initial data
+        const mockStorage = {
+            getItem: function(key) {
+                if (key === 'creative_studio_asset_history') {
+                    return JSON.stringify(mockAssets);
+                }
+                if (key === 'creative_studio_publishing_drafts') {
+                    return JSON.stringify([]);
+                }
+                if (key === 'creative_studio_publishing_history') {
+                    return JSON.stringify([]);
+                }
+                return null;
+            },
+            setItem: function(key, value) {
+                console.log(`Setting ${key}:`, value);
+            }
+        };
+        
+        // Initialize the publishing center
+        document.addEventListener('DOMContentLoaded', () => {
+            const app = document.getElementById('app');
+            initPublishingCenter(app, { storage: mockStorage });
+        });
+    </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, getUserBalance } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, getUserBalance } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -156,6 +156,15 @@ const TABS = [
     )
   },
   {
+    id: 'publishing',
+    label: 'Publishing Center',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 15v-2.5"/>
+      </svg>
+    )
+  },
+  {
     id: 'apps',
     label: 'Explore Apps',
     icon: (
@@ -218,7 +227,7 @@ const NAVIGATION_CATEGORIES = [
   {
     id: 'agents-automation',
     label: 'Agents & Automation',
-    tabIds: ['agents', 'workflows'],
+    tabIds: ['agents', 'workflows', 'publishing'],
     icon: (
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="6" height="6" rx="1"/>
@@ -931,6 +940,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         {visibleTabIds.has('ai-influencer') && (
           <div className={activeTab === 'ai-influencer' ? "h-full w-full" : "hidden"}>
             <AiInfluencerStudio apiKey={studioApiKey} />
+          </div>
+        )}
+        {visibleTabIds.has('publishing') && (
+          <div className={activeTab === 'publishing' ? "h-full w-full" : "hidden"}>
+            <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />
           </div>
         )}
       </div>
