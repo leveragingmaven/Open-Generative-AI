@@ -344,6 +344,14 @@ Current dependencies any future Creative Library integration would need to respe
 
 The Phase 2 foundation now exists under `packages/studio/src/lib`. Future work should continue incremental migration behind these modules rather than introducing parallel service paths. Provider migration is complete for package studio component imports; asset history, signed upload adapters, workflow package downloads, agent package downloads, and Design Agent canvas downloads remain intentionally unmigrated to avoid changing behavior outside the studio package surface.
 
+## MavenSync Hub Integration Boundary
+
+Phase 3 adds an optional Creative Studio-side MavenSync integration foundation under `packages/studio/src/lib/mavensync`. Hub launch/context APIs are adapter contracts only until the Hub backend implements them. Creative Studio continues to own generated media files and sends Hub asset references and metadata rather than duplicated binaries by default.
+
+Social scheduling and publishing initiated inside Creative Studio must be executed through the MuAPI publishing capability. MavenSync Hub, GHL, and n8n may coordinate campaigns and business workflows, but they do not replace the MuAPI social publishing transport used by Creative Studio.
+
+The publishing provider boundary lives under `packages/studio/src/lib/publishing`. MuAPI is the required implementation for Creative Studio social publishing; no alternate GHL or n8n scheduler is implemented.
+
 ## Phase 1 Shared Asset Architecture Plan
 
 This section began as a planning section. Phase 2 implemented the package-level foundation described below without redesigning studio UI or changing generation workflows.

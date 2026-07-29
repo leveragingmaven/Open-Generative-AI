@@ -28,6 +28,28 @@ Limits the visible Creative Studio tabs for the first Agency milestone.
 
 Reserved for deployment environments that need an explicit origin allowlist. Leave blank for local development unless your host requires it.
 
+## MavenSync Hub Integration
+
+`NEXT_PUBLIC_MAVENSYNC_MODE=standalone`
+
+Browser-safe mode flag for the Next.js Creative Studio deployment. Supported foundation modes are `standalone`, `agency`, and `hub-launch`. The application continues in standalone mode when no Hub launch context is supplied.
+
+`NEXT_PUBLIC_MAVENSYNC_API_BASE`
+
+Browser-safe MavenSync Hub API base URL used only for short-lived launch/context and asset-reference handoff calls. Leave blank until the Hub backend implements the documented endpoints. Do not place service secrets in this value.
+
+`NEXT_PUBLIC_MAVENSYNC_ALLOWED_RETURN_ORIGINS=https://hub.mavensync.space`
+
+Comma-separated browser-safe allowlist for return destinations supplied by a Hub launch. Return targets outside this list are rejected and the studio falls back safely.
+
+`VITE_MAVENSYNC_MODE`, `VITE_MAVENSYNC_API_BASE`, and `VITE_MAVENSYNC_ALLOWED_RETURN_ORIGINS`
+
+Optional aliases for legacy Vite/Electron-compatible builds. Keep these values browser-safe.
+
+`MAVENSYNC_API_SECRET`
+
+Reserved server-only value for a future server-side bridge. Do not use a `NEXT_PUBLIC_` or `VITE_` prefix for secrets.
+
 ## Local Development
 
 Copy `.env.example` to `.env`, then paste your real `MUAPI_API_KEY` into `.env`.
@@ -37,5 +59,7 @@ Run the app normally after installing dependencies. Agency Mode requests go thro
 ## Production Deployment
 
 Set the same variables in the production environment manager. Keep `MUAPI_API_KEY` server-only and unset any `NEXT_PUBLIC_` MuAPI key variables.
+
+Social scheduling and publishing initiated inside Creative Studio must continue through MuAPI publishing capability. MavenSync Hub, GHL, and n8n may coordinate campaigns and business workflows, but they do not replace the MuAPI social publishing transport used by Creative Studio.
 
 Real environment files are ignored by git. `.env.example` remains tracked as the safe template.

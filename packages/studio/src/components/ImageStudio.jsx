@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { generateImage, generateI2I, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -875,6 +876,7 @@ export default function ImageStudio({
 
   // Use prop history if provided, otherwise local
   const history = historyItems ?? localHistory;
+  const mavenSync = useMavenSyncIntegration();
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
@@ -1247,6 +1249,21 @@ export default function ImageStudio({
             model: selectedModelId,
             prompt: prompt.trim(),
             type: "image",
+          });
+          void mavenSync.registerAsset({
+            id: entry.id,
+            url: entry.url,
+            type: "image",
+            sourceProvider: res.provider || "muapi",
+            sourceJobId: res.request_id || res.requestId || res.jobId || null,
+            filename: `muapi-${entry.id}.jpg`,
+            prompt: entry.prompt,
+            metadata: {
+              model: entry.model,
+              aspect_ratio: entry.aspect_ratio,
+              studio: "image",
+            },
+            createdAt: entry.timestamp,
           });
         }
       });

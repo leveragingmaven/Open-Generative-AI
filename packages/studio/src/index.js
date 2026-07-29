@@ -21,3 +21,5 @@ export * from './lib/assets/assetManager';
 export * from './lib/jobs/jobManager';
 export * from './lib/jobs/jobTypes';
 export * from './lib/notifications/notify';
+export * from './lib/mavensync';
+export * from './lib/publishing';

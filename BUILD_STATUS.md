@@ -2,13 +2,13 @@
 
 ## Current Phase
 
-Phase 2 - Shared Architecture Foundation
+Phase 3 - MavenSync Hub Integration Foundation
 
 Status: Completed
 
-Goal: add provider, asset, job, and notification architecture foundations while preserving existing studio behavior.
+Goal: add the Creative Studio side of a secure MavenSync Hub integration foundation while preserving standalone operation and existing studio behavior.
 
-Latest pass: implemented package-level shared architecture adapters and migrated safe package studio API/download call sites without UI, branding, workflow, prompt, or feature changes.
+Latest pass: implemented optional MavenSync launch/session/context/asset handoff adapters, documented the Hub API contract, and wired Image Studio generated-asset registration as the reference path.
 
 ## Build Order
 
@@ -18,6 +18,7 @@ Latest pass: implemented package-level shared architecture adapters and migrated
 4. Build validation - Completed
 5. Cleanup and commit - Completed
 6. Phase 2 shared architecture foundation - Completed
+7. Phase 3 MavenSync Hub integration foundation - Completed
 
 ## Repository Inventory
 
@@ -163,6 +164,18 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - Shared job modules exist under `packages/studio/src/lib/jobs` for normalized statuses, polling, cancellation, subscriptions, and local job records.
 - Shared notification wrapper exists under `packages/studio/src/lib/notifications`.
 - Existing studio UI, prompts, routing, branding, and workflows were preserved.
+
+### Phase 3 MavenSync Hub Integration Foundation
+
+- MavenSync integration modules exist under `packages/studio/src/lib/mavensync`.
+- `MavenSyncClient` provides disabled-safe Hub API adapter methods for launch context, project, campaign, knowledge, asset registration, asset return, current user, and publishing status.
+- `MavenSyncSession` normalizes existing AI-gency/Agency browser identity sources without storing authentication tokens in localStorage.
+- `LaunchContext` parses opaque launch identifiers, validates allowed return origins, and strips temporary launch parameters from the visible URL after consumption.
+- `KnowledgeConnector` and `ProjectConnector` normalize Hub-provided creative and project context without coupling studios to Hub response shapes.
+- `AssetHandoff` normalizes Creative Studio-owned generated asset references for Hub registration and preserves local assets on registration failure.
+- `useMavenSyncIntegration()` exposes optional `standalone`, `agency`, and `hub-launch` integration state.
+- Image Studio generated-image completion is the first reference integration path.
+- Publishing provider boundary exists under `packages/studio/src/lib/publishing`; MuAPI remains the required Creative Studio publishing transport.
 
 ### API Wrappers And Upload Services
 
@@ -369,6 +382,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Phase 2 architecture implementation
   - Status: Completed.
   - Notes: added provider, asset, job, and notification foundations; migrated safe package studio provider/download call sites.
+- Phase 3 MavenSync Hub integration foundation
+  - Status: Completed.
+  - Notes: added optional Hub launch/session/context/asset handoff adapters, Image Studio reference asset registration, and documentation/tests for the integration contract.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -389,6 +405,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Implemented Phase 2 provider abstraction, shared asset manager modules, shared job manager, and shared notification wrapper.
 - Migrated package studio MuAPI call sites to the provider facade.
 - Migrated package studio direct URL downloads to the shared download manager.
+- Implemented Phase 3 MavenSync integration package and Image Studio reference asset handoff.
+- Documented Hub API contract in `docs/MAVENSYNC_INTEGRATION.md`.
+- Added focused MavenSync integration tests using Node's built-in `node:test`.
 
 ## In Progress
 
@@ -401,6 +420,8 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Image Studio reference upload validation with real credits.
 - Video Studio generation/upload validation with real credits.
 - Remaining studio generation/upload/workflow/agent execution validation with real credits.
+- MavenSync Hub backend endpoints are not implemented in this repository.
+- Live Hub launch exchange, asset registration, asset return, and publishing-status reporting require the Hub backend contract to be implemented.
 
 ## Commit History
 
@@ -409,3 +430,4 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - `fix: complete Image Studio repairs and validate Video Studio`
 - `docs: complete Phase 1 validation and shared asset plan`
 - `feat: add shared studio architecture foundations`
+- `feat: add MavenSync Hub integration foundation`
