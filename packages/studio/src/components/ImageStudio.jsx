@@ -39,19 +39,33 @@ import {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function downloadImage(url, filename) {
+  if (!url) {
+    console.error("[ImageStudio] Download failed: missing image URL");
+    return;
+  }
+
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { mode: "cors" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
     const blob = await response.blob();
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
-    a.download = filename;
+    a.download = filename || "generated-image";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
+  } catch (err) {
+    console.warn("[ImageStudio] Blob download failed; opening image URL instead.", err);
+    const opened = window.open(url, "_blank");
+    if (opened) opened.opener = null;
+    if (!opened) {
+      console.error("[ImageStudio] Download fallback failed: browser blocked the popup.");
+    }
   }
 }
 
@@ -1284,7 +1298,7 @@ export default function ImageStudio({
     <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative p-4 md:p-6 overflow-hidden">
       
       {/* ── CENTRAL GALLERY AREA ── */}
-      <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
+      <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-72 md:pb-80 lg:pb-72 px-2">
         {history.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 w-full pt-4 animate-fade-in-up">
             {history.map((entry, idx) => (
@@ -1711,6 +1725,21 @@ export default function ImageStudio({
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-sm animate-fade-in"
           onClick={() => setFullscreenUrl(null)}
         >
+          <button
+            type="button"
+            title="Download"
+            className="absolute top-6 right-20 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10"
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadImage(fullscreenUrl, `muapi-preview-${Date.now()}.jpg`);
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
           <button
             type="button"
             className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10"

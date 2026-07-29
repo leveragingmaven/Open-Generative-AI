@@ -234,6 +234,13 @@ Validation method: local Next dev server, temporary local validation key, no gen
   - Error: `Cannot find module for page: /api/v1/get_upload_url`.
   - Fix: set `outputFileTracingRoot` in `next.config.mjs` to this repository root.
   - Status: Fixed. `npm run build` passes.
+- IS-001: Generated Image Studio result cards could be partially hidden behind the floating PromptComposer.
+  - Fix: increased the result gallery bottom scroll padding in `packages/studio/src/components/ImageStudio.jsx`.
+  - Validation: seeded local image history rendered with 64px clearance between the result card and PromptComposer; gallery remained scrollable.
+- IS-003: Image Studio generated-image Download action could fail silently for cross-origin URLs.
+  - Fix: hardened `downloadImage()` to fetch as a Blob, save with a filename, and fall back to opening the asset URL with console diagnostics.
+- IS-004: Image Studio fullscreen preview lacked a Download action.
+  - Fix: added a visible fullscreen-preview Download button that reuses `downloadImage()`.
 
 ### In Progress
 
@@ -243,26 +250,46 @@ Validation method: local Next dev server, temporary local validation key, no gen
 
 - Real API generation validation is blocked by absence of a real MuAPI key in this validation pass.
 - Upload endpoint side effects were intentionally not exercised in Phase 1 functional smoke validation.
+- IS-002: Reference-image upload validation is externally blocked by MuAPI 403 insufficient-credit/auth responses with the validation key.
+- VS-001: Real Video Studio generation and paid upload validation are externally blocked by unavailable MuAPI credits/valid credentials.
 
 ## Known Issues
 
-### Marketing Studio
+### Fixed
+
+- IS-001: Image Studio result cards are no longer covered by the floating PromptComposer.
+- IS-003: Image Studio result-card Download now saves via Blob when possible and falls back with diagnostics.
+- IS-004: Image Studio enlarged preview now includes a Download action.
+
+### Open
 
 - Preset video thumbnails may fail to render on some Chromium/GPU combinations.
   - Status: Non-blocking cosmetic issue.
   - Notes: Assets are playable, audio works if controls are enabled, and studio launch/load/generation controls are not blocked.
+
+### External / Credit Blocked
+
+- IS-002: Image Studio reference-image upload calls return MuAPI 403 insufficient-credit/auth responses with the validation key.
+  - Status: External / Credit Blocked.
+  - Notes: Not treated as an application defect; paid upload calls were not attempted.
+- VS-001: Video Studio paid generation and paid upload calls were not submitted.
+  - Status: External / Credit Blocked.
+  - Notes: Interface validation used seeded local history and did not invent successful API results.
+- Dummy validation key causes expected `403` responses for balance and app-interest calls.
+  - Status: Non-blocking.
+  - Notes: No JavaScript runtime exception was observed from these failures.
+
+### Enhancement
+
+- IS-005: Allow bundled avatar or presenter selections to be replaced or extended later with MavenSync-managed and user-uploaded assets.
+  - Status: Enhancement request.
+  - Notes: No implementation in Phase 1.
 
 ### Local Environment
 
 - `.env.example` defaults to Agency Mode with `CREATIVE_STUDIO_TABS=image,marketing`.
   - Status: Non-blocking for production build; important for validation.
   - Notes: Full Creative Studio validation requires Agency Mode disabled or all tabs included.
-
-### API Validation
-
-- Dummy validation key causes expected `403` responses for balance and app-interest calls.
-  - Status: Non-blocking.
-  - Notes: No JavaScript runtime exception was observed from these failures.
 
 ### Dependency Audit
 
@@ -279,6 +306,12 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Studio browser validation
   - Status: Passed for all listed studios in full-studio mode.
   - Notes: used a temporary local validation key and did not submit generation jobs.
+- Image Studio repair validation
+  - Status: Passed.
+  - Notes: verified seeded result history, PromptComposer clearance, result-card Download action presence, fullscreen preview, and fullscreen Download action without paid API calls.
+- Video Studio validation
+  - Status: Passed as far as possible without paid side effects.
+  - Notes: verified launch, prompt field, model selector, aspect-ratio selector, duration selector, resolution/quality selector, upload file chooser, seeded result history, result-card Download/Fullscreen actions, enlarged preview close action, navigation, and expected invalid-key 403 handling.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -291,6 +324,9 @@ Validation method: local Next dev server, temporary local validation key, no gen
 - Classified dummy-key API 403 responses as expected validation noise.
 - Fixed production build failure.
 - Confirmed production build succeeds.
+- Completed Image Studio fixes IS-001, IS-003, and IS-004.
+- Validated Video Studio interface and navigation without paid generation or upload side effects.
+- Created `BUG_BACKLOG.md` for confirmed Image Studio and Video Studio findings.
 
 ## In Progress
 
@@ -300,7 +336,11 @@ Validation method: local Next dev server, temporary local validation key, no gen
 
 - Real external API generation tests.
 - Upload side-effect tests.
+- Image Studio reference upload validation with real credits.
+- Video Studio generation/upload validation with real credits.
 
 ## Commit History
 
 - `docs: initialize Creative Studio build tracker and stabilize phase 1 validation`
+- `docs: document shared asset architecture`
+- `fix: complete Image Studio repairs and validate Video Studio`
