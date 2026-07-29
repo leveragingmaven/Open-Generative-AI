@@ -6,7 +6,7 @@ import {
   getTemplateAgents,
   getUserAgents,
   getUserConversations,
-} from "../muapi.js";
+} from "../lib/providers/ProviderRegistry.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function timeAgo(dateStr) {

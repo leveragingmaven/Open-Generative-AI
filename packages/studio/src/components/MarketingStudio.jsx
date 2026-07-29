@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { uploadFile, generateMarketingStudioAd } from "../muapi.js";
+import { uploadFile, generateMarketingStudioAd } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -327,20 +328,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const downloadFile = async (url, filename) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    return downloadAsset(url, { filename, kind: "video", prefix: "marketing-ad" });
   };
 
   const handleUpload = async (e, target) => {

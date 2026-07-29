@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { runClipping, uploadFile } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { runClipping, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PROMPT_MEDIA_PREVIEW_CLASS,
@@ -249,20 +250,11 @@ export default function ClippingStudio({
   };
 
   const downloadVideo = async (url, title = "clipped_video") => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `${title.replace(/\s+/g, '_')}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    await downloadAsset(url, {
+      filename: `${title.replace(/\s+/g, '_')}.mp4`,
+      kind: "video",
+      prefix: "clipped_video",
+    });
   };
 
   const handlePromptInput = (e) => {

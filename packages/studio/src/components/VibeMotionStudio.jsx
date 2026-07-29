@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { runMotionGraphics, runMotionGraphicsEdit } from "../muapi.js";
+import { runMotionGraphics, runMotionGraphicsEdit } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -23,20 +24,7 @@ import {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function downloadFile(url, filename) {
-  try {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
-  }
+  return downloadAsset(url, { filename, kind: "video", prefix: "motion" });
 }
 
 const formatTime = (s) =>

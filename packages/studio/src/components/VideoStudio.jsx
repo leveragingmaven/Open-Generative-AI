@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
+import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2vModels,
@@ -46,20 +47,7 @@ function getQualitiesForModel(modelList, modelId) {
 }
 
 async function downloadFile(url, filename) {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
-  }
+  return downloadAsset(url, { filename, kind: "video", prefix: "video" });
 }
 
 // ── SVG icons (kept inline to avoid extra deps) ───────────────────────────────

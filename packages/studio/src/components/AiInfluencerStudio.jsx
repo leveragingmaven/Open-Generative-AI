@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { generateImage } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateImage } from "../lib/providers/ProviderRegistry.js";
 
 const CDN = "https://cdn.muapi.ai/influencer";
 
@@ -416,17 +417,11 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
 
   // ── Download helper ───────────────────────────────────────────────────────
   const downloadImg = async (url) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `ai-influencer-${Date.now()}.webp`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch {
-      window.open(url, "_blank");
-    }
+    await downloadAsset(url, {
+      filename: `ai-influencer-${Date.now()}.webp`,
+      kind: "image",
+      prefix: "ai-influencer",
+    });
   };
 
   // Preview image = selected history or current result

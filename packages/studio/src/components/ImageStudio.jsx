@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, generateI2I, uploadFile } from "../muapi.js";
+import { generateImage, generateI2I, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -39,34 +40,7 @@ import {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function downloadImage(url, filename) {
-  if (!url) {
-    console.error("[ImageStudio] Download failed: missing image URL");
-    return;
-  }
-
-  try {
-    const response = await fetch(url, { mode: "cors" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename || "generated-image";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    console.warn("[ImageStudio] Blob download failed; opening image URL instead.", err);
-    const opened = window.open(url, "_blank");
-    if (opened) opened.opener = null;
-    if (!opened) {
-      console.error("[ImageStudio] Download fallback failed: browser blocked the popup.");
-    }
-  }
+  return downloadAsset(url, { filename, kind: "image", prefix: "muapi" });
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────

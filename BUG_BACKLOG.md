@@ -27,3 +27,10 @@
 | ID | Classification | Status | Finding | Resolution / Notes |
 | --- | --- | --- | --- | --- |
 | RS-001 | External / Credit Blocked | Blocked | Real generation, workflow execution, agent execution, and paid upload calls cannot be validated for the remaining studios with the available validation key. | Cinema, Design Agent, AI Influencer, AI Clipping, Vibe Motion, Lip Sync, Body Swap, Marketing, Audio, Agents, Workflows, and Explore Apps were validated for route mount, main controls, upload-control presence where applicable, navigation shell, and unexpected runtime errors without submitting paid calls. |
+
+## Shared Architecture
+
+| ID | Classification | Status | Finding | Resolution / Notes |
+| --- | --- | --- | --- | --- |
+| ARCH-001 | Fixed | Complete | Package studio components depended directly on MuAPI exports. | Added the provider registry and MuAPI provider implementation under `packages/studio/src/lib/providers`, then migrated package studio component imports to the provider facade. |
+| ARCH-002 | Fixed | Complete | Direct URL Blob download logic was duplicated across package studio components. | Added `downloadAsset()` under `packages/studio/src/lib/assets` and routed package studio download helpers through it while preserving existing filenames and fallback behavior. |

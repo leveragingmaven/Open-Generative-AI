@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { uploadFile, generateI2I } from "../muapi.js";
+import { uploadFile, generateI2I } from "../lib/providers/ProviderRegistry.js";
 
 export default function DrawModal({
   isOpen,

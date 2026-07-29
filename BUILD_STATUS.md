@@ -2,13 +2,13 @@
 
 ## Current Phase
 
-Phase 1 - Creative Studio Functional Validation
+Phase 2 - Shared Architecture Foundation
 
 Status: Completed
 
-Goal: validate the existing Open-Generative-AI Creative Studio foundation, fix production-breaking issues only, and document remaining non-blocking issues.
+Goal: add provider, asset, job, and notification architecture foundations while preserving existing studio behavior.
 
-Latest pass: completed remaining-studio validation and shared asset architecture planning without paid generation/upload side effects.
+Latest pass: implemented package-level shared architecture adapters and migrated safe package studio API/download call sites without UI, branding, workflow, prompt, or feature changes.
 
 ## Build Order
 
@@ -17,7 +17,7 @@ Latest pass: completed remaining-studio validation and shared asset architecture
 3. Production-breaking fixes - Completed
 4. Build validation - Completed
 5. Cleanup and commit - Completed
-6. Phase 2 planning - Blocked until Phase 1 review
+6. Phase 2 shared architecture foundation - Completed
 
 ## Repository Inventory
 
@@ -99,7 +99,13 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 
 ### Shared Asset Services
 
-- Primary React studio API wrapper: `packages/studio/src/muapi.js`.
+- Provider facade: `packages/studio/src/lib/providers/ProviderRegistry.js`.
+- MuAPI provider implementation: `packages/studio/src/lib/providers/MuApiProvider.js`.
+- Provider base/types: `packages/studio/src/lib/providers/CreativeProvider.js`, `packages/studio/src/lib/providers/providerTypes.js`.
+- Primary MuAPI transport wrapper: `packages/studio/src/muapi.js`.
+- Shared asset manager modules: `packages/studio/src/lib/assets/*`.
+- Shared job manager modules: `packages/studio/src/lib/jobs/*`.
+- Shared notification wrapper: `packages/studio/src/lib/notifications/notify.js`.
 - Legacy/Electron API wrapper: `src/lib/muapi.js`.
 - Upload proxy validation: `src/lib/uploadProxyTarget.js`.
 - Upload proxy routes:
@@ -115,6 +121,8 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 ### Shared Asset Flow
 
 - React studios generally generate assets through `packages/studio/src/muapi.js`, receive hosted result URLs, then store recent entries in per-studio state and `localStorage`.
+- Package studio components now call the provider facade, which delegates to the MuAPI provider and preserves the existing MuAPI transport behavior.
+- Package studio direct URL downloads now use the shared `downloadAsset()` helper.
 - Uploads are not fully unified. React studios use `uploadFile()` from the studio MuAPI wrapper, workflow and agent packages use signed upload URLs, Design Agent uses `/api/v1/get_upload_url` plus `/api/v1/upload-binary`, and local Wan2GP uploads go through Electron IPC.
 - Workflow builder assets are represented as node `resultUrl`, `outputs`, and `outputHistory`.
 - Design Agent assets are session-backed and identified by `{ asset_label, url, kind }`.
@@ -122,8 +130,10 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 
 ### Recommended Integration Points
 
-- Future shared asset service location: `packages/studio/src/services/assetService.js`.
-- Possible future hook location: `packages/studio/src/hooks/useAssetHistory.js`.
+- Implemented shared asset service location: `packages/studio/src/lib/assets/assetManager.js`.
+- Implemented provider registry location: `packages/studio/src/lib/providers/ProviderRegistry.js`.
+- Implemented job manager location: `packages/studio/src/lib/jobs/jobManager.js`.
+- Implemented notification wrapper location: `packages/studio/src/lib/notifications/notify.js`.
 - Best future Creative Library connection points:
   - after successful React studio upload;
   - after React studio generation result URL is received;
@@ -139,9 +149,20 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - Upload progress and signed-upload handling are duplicated across studios, workflow nodes, Design Agent, and agent chat.
 - Download helpers are duplicated across studio components, workflow utilities, Design Agent canvas, and agent chat.
 - Per-studio history persistence uses independent localStorage keys and similar load/save/delete logic.
-- Polling exists in multiple independent implementations.
+- Polling exists in multiple independent implementations; a shared package-level job manager now exists for incremental migration.
 - Asset rendering and type handling are split between direct media elements, custom players, canvas nodes, and workflow renderers.
 - Legacy DOM-built studios and React package studios maintain parallel asset flows.
+
+### Phase 2 Architecture Implementation
+
+- Provider abstraction exists under `packages/studio/src/lib/providers`.
+- MuAPI is the only implemented provider; future provider IDs are represented for Gemini, OpenAI, Replicate, FAL, OpenRouter, and internal MavenSync services.
+- Package studio components import provider facade functions instead of importing `muapi.js` directly.
+- Shared asset modules exist under `packages/studio/src/lib/assets` for downloads, metadata, local JSON storage, and local history helpers.
+- Package studio duplicated direct Blob download helpers now route through `downloadAsset()`.
+- Shared job modules exist under `packages/studio/src/lib/jobs` for normalized statuses, polling, cancellation, subscriptions, and local job records.
+- Shared notification wrapper exists under `packages/studio/src/lib/notifications`.
+- Existing studio UI, prompts, routing, branding, and workflows were preserved.
 
 ### API Wrappers And Upload Services
 
@@ -345,6 +366,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Shared asset architecture plan
   - Status: Completed.
   - Notes: documented duplicated download, history, storage, upload, and provider logic in `docs/ASSET_ARCHITECTURE.md`.
+- Phase 2 architecture implementation
+  - Status: Completed.
+  - Notes: added provider, asset, job, and notification foundations; migrated safe package studio provider/download call sites.
 - `npm run build`
   - Initial status: Failed during page-data collection due workspace root inference.
   - Final status: Passed after `next.config.mjs` fix.
@@ -362,6 +386,9 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - Created `BUG_BACKLOG.md` for confirmed Image Studio and Video Studio findings.
 - Completed remaining-studio validation pass for all studios not previously deep-validated.
 - Expanded shared asset architecture plan with duplicated download, history/storage, upload, and provider logic.
+- Implemented Phase 2 provider abstraction, shared asset manager modules, shared job manager, and shared notification wrapper.
+- Migrated package studio MuAPI call sites to the provider facade.
+- Migrated package studio direct URL downloads to the shared download manager.
 
 ## In Progress
 
@@ -381,3 +408,4 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - `docs: document shared asset architecture`
 - `fix: complete Image Studio repairs and validate Video Studio`
 - `docs: complete Phase 1 validation and shared asset plan`
+- `feat: add shared studio architecture foundations`

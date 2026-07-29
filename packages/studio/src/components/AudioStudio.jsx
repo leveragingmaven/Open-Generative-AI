@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateAudio, uploadFile } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateAudio, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { audioModels, getAudioModelById } from "../models.js";
 
 // ---------------------------------------------------------------------------
@@ -344,20 +345,11 @@ function PremiumAudioPlayer({ url, title }) {
   };
 
   const downloadAudio = async () => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = title ? `${title.replace(/\s+/g, '_')}.mp3` : "generated_audio.mp3";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    await downloadAsset(url, {
+      filename: title ? `${title.replace(/\s+/g, '_')}.mp3` : "generated_audio.mp3",
+      kind: "audio",
+      prefix: "generated_audio",
+    });
   };
 
   return (

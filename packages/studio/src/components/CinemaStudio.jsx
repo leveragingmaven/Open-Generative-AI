@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, uploadFile } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateImage, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import {
   PromptAspectRatioIcon,
   PromptAction,
@@ -678,20 +679,11 @@ export default function CinemaStudio({
   // ── Download ──
   const handleDownload = useCallback(async () => {
     if (!canvasUrl) return;
-    try {
-      const response = await fetch(canvasUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `cinema-shot-${Date.now()}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(canvasUrl, "_blank");
-    }
+    await downloadAsset(canvasUrl, {
+      filename: `cinema-shot-${Date.now()}.jpg`,
+      kind: "image",
+      prefix: "cinema-shot",
+    });
   }, [canvasUrl]);
 
   const handleCopyPrompt = useCallback(
@@ -781,20 +773,11 @@ export default function CinemaStudio({
                     title="Download"
                     onClick={async (e) => {
                       e.stopPropagation();
-                      try {
-                        const response = await fetch(entry.url);
-                        const blob = await response.blob();
-                        const blobUrl = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = blobUrl;
-                        a.download = `cinema-shot-${entry.id || idx}.jpg`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
-                      } catch {
-                        window.open(entry.url, "_blank");
-                      }
+                      await downloadAsset(entry.url, {
+                        filename: `cinema-shot-${entry.id || idx}.jpg`,
+                        kind: "image",
+                        prefix: "cinema-shot",
+                      });
                     }}
                     className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-[#22d3ee] hover:text-black transition-all border border-white/10"
                   >

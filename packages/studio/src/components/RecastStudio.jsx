@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { processRecast, uploadFile } from "../muapi.js";
+import { processRecast, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
 import {
   recastModels,
   getRecastModelById,
@@ -681,20 +682,7 @@ export default function RecastStudio({
   }, []);
 
   const downloadFile = async (url, filename) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    return downloadAsset(url, { filename, kind: "video", prefix: "bodyswap" });
   };
 
   // ── Generation ──────────────────────────────────────────────────────────────

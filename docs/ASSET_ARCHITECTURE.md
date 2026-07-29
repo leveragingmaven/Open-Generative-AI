@@ -6,14 +6,16 @@ This document describes the asset generation, upload, download, storage, and his
 
 ## Current Asset Flow
 
-The application currently treats most generated and uploaded assets as hosted URLs plus local metadata. There is no single shared asset record or asset service across all studios.
+The application currently treats most generated and uploaded assets as hosted URLs plus local metadata. Phase 2 introduced shared package-level adapters for providers, downloads, metadata, storage, history, jobs, and notifications, while preserving existing studio-owned histories and UI flows.
 
 Main paths:
 
-- `packages/studio/src/components/*Studio.jsx` calls functions from `packages/studio/src/muapi.js`.
+- `packages/studio/src/components/*Studio.jsx` calls the provider facade in `packages/studio/src/lib/providers/ProviderRegistry.js`.
+- `packages/studio/src/lib/providers/MuApiProvider.js` wraps the existing MuAPI client in `packages/studio/src/muapi.js`.
 - `packages/studio/src/muapi.js` posts jobs to MuAPI, polls for completion, and returns result URLs.
 - Studios store recent generated URLs and prompt/model metadata in component state and per-studio `localStorage` keys.
-- Uploads in React studios use `uploadFile()` from `packages/studio/src/muapi.js`.
+- Uploads in React studios use `uploadFile()` through the provider facade.
+- Package studio downloads use `downloadAsset()` from `packages/studio/src/lib/assets/downloadManager.js`.
 - Workflow builder nodes store outputs as `resultUrl`, `outputs`, and `outputHistory`.
 - Design Agent stores assets against creative-agent sessions using asset labels.
 - Agent chat stores conversation history on the backend and performs its own upload/download handling.
@@ -127,9 +129,11 @@ Main paths:
 
 ## Shared Services
 
-### Studio MuAPI Wrapper
+### Studio Provider Facade
 
-`packages/studio/src/muapi.js` is the primary React studio API wrapper.
+`packages/studio/src/lib/providers/ProviderRegistry.js` is the current React studio provider entry point. It exposes the same generation, upload, workflow, agent, app, and balance functions used by existing studios, and delegates the implemented provider to `packages/studio/src/lib/providers/MuApiProvider.js`.
+
+`packages/studio/src/muapi.js` remains the MuAPI transport wrapper.
 
 Responsibilities today:
 
@@ -139,6 +143,26 @@ Responsibilities today:
 - Polls prediction results through `/api/v1/predictions/{requestId}/result`.
 - Wraps image, video, audio, clipping, marketing, lip-sync, recast, motion graphics, apps, balance, workflow, and agent catalog calls.
 - Exposes workflow helpers such as `executeWorkflow()`, `pollWorkflowResult()`, `runSingleNode()`, `getNodeStatus()`, and `deleteNodeRun()`.
+
+### Implemented Shared Package Modules
+
+- `packages/studio/src/lib/providers/`
+  - `CreativeProvider.js` defines the base provider contract.
+  - `MuApiProvider.js` implements the current MuAPI-backed provider.
+  - `ProviderRegistry.js` owns provider registration, active provider lookup, and backward-compatible facade exports.
+  - `providerTypes.js` defines provider identifiers, capability names, and response normalization helpers.
+- `packages/studio/src/lib/assets/`
+  - `downloadManager.js` centralizes fetch-as-Blob downloads and safe open-in-new-tab fallback behavior.
+  - `metadataManager.js` centralizes asset kind detection and filename creation.
+  - `storageManager.js` wraps JSON localStorage reads and writes.
+  - `historyManager.js` wraps local history read/write/prepend/remove operations.
+  - `assetManager.js` re-exports the shared asset utilities.
+- `packages/studio/src/lib/jobs/`
+  - `jobTypes.js` normalizes job statuses and provider job responses.
+  - `polling.js` provides reusable polling with timeout and cancellation support.
+  - `jobManager.js` creates cancellable local job records and emits status updates.
+- `packages/studio/src/lib/notifications/notify.js`
+  - Provides `success`, `error`, `warning`, and `progress` wrappers without changing the current notification UI.
 
 ### Root MuAPI Wrapper
 
@@ -185,10 +209,10 @@ Responsibilities today:
 Current React studio generation flow:
 
 1. Studio component collects prompt, model, uploaded URLs, and options.
-2. Studio calls a wrapper in `packages/studio/src/muapi.js`.
-3. `muapi.js` submits to a MuAPI endpoint.
-4. The wrapper extracts `request_id` or `id`.
-5. The wrapper polls until a result URL is returned.
+2. Studio calls the provider facade in `packages/studio/src/lib/providers/ProviderRegistry.js`.
+3. The active MuAPI provider delegates to `packages/studio/src/muapi.js`.
+4. `muapi.js` submits to a MuAPI endpoint.
+5. The wrapper extracts `request_id` or `id` and polls until a result URL is returned.
 6. The studio creates a local history entry with the result URL and metadata.
 7. The studio renders the asset and exposes local download/delete controls.
 
@@ -217,7 +241,7 @@ Agent chat generation flow:
 
 Current upload flows are not unified.
 
-- React studios call `uploadFile(apiKey, file, onProgress)` from `packages/studio/src/muapi.js`, which posts to `/api/v1/upload_file`.
+- React studios call `uploadFile(apiKey, file, onProgress)` through `packages/studio/src/lib/providers/ProviderRegistry.js`, which delegates to the MuAPI provider and posts to `/api/v1/upload_file`.
 - Workflow `UploadNode.jsx` requests `/api/app/get_file_upload_url`, posts the returned form fields to the returned upload URL, and derives `https://cdn.muapi.ai/{fields.key}`.
 - Design Agent requests `/api/v1/get_upload_url`, posts to `/api/v1/upload-binary`, derives `https://cdn.muapi.ai/{fields.key}`, then registers the URL as a session asset.
 - Agent chat and agent editing request `/api/app/get_file_upload_url`, post form data, and derive `https://cdn.muapi.ai/{fields.key}`.
@@ -256,25 +280,27 @@ History is split by product area.
 - Asset rendering is split across direct `<img>`, `<video>`, `<audio>`, custom players, canvas nodes, and workflow-specific players without a shared asset model.
 - Uploaded/generated assets are represented inconsistently as plain URLs, `{ url }`, `{ id, url, prompt }`, workflow `outputs`, design-agent `{ asset_label, url, kind }`, and agent message parts.
 
-## Recommended Future Shared Asset Service
+## Implemented Shared Asset Service Boundary
 
-Recommended location:
+Implemented location:
 
-- `packages/studio/src/services/assetService.js`
+- `packages/studio/src/lib/assets/assetManager.js`
 
-Recommended companion hook location if UI state needs to be shared later:
+Implemented companion modules:
 
-- `packages/studio/src/hooks/useAssetHistory.js`
+- `packages/studio/src/lib/assets/downloadManager.js`
+- `packages/studio/src/lib/assets/historyManager.js`
+- `packages/studio/src/lib/assets/storageManager.js`
+- `packages/studio/src/lib/assets/metadataManager.js`
 
-Recommended responsibility:
+Current responsibility:
 
-- Normalize asset records across studios.
-- Provide upload helpers with progress callbacks.
-- Provide download helpers for direct URLs, signed URLs, and blob downloads.
-- Provide history persistence adapters for local studio history.
+- Provide download helpers for direct URL Blob downloads and fallback opening.
 - Provide type detection for image/video/audio/generated file URLs.
-- Provide thumbnail extraction where appropriate.
-- Wrap existing MuAPI, workflow, design-agent, and local inference asset flows through adapters without changing their current endpoint contracts.
+- Provide local history persistence adapters that preserve existing per-studio storage keys.
+- Provide JSON storage helpers and filename helpers.
+
+Upload execution remains provider-owned in this increment so existing endpoint contracts and progress behavior are preserved.
 
 This service should not own UI rendering. Components should continue to decide how to present assets.
 
@@ -316,11 +342,11 @@ Current dependencies any future Creative Library integration would need to respe
 
 ## Current Recommendation
 
-No functional change should be made during this audit phase. For a later implementation phase, introduce a small shared asset service in `packages/studio/src/services/assetService.js` and migrate one low-risk studio first. The initial service should wrap existing behavior rather than replace endpoints or storage.
+The Phase 2 foundation now exists under `packages/studio/src/lib`. Future work should continue incremental migration behind these modules rather than introducing parallel service paths. Provider migration is complete for package studio component imports; asset history, signed upload adapters, workflow package downloads, agent package downloads, and Design Agent canvas downloads remain intentionally unmigrated to avoid changing behavior outside the studio package surface.
 
 ## Phase 1 Shared Asset Architecture Plan
 
-This is a planning section only. It does not implement a new service or change runtime behavior.
+This section began as a planning section. Phase 2 implemented the package-level foundation described below without redesigning studio UI or changing generation workflows.
 
 ### Duplicated Download Logic
 
@@ -340,12 +366,11 @@ Confirmed duplicated download helpers:
 - `packages/Open-AI-Design-Agent/packages/design-agent/src/CanvasArea.jsx` has direct Blob download and canvas export logic.
 - Legacy `src/components/*Studio.js` files include parallel Blob download helpers.
 
-Plan:
+Implemented:
 
-1. Create a shared `downloadAsset()` helper in a future `packages/studio/src/services/assetService.js`.
-2. Support direct URL Blob download first, then signed URL adapters for workflow/agent media.
-3. Keep canvas export separate because it downloads generated canvas data URLs rather than remote assets.
-4. Migrate one low-risk studio before broad replacement.
+1. Created `downloadAsset()` in `packages/studio/src/lib/assets/downloadManager.js`.
+2. Migrated package studio download helpers in Image, Video, Cinema, AI Influencer, Audio, Marketing, Vibe Motion, Lip Sync, Recast, and AI Clipping.
+3. Kept workflow signed downloads, agent signed downloads, Design Agent canvas exports, and legacy DOM-built studio downloads separate because their endpoint and canvas behaviors differ.
 
 ### Duplicated History And Storage Logic
 
@@ -371,30 +396,29 @@ Additional storage paths:
 - Agent chat conversation history through backend agent APIs.
 - Workflow node history through backend run history mapped to `outputHistory`.
 
-Plan:
+Implemented:
 
-1. Define a shared `AssetRecord` shape with `id`, `url`, `kind`, `source`, `studio`, `prompt`, `model`, `createdAt`, and optional provider metadata.
-2. Add a local history adapter that wraps existing localStorage keys without migrating data immediately.
-3. Add adapters for workflow `outputHistory`, design-agent `{ asset_label, url, kind }`, and agent message parts.
-4. Leave remote deletion semantics explicit; deleting local history should not imply remote asset deletion.
+1. Added shared metadata normalization helpers with `id`, `url`, `kind`, `source`, `studio`, `prompt`, `model`, `createdAt`, and optional raw provider metadata.
+2. Added a local history adapter that wraps existing localStorage keys without migrating data immediately.
+3. Left workflow `outputHistory`, design-agent `{ asset_label, url, kind }`, and agent message parts unmigrated.
+4. Preserved existing remote deletion semantics; deleting local history still does not imply remote asset deletion.
 
 ### Duplicated Upload Logic
 
 Confirmed upload paths:
 
-- React studios call `uploadFile(apiKey, file, onProgress)` from `packages/studio/src/muapi.js`.
+- React studios call `uploadFile(apiKey, file, onProgress)` through `packages/studio/src/lib/providers/ProviderRegistry.js`.
 - Workflow `UploadNode.jsx` requests `/api/app/get_file_upload_url` and posts signed form data.
 - Design Agent requests `/api/v1/get_upload_url`, posts through `/api/v1/upload-binary`, then registers session assets.
 - Agent chat and agent editing request `/api/app/get_file_upload_url` and post signed form data.
 - Legacy `UploadPicker.js` accepts a custom `uploadFn` and persists upload history.
 - Local Wan2GP uploads go through Electron IPC in `src/lib/localInferenceClient.js`.
 
-Plan:
+Implemented:
 
-1. Define an upload adapter interface with `upload(file, { kind, onProgress, destination })`.
-2. Keep MuAPI direct upload, signed upload, design-agent registered upload, and local Wan2GP upload as separate adapters.
-3. Return normalized upload results `{ url, kind, source: 'upload', provider, raw }`.
-4. Keep paid upload execution behind explicit user actions; validation should continue using file chooser checks only.
+1. MuAPI uploads now route through the provider facade.
+2. Signed upload, design-agent registered upload, agent upload, and local Wan2GP upload paths remain separate adapters to be migrated only with focused validation.
+3. Paid upload execution remains behind explicit user actions.
 
 ### Duplicated Provider Logic
 
@@ -405,34 +429,41 @@ Confirmed provider duplication:
 - Local inference provider routing exists separately in `src/lib/localModels.js` and `src/lib/localInferenceClient.js`.
 - Workflow model provider data is embedded in workflow utility model catalogs.
 
-Plan:
+Implemented:
 
-1. Move provider metadata into a shared provider registry module.
-2. Keep model catalogs separate, but expose provider display helpers for logos, labels, and filtering.
-3. Keep local inference provider routing separate from display metadata; it controls execution, not only UI.
-4. Migrate Image and Video dropdowns together because their provider UI is structurally similar.
+1. Added shared provider registry and provider capability metadata.
+2. Implemented MuAPI as the active provider.
+3. Kept model catalogs and UI provider display behavior unchanged.
+4. Kept local inference provider routing separate because it controls local execution, not only display metadata.
 
 ### Proposed Module Boundaries
 
-Recommended future modules:
+Implemented modules:
 
-- `packages/studio/src/services/assetService.js`
-  - Download, upload adapter selection, asset normalization, and type detection.
-- `packages/studio/src/hooks/useAssetHistory.js`
-  - Local history load/save/delete for React studio histories.
-- `packages/studio/src/providers/providerRegistry.js`
-  - Provider display metadata and provider filter helpers.
-- `packages/studio/src/services/assetAdapters/`
-  - `muapiUploadAdapter.js`
-  - `signedUploadAdapter.js`
-  - `designAgentAssetAdapter.js`
-  - `workflowAssetAdapter.js`
-  - `localInferenceAssetAdapter.js`
+- `packages/studio/src/lib/assets/assetManager.js`
+  - Asset utility barrel.
+- `packages/studio/src/lib/assets/downloadManager.js`
+  - Direct URL Blob downloads and fallback opening.
+- `packages/studio/src/lib/assets/historyManager.js`
+  - Local history load/save/prepend/remove helpers.
+- `packages/studio/src/lib/assets/storageManager.js`
+  - JSON localStorage helpers.
+- `packages/studio/src/lib/assets/metadataManager.js`
+  - Asset kind and filename helpers.
+- `packages/studio/src/lib/providers/ProviderRegistry.js`
+  - Provider registration and backward-compatible studio API facade.
+- `packages/studio/src/lib/providers/MuApiProvider.js`
+  - MuAPI provider implementation.
+- `packages/studio/src/lib/jobs/jobManager.js`
+  - Reusable async job records, cancellation, and subscriptions.
+- `packages/studio/src/lib/notifications/notify.js`
+  - Notification wrapper facade.
 
 ### Migration Order
 
-1. Extract download helper only, with no behavior change.
-2. Extract provider registry for Image and Video model dropdowns.
-3. Add local history adapter behind existing per-studio keys.
-4. Add upload adapters while preserving current endpoints.
-5. Connect a future Creative Library only after asset records are normalized.
+1. Completed: provider registry facade for package studio API calls.
+2. Completed: shared direct URL download helper and package studio migration.
+3. Completed: local storage/history/metadata helper modules.
+4. Completed: reusable job manager foundation.
+5. Completed: notification wrapper foundation.
+6. Remaining: migrate workflow, agent, design-agent, and legacy package paths only with focused validation.
