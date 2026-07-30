@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { runMotionGraphics, runMotionGraphicsEdit } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -127,16 +128,18 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
     try {
       let result;
       if (editMode) {
+        const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
         result = await runMotionGraphicsEdit(apiKey, {
           request_id: editSourceId,
-          edit_prompt: prompt.trim(),
+          edit_prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },
         });
       } else {
+        const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
         result = await runMotionGraphics(apiKey, {
-          prompt: prompt.trim(),
+          prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },

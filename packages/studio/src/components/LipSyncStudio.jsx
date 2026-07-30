@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { processLipSync, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import {
   lipsyncModels,
   imageLipSyncModels,
@@ -638,7 +639,9 @@ export default function LipSyncStudio({
       };
       if (inputMode === "image") lipsyncParams.image_url = imageUrl;
       else lipsyncParams.video_url = videoUrl;
-      if (prompt && selectedModel?.hasPrompt) lipsyncParams.prompt = prompt;
+      if (prompt && selectedModel?.hasPrompt) {
+        lipsyncParams.prompt = buildRecipe("lipSync", { prompt }).prompt;
+      }
       if (showResolution) lipsyncParams.resolution = selectedResolution;
       if (selectedModel?.hasSeed) lipsyncParams.seed = -1;
 

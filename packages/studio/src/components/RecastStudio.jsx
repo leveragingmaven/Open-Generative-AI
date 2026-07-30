@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { processRecast, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import {
   recastModels,
   getRecastModelById,
@@ -706,7 +707,9 @@ export default function RecastStudio({
         image_url: imageUrl,
       };
       if (showAspect) params.aspect_ratio = selectedAspectRatio;
-      if (prompt && selectedModel?.hasPrompt) params.prompt = prompt;
+      if (prompt && selectedModel?.hasPrompt) {
+        params.prompt = buildRecipe("recast", { prompt }).prompt;
+      }
       if (selectedModelId === "kling-v3.0-pro-recast") {
         params.character_orientation = characterOrientation;
       }

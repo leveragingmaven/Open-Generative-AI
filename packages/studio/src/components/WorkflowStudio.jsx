@@ -16,6 +16,7 @@ import {
   getAllNodeSchemas,
   getWorkflowData,
 } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import dynamic from "next/dynamic";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { notify } from "../lib/notifications/notify.js";
@@ -422,7 +423,9 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
       const inputs = {};
       Object.entries(formData).forEach(([key, value]) => {
         if (!value) return;
-        if (key.startsWith("text")) inputs[key] = { prompt: value };
+        if (key.startsWith("text")) {
+          inputs[key] = { prompt: buildRecipe("workflow", { prompt: value }).prompt };
+        }
         else if (key.startsWith("image")) inputs[key] = { image_url: value };
         else if (key.startsWith("video")) inputs[key] = { video_url: value };
         else inputs[key] = value;

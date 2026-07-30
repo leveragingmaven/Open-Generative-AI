@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateAudio, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { audioModels, getAudioModelById } from "../models.js";
 
 // ---------------------------------------------------------------------------
@@ -628,8 +629,10 @@ export default function AudioStudio({
     setGenerateError(null);
 
     try {
+      const recipe = buildRecipe("audio", { prompt: params.prompt || "" });
       const audioParams = {
         ...params,
+        ...(params.prompt !== undefined ? { prompt: recipe.prompt } : {}),
         _modelId: selectedModelId,
       };
 

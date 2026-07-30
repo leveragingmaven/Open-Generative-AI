@@ -1100,7 +1100,7 @@ export default function VideoStudio({
           v2vParams.image_url = uploadedImageUrl;
         }
         if (currentModel?.hasPrompt && trimmedPrompt) {
-          v2vParams.prompt = trimmedPrompt;
+          v2vParams.prompt = buildRecipe("videoTransform", { prompt: trimmedPrompt }).prompt;
         }
         res = await processV2V(apiKey, v2vParams);
         if (!res?.url) throw new Error("No video URL returned by API");

@@ -182,8 +182,28 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - Video Studio is migrated to the shared `video` recipe while preserving its T2V, I2V, V2V, extend, and MuAPI request flows.
 - DrawModal image editing is migrated to the shared `imageEdit` recipe while preserving its canvas merge, upload, edit payload, history, and callback flow.
 - AiInfluencerStudio is migrated to the shared `aiInfluencer` recipe while preserving its option ordering, custom prompt handling, model, aspect ratio, callback, and history flow.
-- Remaining manual prompt construction includes V2V prompt forwarding, legacy `src/components/*` studio paths, DrawModal display labels, and agent workflows.
+- VibeMotionStudio is migrated to the shared `vibeMotion` recipe while preserving generation, edit_prompt, duration, aspect ratio, history, callback, and MuAPI flows.
+- Audio Studio is migrated to the shared `audio` recipe while preserving model-specific parameters, uploads, references, history, callbacks, and MuAPI flow.
+- Recast Studio is migrated to the shared `recast` recipe while preserving conditional prompt support, orientation, media inputs, history, callbacks, and MuAPI flow.
+- Lip Sync Studio is migrated to the shared `lipSync` recipe while preserving conditional prompt support, image/video modes, audio input, seed, resolution, history, callbacks, and MuAPI flow.
+- Video Studio V2V is migrated to the shared `videoTransform` recipe while preserving conditional prompt support, source video, transform parameters, history, callbacks, and MuAPI flow.
+- Workflow Studio text inputs are migrated to the shared `workflow` recipe while preserving normalized input shapes and workflow execution behavior.
+- Remaining manual prompt construction includes workflow-builder node interpolation/concatenation, legacy `src/components/*` studio paths, DrawModal display labels, and agent workflows.
 - Publishing provider boundary exists under `packages/studio/src/lib/publishing`; MuAPI remains the required Creative Studio publishing transport.
+
+### Creative Intelligence Prompt Audit
+
+- Active package studio generation paths now use `buildRecipe()`: Cinema, Image, Marketing, Video T2V/I2V/V2V, Draw/Edit, AI Influencer, Vibe Motion, Audio, Recast, Lip Sync, and Workflow text inputs.
+- The active package studio layer contains no remaining local prompt builder or direct prompt construction for ordinary studio generation.
+- Provider payload mapping remains intentionally in `packages/studio/src/muapi.js`; it translates recipe output into MuAPI fields and is not prompt authoring.
+- Vendored workflow-builder prompt concatenation and dynamic graph interpolation remain because they transform node connections and runtime values, not standalone studio prompts.
+- Legacy prompt paths remain under `src/components/*`, `src/lib/promptUtils.js`, and `src/lib/muapi.js` for the separate Electron/Vite application loaded by `src/main.js` and `electron/main.js`. They are not refactored in this audit because that product surface remains independently supported.
+- Agent `system_prompt` and Design Agent instruction paths remain owned by their respective agent packages and are outside ordinary Creative Studio generation.
+- Remaining technical debt: the active intelligence configuration still imports legacy camera/lens vocabulary from `src/lib/promptUtils.js`, and the legacy desktop surface has no shared-layer bridge.
+- Audit validation: `npm run build:studio`, `node --test tests/*.test.js`, and `node --test packages/studio/src/lib/intelligence/PromptBuilder.test.js` passed.
+- Files changed in the completion audit: `packages/studio/src/components/AudioStudio.jsx`, `LipSyncStudio.jsx`, `RecastStudio.jsx`, `VibeMotionStudio.jsx`, `VideoStudio.jsx`, `WorkflowStudio.jsx`, `packages/studio/src/lib/intelligence/config.js`, and this document. The studio component changes are the preceding focused migration set retained in the worktree; no additional component behavior was changed by the audit itself.
+- Architecture summary: 11 active package studio surfaces now call `buildRecipe()` (`Cinema`, `Image`, `Marketing`, `Video`, `Draw/Edit`, `AI Influencer`, `Vibe Motion`, `Audio`, `Recast`, `Lip Sync`, and `Workflow`). Legacy prompt files remaining are `src/lib/promptUtils.js`, `src/components/ImageStudio.js`, `VideoStudio.js`, `CinemaStudio.js`, `LipSyncStudio.js`, and `src/lib/muapi.js`, all belonging to the separate Electron/Vite surface. Provider expansion is ready at the active studio boundary because studios depend on recipes and the existing provider facade rather than provider-specific prompt construction.
+- The active package no longer imports runtime vocabulary or prompt logic from `src/lib/promptUtils.js`; cinematic camera, lens, focal-length, and aperture maps now live in `packages/studio/src/lib/intelligence/vocabulary.js`. The legacy Electron/Vite dependency remains intentionally unchanged for backward compatibility.
 
 ### Phase 4 MuAPI Social Publishing Foundation
 

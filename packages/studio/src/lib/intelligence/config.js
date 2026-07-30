@@ -3,7 +3,7 @@ import {
   CAMERA_MAP,
   FOCAL_PERSPECTIVE,
   LENS_MAP,
-} from "../../../../../src/lib/promptUtils.js";
+} from "./vocabulary.js";
 
 export const PROVIDER_CONFIG = Object.freeze({
   muapi: Object.freeze({ id: "muapi", name: "MuAPI", enabled: true }),
@@ -65,5 +65,35 @@ export const RECIPE_LIBRARY = Object.freeze({
     promptId: "aiInfluencer",
     providerId: "muapi",
     model: "nano-banana-pro",
+  }),
+  vibeMotion: Object.freeze({
+    id: "vibe-motion",
+    promptId: "plain",
+    providerId: "muapi",
+  }),
+  audio: Object.freeze({
+    id: "audio",
+    promptId: "plain",
+    providerId: "muapi",
+  }),
+  recast: Object.freeze({
+    id: "recast",
+    promptId: "plain",
+    providerId: "muapi",
+  }),
+  lipSync: Object.freeze({
+    id: "lip-sync",
+    promptId: "plain",
+    providerId: "muapi",
+  }),
+  videoTransform: Object.freeze({
+    id: "video-transform",
+    promptId: "plain",
+    providerId: "muapi",
+  }),
+  workflow: Object.freeze({
+    id: "workflow",
+    promptId: "plain",
+    providerId: "muapi-workflow",
   }),
 });
