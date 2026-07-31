@@ -44,6 +44,7 @@ export const RECIPE_LIBRARY = Object.freeze({
     id: "image",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["image_generation"],
   }),
   marketing: Object.freeze({
     id: "marketing",
@@ -54,42 +55,50 @@ export const RECIPE_LIBRARY = Object.freeze({
     id: "video",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["video_generation"],
   }),
   imageEdit: Object.freeze({
     id: "image-edit",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["image_editing"],
   }),
   aiInfluencer: Object.freeze({
     id: "ai-influencer",
     promptId: "aiInfluencer",
     providerId: "muapi",
     model: "nano-banana-pro",
+    capabilityRequirements: ["image_generation", "reference_images", "character_consistency"],
   }),
   vibeMotion: Object.freeze({
     id: "vibe-motion",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["video_generation"],
   }),
   audio: Object.freeze({
     id: "audio",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["voice_generation"],
   }),
   recast: Object.freeze({
     id: "recast",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["video_editing"],
   }),
   lipSync: Object.freeze({
     id: "lip-sync",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["lip_sync"],
   }),
   videoTransform: Object.freeze({
     id: "video-transform",
     promptId: "plain",
     providerId: "muapi",
+    capabilityRequirements: ["video_editing"],
   }),
   workflow: Object.freeze({
     id: "workflow",

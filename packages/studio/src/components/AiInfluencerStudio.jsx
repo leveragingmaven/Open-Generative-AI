@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createAIInfluencerStudioRequest, executeAIInfluencerStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 
 const CDN = "https://cdn.muapi.ai/influencer";
 
@@ -396,10 +397,11 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
       if (onGenerate) {
         res = await onGenerate({ prompt, aspectRatio, selections: selectedOptions });
       } else {
-        res = await generateImage(apiKey, {
+        const influencerParams = {
           ...recipe,
           aspect_ratio: aspectRatio,
-        });
+        };
+        res = await executeAIInfluencerStudioRequest(createAIInfluencerStudioRequest({ apiKey, prompt, aspectRatio, params: influencerParams, references: getPromptValues().optionPrompts }), { legacyExecute: () => generateImage(apiKey, influencerParams) });
       }
       if (res?.url) {
         setCurrentResult(res.url);

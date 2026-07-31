@@ -11,6 +11,27 @@ export class MuApiProvider extends CreativeProvider {
     });
   }
 
+  execute(request = {}) {
+    const operation = request.operation || request.capability?.operation || request.recipe?.operation;
+    const apiKey = request.apiKey || request.executionMetadata?.apiKey;
+    const params = request.params || request.payload || request.inputs || {};
+    const methods = {
+      image_generation: "generateImage",
+      image_editing: "generateI2I",
+      video_generation: "generateVideo",
+      image_to_video: "generateI2V",
+      video_transform: "processV2V",
+      video_editing: "runMotionGraphicsEdit",
+      audio_generation: "generateAudio",
+      marketing_generation: "generateMarketingStudioAd",
+      recast: "processRecast",
+      lip_sync: "processLipSync",
+    };
+    const methodName = methods[operation] || operation;
+    if (!methodName || typeof this[methodName] !== "function") this.notImplemented(`execute:${operation || "unknown"}`);
+    return this[methodName](apiKey, params);
+  }
+
   generateImage(apiKey, params) {
     return muapi.generateImage(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
   }

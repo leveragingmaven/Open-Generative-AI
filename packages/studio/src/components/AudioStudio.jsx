@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateAudio, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import { audioModels, getAudioModelById } from "../models.js";
 
 // ---------------------------------------------------------------------------
@@ -637,7 +638,17 @@ export default function AudioStudio({
       };
 
       // Call generateAudio
-      const res = await generateAudio(apiKey, audioParams);
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "audio",
+        recipeId: "audio",
+        operation: "audio_generation",
+        capability: "voice_generation",
+        prompt: params.prompt || "",
+        inputs: audioParams,
+        references: Object.values(params).filter((value) => typeof value === "string" && /^https?:/.test(value)),
+        output: { modality: "audio" },
+        apiKey,
+      }), { legacyExecute: () => generateAudio(apiKey, audioParams) });
 
       if (!res?.url) {
         throw new Error("No audio URL returned by the API.");

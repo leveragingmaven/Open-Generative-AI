@@ -5,6 +5,7 @@ import { generateImage, generateI2I, uploadFile } from "../lib/providers/Provide
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createImageStudioRequest, executeImageStudioRequest } from "../lib/intelligence/ImageStudioRuntime.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -1219,7 +1220,16 @@ export default function ImageStudio({
               genParams[currentQualityField] = selectedQuality;
             }
             if (showEffectBtn && selectedEffect) genParams.name = selectedEffect;
-            return await generateI2I(apiKey, genParams);
+            return await executeImageStudioRequest(createImageStudioRequest({
+              prompt: genParams.prompt,
+              model: selectedModelId,
+              aspectRatio: selectedAr,
+              references: uploadedImageUrls,
+              swapUrl: swapImageUrl,
+              imageMode: true,
+              inputs: genParams,
+              apiKey,
+            }), { legacyExecute: () => generateI2I(apiKey, genParams) });
           } else {
             const recipe = buildRecipe("image", {
               prompt: prompt.trim(),
@@ -1234,7 +1244,16 @@ export default function ImageStudio({
             if (currentQualityField && selectedQuality) {
               genParams[currentQualityField] = selectedQuality;
             }
-            return await generateImage(apiKey, genParams);
+            return await executeImageStudioRequest(createImageStudioRequest({
+              prompt: prompt.trim(),
+              model: selectedModelId,
+              aspectRatio: selectedAr,
+              qualityField: currentQualityField,
+              quality: selectedQuality,
+              imageMode: false,
+              inputs: genParams,
+              apiKey,
+            }), { legacyExecute: () => generateImage(apiKey, genParams) });
           }
         })
       );

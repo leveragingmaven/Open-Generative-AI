@@ -42,6 +42,12 @@ export const workflowProvider = new MuApiWorkflowProvider({
 });
 export const designAgentProvider = muApiDesignAgentProvider;
 
+export const executeProvider = (request) => {
+  const provider = providerRegistry.get(request?.routing?.providerId || request?.providerId);
+  if (!provider?.execute) throw new Error(`Provider ${provider?.id || "unknown"} does not support generic execution`);
+  return provider.execute(request);
+};
+
 const active = () => providerRegistry.getActiveProvider();
 
 export const generateImage = (apiKey, params) => active().generateImage(apiKey, params);
@@ -83,6 +89,8 @@ export const runMotionGraphics = (apiKey, params) => active().runMotionGraphics(
 export const runMotionGraphicsEdit = (apiKey, params) => active().runMotionGraphicsEdit(apiKey, params);
 
 export const getNormalizedWorkflowTemplates = (apiKey) => workflowProvider.getWorkflowTemplates(apiKey);
+// Keep the provider module's direct API for WorkflowStudio; the package barrel exports
+// the authoritative intelligence validator explicitly to avoid a star-export collision.
 export const validateWorkflowDefinition = (definition) => workflowProvider.validateWorkflow(definition);
 export const executeNormalizedWorkflow = (apiKey, workflowId, inputs, context) =>
   workflowProvider.executeWorkflow(apiKey, workflowId, inputs, context);

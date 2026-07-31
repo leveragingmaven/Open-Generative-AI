@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import {
   PromptAspectRatioIcon,
   PromptAction,
@@ -593,14 +594,25 @@ export default function CinemaStudio({
     );
 
     try {
-      const res = await generateImage(apiKey, {
+      const legacyParams = {
         model: uploadedImage ? "nano-banana-pro-edit" : "nano-banana-pro",
         prompt: finalPrompt,
         aspect_ratio: settings.aspect_ratio,
         resolution: resolution.toLowerCase(),
         negative_prompt: "blurry, low quality, distortion, bad composition",
         images_list: uploadedImage ? [uploadedImage] : [],
-      });
+      };
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "cinema",
+        recipeId: "cinemaImage",
+        operation: "image_generation",
+        capability: uploadedImage ? "image_editing" : "image_generation",
+        prompt: finalPrompt,
+        inputs: legacyParams,
+        references: legacyParams.images_list,
+        output: { modality: "image", aspectRatio: settings.aspect_ratio },
+        apiKey,
+      }), { legacyExecute: () => generateImage(apiKey, legacyParams) });
 
       if (res && res.url) {
         const entry = {

@@ -1,19 +1,21 @@
-import { normalizeAssetMetadata } from "../assets/metadataManager.js";
-import { readAssetHistory, writeAssetHistory } from "../assets/historyManager.js";
-
-const KEY = "creative_library";
+import { localAssetManager } from "./AssetManager.js";
 
 export function readCreativeLibrary() {
-  return readAssetHistory(KEY).map((asset) => normalizeAssetMetadata(asset));
+  return localAssetManager.listAssets();
 }
 
 export function saveCreativeAsset(asset) {
-  const normalized = normalizeAssetMetadata({ ...asset, source: asset.source || "generated" });
-  const history = readCreativeLibrary().filter((item) => item.id !== normalized.id);
-  writeAssetHistory(KEY, [normalized, ...history].slice(0, 200));
-  return normalized;
+  return localAssetManager.saveAsset(asset);
+}
+
+export function updateCreativeAsset(assetId, changes = {}) {
+  return localAssetManager.updateAsset(assetId, changes);
+}
+
+export function cloneCreativeLibraryAsset(assetId, overrides = {}) {
+  return localAssetManager.cloneAsset(assetId, overrides);
 }
 
 export function removeCreativeAsset(assetId) {
-  writeAssetHistory(KEY, readCreativeLibrary().filter((asset) => asset.id !== assetId));
+  return localAssetManager.removeAsset(assetId);
 }

@@ -12,4 +12,8 @@ export class CreativeProvider {
   notImplemented(methodName) {
     throw new Error(`${this.name || this.id} provider does not implement ${methodName}`);
   }
+
+  execute() {
+    this.notImplemented("execute");
+  }
 }

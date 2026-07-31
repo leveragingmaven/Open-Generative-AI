@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, getUserBalance } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, AssetLibraryStudio, getUserBalance } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -184,6 +184,15 @@ const TABS = [
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
       </svg>
     )
+  },
+  {
+    id: 'asset-library',
+    label: 'Creative Asset Library',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+      </svg>
+    )
   }
 ];
 
@@ -227,7 +236,7 @@ const NAVIGATION_CATEGORIES = [
   {
     id: 'agents-automation',
     label: 'Agents & Automation',
-    tabIds: ['agents', 'workflows', 'publishing'],
+    tabIds: ['agents', 'workflows', 'publishing', 'asset-library'],
     icon: (
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="6" height="6" rx="1"/>
@@ -259,14 +268,19 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     agencyMode ? TABS.filter((tab) => enabledTabIds.has(tab.id)) : TABS
   ), [agencyMode, enabledTabIds]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
+  const isStudioHome = slug.length === 0;
+  const effectiveVisibleTabIds = useMemo(() => {
+    if (!isStudioHome || !agencyMode) return visibleTabIds;
+    return new Set([...visibleTabIds, 'asset-library']);
+  }, [agencyMode, isStudioHome, visibleTabIds]);
   const navigationCategories = useMemo(() => (
     NAVIGATION_CATEGORIES
       .map((category) => ({
         ...category,
-        tabIds: category.tabIds.filter((tabId) => visibleTabIds.has(tabId)),
+        tabIds: category.tabIds.filter((tabId) => effectiveVisibleTabIds.has(tabId)),
       }))
       .filter((category) => category.tabIds.length > 0)
-  ), [visibleTabIds]);
+  ), [effectiveVisibleTabIds]);
   const exploreAppsTab = agencyMode ? null : EXPLORE_APPS_TAB;
   const getVisibleNavigationCategory = useCallback((tabId) => (
     navigationCategories.find((category) => category.tabIds.includes(tabId))
@@ -287,9 +301,9 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   const { id: urlWorkflowId } = getWorkflowInfo();
 
-  // Initialize activeTab from URL slug/params or default to 'image'
+  // The no-slug Studio entry point is the Creative OS home; explicit slugs keep their existing tabs.
   const getInitialTab = () => {
-    let candidate = 'image';
+    let candidate = slug.length === 0 ? 'asset-library' : 'image';
     if (idFromParams || slug.includes('workflow')) candidate = 'workflows';
     else if (slug.includes('agents')) candidate = 'agents';
     else if (slug.includes('design-agent')) candidate = 'design-agent';
@@ -299,10 +313,10 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       if (firstSegment && visibleTabs.find(t => t.id === firstSegment)) candidate = firstSegment;
     }
 
-    if (visibleTabIds.has(candidate)) return candidate;
+    if (effectiveVisibleTabIds.has(candidate)) return candidate;
     return visibleTabs[0]?.id || 'image';
   };
-  
+
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialTab());
 
@@ -355,10 +369,10 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   }, [activeCategory?.id]);
 
   useEffect(() => {
-    if (!visibleTabIds.has(activeTab)) {
+    if (!effectiveVisibleTabIds.has(activeTab)) {
       setActiveTab(visibleTabs[0]?.id || 'image');
     }
-  }, [activeTab, visibleTabIds, visibleTabs]);
+  }, [activeTab, effectiveVisibleTabIds, visibleTabs]);
 
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState(false);
@@ -396,7 +410,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     const handlePopState = () => {
       const path = window.location.pathname;
       const segments = path.split('/').filter(Boolean);
-      const tabId = segments[1] || 'image';
+      const tabId = segments[1] || 'asset-library';
       if (visibleTabs.find(t => t.id === tabId)) {
         setActiveTab(tabId);
       }
@@ -945,6 +959,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         {visibleTabIds.has('publishing') && (
           <div className={activeTab === 'publishing' ? "h-full w-full" : "hidden"}>
             <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />
+          </div>
+        )}
+        {effectiveVisibleTabIds.has('asset-library') && (
+          <div className={activeTab === 'asset-library' ? "h-full w-full" : "hidden"}>
+            <AssetLibraryStudio />
           </div>
         )}
       </div>

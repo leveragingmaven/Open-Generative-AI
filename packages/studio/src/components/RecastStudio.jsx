@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { processRecast, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createRecastStudioRequest, executeRecastStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
   recastModels,
   getRecastModelById,
@@ -714,7 +715,7 @@ export default function RecastStudio({
         params.character_orientation = characterOrientation;
       }
 
-      const res = await processRecast(apiKey, params);
+      const res = await executeRecastStudioRequest(createRecastStudioRequest({ apiKey, prompt, params }), { legacyExecute: () => processRecast(apiKey, params) });
 
       if (!res?.url) throw new Error("No video URL returned by API");
 

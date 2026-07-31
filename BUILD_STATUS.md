@@ -6,6 +6,18 @@ Phase 4 - MuAPI Social Publishing and Scheduler Foundation
 
 Status: Completed
 
+### Creative OS Studio Entry Point Fix
+
+- Component tree: `/studio` -> `app/studio/[[...slug]]/page.js` -> `StandaloneShell` -> `getInitialTab()` -> `activeTab` -> mounted studio component.
+- Root cause: `StandaloneShell.getInitialTab()` initialized the no-slug route to `image`, so `/studio` rendered `ImageStudio`; `AssetLibraryStudio` was already mounted only for the `asset-library` tab.
+- Files changed: `components/StandaloneShell.js` and this document.
+- Fix: the no-slug Studio entry point now selects the existing `asset-library` tab, which renders the existing Creative OS landing page in `AssetLibraryStudio`. Popstate handling uses the same home fallback.
+- Final routing behavior: `/studio` opens Creative OS Home; explicit tab slugs such as `/studio/image`, `/studio/marketing`, and `/studio/workflows` retain their existing studio components. Unknown slugs retain the existing safe fallback to the first visible tab. Agency Mode selection remains unchanged.
+- Validation: `npm run build:studio`, repository tests, Creative Intelligence tests, and local `/studio` route smoke testing completed for this fix.
+- Remaining navigation issue: none identified for the entry-point change; existing shell navigation and browser history behavior remain in place.
+
+Architecture documentation library established under `docs/architecture/`; `Creative_OS_Architecture_v1.md` remains the authoritative master overview.
+
 Goal: add a MuAPI-required social publishing foundation with normalized drafts, platform capabilities, server-side route boundary, local publishing history, and optional MavenSync status reporting.
 
 Latest pass: inspected the repo for existing social scheduler code, confirmed none is implemented, and added a safe MuAPI publishing provider foundation without live social publishing side effects.
@@ -204,6 +216,189 @@ Detailed audit: `docs/ASSET_ARCHITECTURE.md`
 - Files changed in the completion audit: `packages/studio/src/components/AudioStudio.jsx`, `LipSyncStudio.jsx`, `RecastStudio.jsx`, `VibeMotionStudio.jsx`, `VideoStudio.jsx`, `WorkflowStudio.jsx`, `packages/studio/src/lib/intelligence/config.js`, and this document. The studio component changes are the preceding focused migration set retained in the worktree; no additional component behavior was changed by the audit itself.
 - Architecture summary: 11 active package studio surfaces now call `buildRecipe()` (`Cinema`, `Image`, `Marketing`, `Video`, `Draw/Edit`, `AI Influencer`, `Vibe Motion`, `Audio`, `Recast`, `Lip Sync`, and `Workflow`). Legacy prompt files remaining are `src/lib/promptUtils.js`, `src/components/ImageStudio.js`, `VideoStudio.js`, `CinemaStudio.js`, `LipSyncStudio.js`, and `src/lib/muapi.js`, all belonging to the separate Electron/Vite surface. Provider expansion is ready at the active studio boundary because studios depend on recipes and the existing provider facade rather than provider-specific prompt construction.
 - The active package no longer imports runtime vocabulary or prompt logic from `src/lib/promptUtils.js`; cinematic camera, lens, focal-length, and aperture maps now live in `packages/studio/src/lib/intelligence/vocabulary.js`. The legacy Electron/Vite dependency remains intentionally unchanged for backward compatibility.
+
+### Creative Asset Library Foundation
+
+- Files changed: `CreativeAsset.js`, `AssetCollection.js`, `AssetTags.js`, `CreativeLibrary.js`, `intelligence/index.js`, `CreativeAsset.test.js`, and this document.
+- `CreativeAsset` now provides canonical core, generation, creative settings, input, output, organization, metadata, and versioning fields.
+- Asset helpers support create, clone, update, serialize, and deserialize operations.
+- `CreativeLibrary` remains localStorage-backed and now stores canonical assets while preserving existing read/save/remove exports; update and clone operations are also available.
+- Collections and normalized tags are available as local, UI-independent helpers.
+- Cloudflare R2, provider logic, and studio UI were not modified.
+- Validation: `npm run build:studio`, `node --test tests/*.test.js`, and `node --test packages/studio/src/lib/intelligence/PromptBuilder.test.js` passed; Creative Asset unit tests also pass.
+- Known limitation: existing studio histories are not automatically migrated into canonical assets; this foundation adds the model and storage API without changing existing UI flows.
+
+### Platform 1.0 Front-End Integration & Validation
+
+- Asset Library is mounted in the main Studio navigation and exported through the studio package.
+- Canonical assets and legacy studio histories are surfaced through `AssetLibraryService` without history migration.
+- Search, type/provider/recipe/model/date/favorite/archive filtering, sorting, favorite updates, details metadata, and parent lineage display are wired.
+- Loading, empty, and error states are present in the Asset Library workspace.
+- Current limitation: legacy-only records remain read-only for repository-backed favorite/archive updates; this preserves the no-migration constraint.
+- Validation: studio build, 44 existing tests, and 48 intelligence tests passed.
+
+### Asset Manager Abstraction
+
+- Added `AssetManager.js`, `StorageAdapter.js`, and `LocalStorageAdapter.js` under `packages/studio/src/lib/intelligence`.
+- `StorageAdapter` defines `saveAsset`, `updateAsset`, `removeAsset`, `getAsset`, `listAssets`, and `cloneAsset`.
+- `LocalStorageAdapter` is the active implementation and owns localStorage serialization/access.
+- `AssetManager` owns canonical asset normalization and delegates persistence to the adapter.
+- `CreativeLibrary` now uses the default local `AssetManager` while preserving its existing public APIs.
+- Future R2, S3, or filesystem adapters can implement `StorageAdapter` without changing studios or `CreativeLibrary`.
+- `StorageRegistry` now registers the local adapter under `local`, resolves named adapters, and supplies the default adapter used by `AssetManager`.
+- Validation: `npm run build:studio`, `node --test tests/*.test.js`, and intelligence asset/prompt tests passed.
+
+### Phase 2 Campaign Foundation
+
+- Added the provider-agnostic `Campaign` domain model with lifecycle, planning, recipe, organization, approval, metadata, and version fields.
+- Added `CampaignAsset` as a lightweight campaign-to-creative-asset relationship without duplicating asset data.
+- Added `CampaignStatus` constants for draft, planning, generating, review, approved, queued, completed, and archived states.
+- Added `CampaignManager` CRUD, clone, status, and asset relationship helpers.
+- Campaign persistence reuses `StorageAdapter` and `StorageRegistry`; `LocalStorageAdapter` stores campaigns under `creative_campaigns` while preserving asset storage behavior.
+- Foundation is ready for a future Publishing Queue and Campaign Builder; scheduling, publishing, social APIs, n8n, GHL, R2, and UI are intentionally out of scope.
+- Validation: `npm run build:studio`, `node --test tests/*.test.js`, and all intelligence tests passed.
+
+### Phase 2 Campaign Builder Foundation
+
+- Added reusable `CampaignTemplate` definitions for Product Launch, Weekly Content, Authority Building, Course Promotion, Lead Magnet, and Holiday Campaign planning.
+- Added provider-agnostic `CampaignPlan` and structured asset requests describing roles, purposes, priorities, references, and metadata.
+- Added `CampaignBuilder` helpers for plan creation, request generation, template application, workload estimation, plan updates, and cloning.
+- Added `CampaignPlanner` orchestration helpers for building plans, estimating workload, organizing roles, and assigning recipes.
+- Planning produces request objects only; it does not generate assets or call providers.
+- Foundation is ready for Creative Intelligence generation integration, Campaign Builder UI, and future Publishing Queue work.
+- Validation: `npm run build:studio`, `node --test tests/*.test.js`, and all intelligence tests passed.
+
+### Phase 2 Creative Execution Orchestration
+
+- Added `CreativeJob`, `CreativeJobStatus`, `CreativeExecutionPlan`, and `CreativeOrchestrator`.
+- Creative Orchestrator converts Campaign Plans into provider-neutral execution jobs, tracks lifecycle state, preserves priority and dependencies, and returns execution summaries.
+- Job helpers support pending, queued, running, completed, failed, retrying, and cancelled states.
+- Orchestration does not generate assets, call providers, alter MuAPI, or change storage. It prepares jobs for future Provider Registry execution.
+- Foundation is ready for Provider execution integration.
+- Validation: `npm run build:studio`, `node --test tests/*.test.js`, and all intelligence tests passed.
+
+### Phase 2 Creative Memory Foundation
+
+- Added extensible `CreativeMemory` records supporting brand, voice, audience, offer, product, visual, character, campaign, platform, writing, and approved-claims memory types.
+- Added scoped memory, confidence, approval, version, supersession, effective dates, provenance, and metadata fields.
+- Added `CreativeMemoryEngine` for create, retrieve, list, update, archive, selective projection, and cache invalidation.
+- Added `MemoryRegistry` for extensible memory types, `MemoryStorageAdapter` for local persistence, and `MemoryCache` as an injectable cache seam.
+- Creative Memory remains provider-independent and does not modify studios or providers.
+- Foundation is ready for Knowledge Engine projection, durable memory storage, approval workflows, and production cache integration.
+- Validation: studio build, 44 existing tests, and 14 intelligence tests passed.
+
+### Phase 2 Capability Router Foundation
+
+- Added extensible capability definitions and requirement contracts.
+- Added provider-neutral deployment capability metadata registry without modifying the existing Provider Registry.
+- Added eligibility filtering for required capabilities, availability, policy allowlists, and input/output constraints.
+- Added deterministic scoring, preference weighting, ranked candidates, fallback deployments, and routing explanations.
+- Capability Router is selection-only and does not invoke providers, modify studios, or alter MuAPI behavior.
+- Foundation is ready for live provider metadata, health/capacity refresh, pricing/evidence ingestion, and Creative Job integration.
+- Validation: studio build, 44 existing tests, and 16 intelligence tests passed.
+
+### Phase 2 Creative Intelligence Integration Foundation
+
+- Added provider-neutral `CreativeRequest` and `CreativePlan` planning models.
+- Added `RecipeResolver` for recipe selection/compilation without duplicating prompt or provider logic.
+- Added `CreativeIntelligenceEngine` to coordinate selective Creative Memory projections, recipe resolution, capability requirements, optional routing, warnings, and plan validation.
+- The engine is planning-only and does not invoke providers, create jobs, generate assets, or modify studios.
+- Foundation is ready for Creative Job handoff and API boundary integration in the next milestone.
+- Validation: studio build, 44 existing tests, and 18 intelligence tests passed.
+
+### Phase 3 Creative Execution Engine Foundation
+
+- Added `ExecutionContext`, `ExecutionAttempt`, execution lifecycle constants, injectable persistence, idempotency, retry, cancellation, and event interfaces.
+- Added `CreativeExecutionEngine` to validate Creative Plans, create Creative Jobs, create future provider attempts, transition job state, record results/errors, and expose execution status.
+- Provider execution, asset generation/materialization, queues, workers, storage changes, MuAPI, and studio migration remain intentionally out of scope.
+- Foundation is ready for the next provider execution milestone.
+- Validation: studio build, 44 existing tests, and 20 intelligence tests passed.
+
+### Phase 3 Provider Execution Integration
+
+- Added the provider execution port and registry adapter boundary without modifying existing provider implementations or MuAPI.
+- Added normalized execution results for success, warnings, timing, provider/deployment metadata, response references, and output references.
+- Added platform-level execution error normalization with retryability classification.
+- Creative Execution Engine can now invoke an injected Provider Registry execution contract and update Creative Job/Attempt state; asset materialization remains deferred.
+- Validation: studio build, 44 existing tests, and 22 intelligence tests passed.
+
+### Phase 4 Creative Asset Engine & Lineage Foundation
+
+- Added Asset Factory, metadata, reference, relationship, lineage, version, repository, and index abstractions.
+- Successful normalized Execution Results can now be materialized into canonical Creative Assets through an injected repository.
+- Materialized assets retain execution context, job, plan, recipe, provider, deployment, memory provenance, timestamps, output references, and version lineage without duplicating full execution data.
+- Existing Asset Manager/storage adapters and studio histories remain unchanged; object storage, thumbnails, signed delivery, and durable indexing remain future work.
+- Validation: studio build, 44 existing tests, and 27 intelligence tests passed.
+
+### Phase 4 Durable Asset Storage & Output Materialization
+
+- Added provider-independent `AssetStorage` contract with in-memory and injected S3-compatible implementations.
+- Added `AssetMaterializer` for remote output validation, bounded download, MIME normalization, checksums, deterministic storage keys, delivery references, and per-output partial failure handling.
+- Successful outputs can be linked to canonical Creative Assets with storage metadata while preserving provider provenance and lineage.
+- No R2 credentials, SDK, browser storage secrets, studio upload behavior, provider logic, or publishing behavior were changed.
+- Current R2 readiness: adapter-compatible but not production-activated because the repository has no configured server-side R2 runtime.
+- Validation: studio build, 44 existing tests, and 30 intelligence tests passed.
+
+### Phase 5 Image Studio Runtime Migration Foundation
+
+- Added `ImageStudioRuntime.js` as an isolated Creative OS compatibility bridge for Image Studio request normalization and runtime composition.
+- The bridge preserves image/text-to-image and image-edit request fields, references, aspect ratio, model, quality settings, and compatibility metadata without changing Image Studio UI or current provider calls.
+- Existing Image Studio generation, history, polling, uploads, and callbacks remain unchanged; the bridge is available for controlled runtime adoption and does not alter other studios.
+- Runtime limitation: built-in image recipes require production capability/deployment registrations before a live component cutover; current studio execution remains safely backward-compatible.
+- Validation: studio build, 44 existing tests, and 33 intelligence tests passed.
+
+### Phase 5 Image Studio Production Runtime Cutover
+
+- Image Studio T2I and I2I branches now submit through `ImageStudioRuntime` when `CREATIVE_OS_IMAGE_STUDIO=true`.
+- The runtime path performs Creative Request normalization, Creative Intelligence planning, Capability Router resolution, Creative Job execution, normalized result handling, and optional asset materialization.
+- The legacy provider path remains an automatic compatibility fallback when the flag is disabled or runtime execution fails before a usable result.
+- Existing Image Studio UI, uploads, history, callbacks, response shape, provider methods, and other studios remain unchanged.
+- Remaining direct execution paths are in all non-Image studios and the Image Studio legacy fallback path.
+- Validation: studio build, 44 existing tests, and 34 intelligence tests passed.
+
+### Phase 5 Marketing Studio Runtime Migration
+
+- Added `MarketingStudioRuntime.js` as an isolated Creative OS compatibility bridge.
+- Marketing Studio now supports feature-flagged Creative OS planning, routing, execution, normalized results, and optional asset materialization.
+- `CREATIVE_OS_MARKETING_STUDIO=false` preserves legacy execution; runtime failures before a usable result automatically fall back to the existing Marketing Studio provider path.
+- Existing marketing prompts, payload fields, media references, history, callbacks, UI, and other studios remain unchanged.
+- Remaining legacy execution paths include all non-migrated studios and the Marketing Studio fallback path.
+- Validation: studio build, 44 existing tests, and 38 intelligence tests passed.
+
+### Phase 5 Specialized Studio Runtime Migration
+
+- Added independent runtime adapters and feature flags for Recast, Vibe Motion, and AI Influencer Studio.
+- Added flags: `CREATIVE_OS_RECAST_STUDIO`, `CREATIVE_OS_VIBE_MOTION_STUDIO`, and `CREATIVE_OS_AI_INFLUENCER_STUDIO`.
+- Recast uses video editing capability requirements; Vibe Motion distinguishes video generation/edit operations; AI Influencer preserves image generation and identity/reference inputs.
+- All three studios retain legacy execution as the default and automatic fallback.
+- Workflow Studio remains intentionally unmigrated for separate multi-step runtime work.
+- Validation: studio build, 44 existing tests, and 42 intelligence tests passed.
+
+### Phase 6 Workflow Execution Engine Foundation
+
+- Added provider-independent workflow nodes, definitions, DAG validation, shared workflow context, and Workflow Execution Engine.
+- Initial node types cover image generation/editing, marketing, video generation/editing, audio, lip sync, asset references, decisions, logical delays, and end nodes.
+- Engine supports sequential dependencies, conditional branching, shared variables, asset passing, failure propagation, retry hooks, cancellation, partial completion, and injected async-compatible node execution.
+- Workflow Studio UI and existing workflow/provider execution paths remain unchanged; this is the future orchestration seam.
+- Validation: studio build, 44 existing tests, and 45 intelligence tests passed.
+
+### Phase 5 Media Studio Runtime Migration
+
+- Added feature-flagged Creative OS runtime bridges for Cinema, Video, Lip Sync, and Audio Studio.
+- Added flags: `CREATIVE_OS_CINEMA_STUDIO`, `CREATIVE_OS_VIDEO_STUDIO`, `CREATIVE_OS_LIPSYNC_STUDIO`, and `CREATIVE_OS_AUDIO_STUDIO`.
+- Each studio preserves its legacy provider path as automatic fallback, including existing payloads, polling, history, callbacks, uploads, and response shapes.
+- Runtime capability requirements now cover video generation, video editing, lip sync, voice/audio generation, and image generation/editing recipes.
+- Remaining legacy execution paths are the disabled/fallback paths and non-migrated studios; no additional studio migration is included in this milestone.
+- Validation: studio build, 44 existing tests, and 40 intelligence tests passed.
+
+### Phase 5 Production Capability Registry
+
+- Added declarative production capability and deployment catalog with extensible operations, feature states, health, limits, supports, quality, speed, cost, licensing, and version metadata.
+- Registered MuAPI-backed image generation and image editing deployments for Capability Router resolution.
+- Image and image-edit recipes now declare capability requirements without changing studio behavior.
+- Capability Router eligibility now respects deployment feature state and health.
+- No studios or provider implementations were modified; the catalog enables a future runtime cutover.
+- Validation: studio build, 44 existing tests, and 35 intelligence tests passed.
 
 ### Phase 4 MuAPI Social Publishing Foundation
 

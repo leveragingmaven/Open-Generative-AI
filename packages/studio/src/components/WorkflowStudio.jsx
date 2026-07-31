@@ -12,11 +12,12 @@ import {
   deleteWorkflow,
   getWorkflowInputs,
   executeNormalizedWorkflow,
-  validateWorkflowDefinition,
   getAllNodeSchemas,
   getWorkflowData,
 } from "../lib/providers/ProviderRegistry.js";
+import { validateWorkflowDefinition } from "../lib/intelligence/WorkflowDefinition.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { executeWorkflowStudioRuntime } from "../lib/intelligence/WorkflowStudioRuntime.js";
 import dynamic from "next/dynamic";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { notify } from "../lib/notifications/notify.js";
@@ -431,7 +432,17 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         else inputs[key] = value;
       });
 
-      const data = await executeNormalizedWorkflow(apiKey, selectedWorkflow.id, inputs, integration);
+      const data = await executeWorkflowStudioRuntime({
+        workflow: selectedWorkflow,
+        inputs,
+        nodeExecutor: {
+          execute: async ({ node }) => {
+            const result = await executeNormalizedWorkflow(apiKey, selectedWorkflow.id, { [node.id]: node.inputs }, integration);
+            return { variables: result, assets: result.assets || [], asset: result.assets?.[0] || null };
+          },
+        },
+        legacyExecute: (runtimeError) => executeNormalizedWorkflow(apiKey, selectedWorkflow.id, inputs, integration),
+      });
       await Promise.allSettled(
         (data.assets || []).map((asset) =>
           integration.registerAsset?.({

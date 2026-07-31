@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { uploadFile, generateMarketingStudioAd } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMarketingStudioRequest, executeMarketingStudioRequest } from "../lib/intelligence/MarketingStudioRuntime.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -363,14 +364,23 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
     setIsGenerating(true);
     try {
       const recipe = buildRecipe("marketing", { prompt: prompt.trim() });
-      const result = await generateMarketingStudioAd(apiKey, {
+      const legacyParams = {
         ...recipe,
         aspect_ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,
         images_list: [productImage, avatarImage, ...additionalImages].filter(Boolean),
         video_files: params.videoUrl ? [params.videoUrl] : []
-      });
+      };
+      const result = await executeMarketingStudioRequest(createMarketingStudioRequest({
+        prompt: prompt.trim(),
+        ratio: params.ratio,
+        duration: params.duration,
+        resolution: params.res,
+        images: legacyParams.images_list,
+        videoFiles: legacyParams.video_files,
+        apiKey,
+      }), { legacyExecute: () => generateMarketingStudioAd(apiKey, legacyParams) });
 
       if (result?.url) {
         const entry = {

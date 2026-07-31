@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2vModels,
@@ -1102,7 +1103,7 @@ export default function VideoStudio({
         if (currentModel?.hasPrompt && trimmedPrompt) {
           v2vParams.prompt = buildRecipe("videoTransform", { prompt: trimmedPrompt }).prompt;
         }
-        res = await processV2V(apiKey, v2vParams);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "videoTransform", operation: "video_transform", capability: "video_editing", prompt: trimmedPrompt, inputs: v2vParams, references: [uploadedVideoUrl, uploadedImageUrl].filter(Boolean), output: { modality: "video" }, apiKey }), { legacyExecute: () => processV2V(apiKey, v2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1147,7 +1148,7 @@ export default function VideoStudio({
         if (selectedMode) i2vParams.mode = selectedMode;
         if (showEffect && selectedEffect) i2vParams.name = selectedEffect;
 
-        res = await generateI2V(apiKey, i2vParams);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "image_to_video", capability: "video_generation", prompt: trimmedPrompt, inputs: i2vParams, references: uploadedImageUrls, output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateI2V(apiKey, i2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1203,7 +1204,7 @@ export default function VideoStudio({
         if (selectedQuality) params.quality = selectedQuality;
         if (selectedMode) params.mode = selectedMode;
 
-        res = await generateVideo(apiKey, params);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "video_generation", capability: "video_generation", prompt: trimmedPrompt, inputs: params, references: [uploadedVideoUrl, ...uploadedImageUrls].filter(Boolean), output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateVideo(apiKey, params) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();

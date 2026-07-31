@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { runMotionGraphics, runMotionGraphicsEdit } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createVibeMotionStudioRequest, executeVibeMotionStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -129,21 +130,23 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
       let result;
       if (editMode) {
         const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
-        result = await runMotionGraphicsEdit(apiKey, {
+        const editParams = {
           request_id: editSourceId,
           edit_prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },
-        });
+        };
+        result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), editMode: true, params: editParams, references: editSourceId ? [editSourceId] : [] }), { legacyExecute: () => runMotionGraphicsEdit(apiKey, editParams) });
       } else {
         const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
-        result = await runMotionGraphics(apiKey, {
+        const generateParams = {
           prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },
-        });
+        };
+        result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), params: generateParams }), { legacyExecute: () => runMotionGraphics(apiKey, generateParams) });
       }
 
       const videoUrl = result?.output?.video || result?.url || result?.outputs?.[0];

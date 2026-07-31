@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { processLipSync, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import {
   lipsyncModels,
   imageLipSyncModels,
@@ -645,7 +646,17 @@ export default function LipSyncStudio({
       if (showResolution) lipsyncParams.resolution = selectedResolution;
       if (selectedModel?.hasSeed) lipsyncParams.seed = -1;
 
-      const res = await processLipSync(apiKey, lipsyncParams);
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "lipsync",
+        recipeId: "lipSync",
+        operation: "lip_sync",
+        capability: "lip_sync",
+        prompt,
+        inputs: lipsyncParams,
+        references: [imageUrl, videoUrl, audioUrl].filter(Boolean),
+        output: { modality: "video" },
+        apiKey,
+      }), { legacyExecute: () => processLipSync(apiKey, lipsyncParams) });
 
       if (!res?.url) throw new Error("No video URL returned by API");
 

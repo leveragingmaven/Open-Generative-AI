@@ -16,7 +16,55 @@ export { default as AppsStudio } from './components/AppsStudio';
 export { default as McpCliStudio } from './components/McpCliStudio';
 export { default as AiInfluencerStudio } from './components/AiInfluencerStudio';
 export { default as PublishingStudio } from './components/PublishingStudio';
-export * from './lib/providers/ProviderRegistry';
+export { default as AssetLibraryStudio } from './components/AssetLibraryStudio';
+export {
+  providerRegistry,
+  workflowProvider,
+  designAgentProvider,
+  executeProvider,
+  generateImage,
+  generateI2I,
+  generateVideo,
+  generateI2V,
+  generateMarketingStudioAd,
+  processV2V,
+  processRecast,
+  processLipSync,
+  generateAudio,
+  uploadFile,
+  getUserBalance,
+  getTemplateWorkflows,
+  getUserWorkflows,
+  getPublishedWorkflows,
+  getTemplateAgents,
+  getUserAgents,
+  getPublishedAgents,
+  getUserConversations,
+  createWorkflow,
+  updateWorkflowName,
+  deleteWorkflow,
+  getWorkflowInputs,
+  executeWorkflow,
+  getAllNodeSchemas,
+  getWorkflowData,
+  getNodeSchemas,
+  runSingleNode,
+  deleteNodeRun,
+  getNodeStatus,
+  handleProxyRequest,
+  handleServerSideProxy,
+  calculateDynamicCost,
+  registerAppInterest,
+  getAppInterests,
+  runClipping,
+  runMotionGraphics,
+  runMotionGraphicsEdit,
+  getNormalizedWorkflowTemplates,
+  executeNormalizedWorkflow,
+  createDesignAgentSession,
+  getDesignAgentSessionAssets,
+  getDesignAgentJobs,
+} from './lib/providers/ProviderRegistry';
 export * from './lib/providers/providerTypes';
 export * from './lib/assets/assetManager';
 export * from './lib/jobs/jobManager';
