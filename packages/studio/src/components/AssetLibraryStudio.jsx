@@ -1,12 +1,107 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AssetLibraryService } from "../lib/intelligence/AssetLibraryService.js";
 import { localAssetManager } from "../lib/intelligence/AssetManager.js";
 import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
 
 function assetUrl(asset) { return asset.generatedFiles?.[0] || asset.url || null; }
 function assetType(asset) { return asset.metadata?.assetType || asset.kind || "creative"; }
+
+const STUDIO_ROUTES = {
+  image: "/studio/image",
+  "image-edit": "/studio/image",
+  "cinema-image": "/studio/cinema",
+  video: "/studio/video",
+  "video-transform": "/studio/video",
+  marketing: "/studio/marketing",
+  "ai-influencer": "/studio/ai-influencer",
+  "vibe-motion": "/studio/vibe-motion",
+  audio: "/studio/audio",
+  recast: "/studio/body-swap",
+  "lip-sync": "/studio/lipsync",
+  workflow: "/studio/workflows",
+};
+
+const STUDIO_LABELS = {
+  image: "Image session",
+  "image-edit": "Image edit",
+  "cinema-image": "Cinema image",
+  video: "Video project",
+  "video-transform": "Video edit",
+  marketing: "Marketing project",
+  "ai-influencer": "AI Influencer session",
+  "vibe-motion": "Motion project",
+  audio: "Audio session",
+  recast: "Body swap",
+  "lip-sync": "Lip sync",
+  workflow: "Workflow",
+};
+
+function assetStudioKey(asset) {
+  const historyKey = asset.metadata?.legacyHistoryKey || "";
+  if (historyKey.includes("video")) return "video";
+  if (historyKey.includes("cinema")) return "cinema-image";
+  if (historyKey.includes("marketing")) return "marketing";
+  if (historyKey.includes("audio")) return "audio";
+  if (historyKey.includes("lipsync")) return "lip-sync";
+  if (historyKey.includes("recast")) return "recast";
+  if (historyKey.includes("vibe_motion")) return "vibe-motion";
+  if (historyKey.includes("image")) return "image";
+  const recipe = asset.recipe || asset.recipeId || asset.metadata?.recipe;
+  if (STUDIO_ROUTES[recipe]) return recipe;
+  const studio = asset.metadata?.studio;
+  if (STUDIO_ROUTES[studio]) return studio;
+  const kind = assetType(asset);
+  if (kind.includes("image")) return "image";
+  if (kind.includes("video")) return "video";
+  if (kind === "audio") return "audio";
+  if (kind === "marketing") return "marketing";
+  if (kind === "workflow") return "workflow";
+  return "image";
+}
+
+function studioRouteForAsset(asset) {
+  return STUDIO_ROUTES[assetStudioKey(asset)] || "/studio/image";
+}
+
+function assetTimestamp(asset) {
+  const raw = asset.updatedAt || asset.createdAt || asset.timestamp || asset.ts;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Date.parse(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function relativeTime(ms) {
+  if (!ms) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function heroStudioRoute(prompt) {
+  const text = (prompt || "").toLowerCase();
+  if (/image|photo|logo|illustration|watercolor/.test(text)) return "/studio/image";
+  if (/video|animation|reel|commercial|short/.test(text)) return "/studio/video";
+  if (/marketing|blog|email|caption|social/.test(text)) return "/studio/marketing";
+  if (/workflow|automation/.test(text)) return "/studio/workflows";
+  if (/influencer|avatar|creator/.test(text)) return "/studio/ai-influencer";
+  return "/studio/image";
+}
 
 function Icon({ type }) {
   const paths = {
@@ -27,6 +122,7 @@ function Icon({ type }) {
 }
 
 export default function AssetLibraryStudio() {
+  const router = useRouter();
   const service = useMemo(() => {
     try {
       return new AssetLibraryService({
@@ -60,71 +156,77 @@ export default function AssetLibraryStudio() {
     reload();
   };
 
+  const handleCreate = () => {
+    router.push(heroStudioRoute(prompt));
+  };
+
   const suggestedPrompts = ["Launch a social campaign", "Turn this into a short video", "Build a visual identity"];
   const quickCreate = [
-    ["Image", "Explore a visual direction", "image"],
-    ["Video", "Shape an idea into motion", "video"],
-    ["Marketing", "Create campaigns that convert", "marketing"],
-    ["Web Experience", "Make the story interactive", "web"],
-    ["AI Influencer", "Build a recognizable presence", "influencer"],
-    ["Workflow", "Connect the creative steps", "workflow"],
+    ["Image", "Explore a visual direction", "image", "/studio/image"],
+    ["Video", "Shape an idea into motion", "video", "/studio/video"],
+    ["Marketing", "Create campaigns that convert", "marketing", "/studio/marketing"],
+    ["Web Experience", "Make the story interactive", "web", "/studio/apps"],
+    ["AI Influencer", "Build a recognizable presence", "influencer", "/studio/ai-influencer"],
+    ["Workflow", "Connect the creative steps", "workflow", "/studio/workflows"],
   ];
   const workspaces = [
-    ["Campaigns", "Plan and manage creative initiatives", "campaigns"],
-    ["Creative Library", "Every asset you have created", "library"],
-    ["Publishing", "Schedule and distribute your work", "publishing"],
-    ["Automation", "Run creative processes on repeat", "automation"],
-    ["Knowledge Center", "Your brand, voice, and references", "knowledge"],
-    ["Creative Memory", "The system that remembers you", "memory"],
+    ["Campaigns", "Plan and manage creative initiatives", "campaigns", null],
+    ["Creative Library", "Every asset you have created", "library", "/studio/asset-library"],
+    ["Publishing", "Schedule and distribute your work", "publishing", "/studio/publishing"],
+    ["Automation", "Run creative processes on repeat", "automation", null],
+    ["Knowledge Center", "Your brand, voice, and references", "knowledge", null],
+    ["Creative Memory", "The system that remembers you", "memory", null],
   ];
-  const continueWorking = assets.slice(0, 4);
+  const continueWorking = useMemo(() => [...assets].sort((a, b) => (assetTimestamp(b) || 0) - (assetTimestamp(a) || 0)).slice(0, 4), [assets]);
   const recentAssets = assets.slice(0, 6);
 
   return (
     <div className="h-full w-full bg-[#121212] text-white overflow-y-auto">
-      <main className="min-h-full w-full p-5 md:p-8">
-        <section className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between gap-4 mb-8">
+      <main className="min-h-full w-full p-6 md:p-10">
+        <section className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between gap-4 mb-10">
             <div>
               <p className="text-[10px] uppercase tracking-[0.28em] text-[#D4A858]/80">Creative Operating System</p>
-              <h1 className="mt-2 text-2xl md:text-3xl font-semibold tracking-tight">Make something meaningful.</h1>
+              <h1 className="mt-2 text-3xl md:text-4xl font-semibold tracking-tight">Make something <span className="text-[#E82070]">meaningful.</span></h1>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-[#333333] bg-[#1E1E1E] p-5 md:p-8 shadow-xl shadow-black/20">
-            <p className="text-sm text-[#D4A858]/80">Your next creative move</p>
-            <h2 className="mt-2 text-3xl md:text-5xl font-semibold tracking-tight">What are we building today?</h2>
-            <div className="mt-6 flex flex-col md:flex-row gap-3">
-              <input aria-label="Describe what to build" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Tell us what you want to make..." className="min-w-0 flex-1 rounded-xl border border-[#333333] bg-[#121212] px-4 py-3 text-sm outline-none placeholder:text-[#808080] focus:border-[#D4A858]" />
-              <button type="button" className="rounded-xl bg-[#D4A858] px-5 py-3 text-sm font-semibold text-[#121212] transition hover:bg-[#e0b96b]">Create</button>
+          <div className="relative overflow-hidden rounded-3xl border border-[#333333] bg-[#1B1B1B] p-5 md:p-8 shadow-[0_0_60px_rgba(212,168,88,0.10),0_20px_60px_rgba(0,0,0,0.4)]">
+            <div className="pointer-events-none absolute -top-24 -right-20 w-72 h-72 rounded-full bg-[#D4A858]/10 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-28 -left-20 w-72 h-72 rounded-full bg-[#E82070]/10 blur-3xl" />
+            <p className="relative text-sm text-[#D4A858]/80">Your next creative move</p>
+            <h2 className="relative mt-2 text-3xl md:text-5xl font-semibold tracking-tight">What are we building <span className="text-[#E82070]">today?</span></h2>
+            <div className="relative mt-6 flex flex-col md:flex-row gap-3">
+              <input aria-label="Describe what to build" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Tell us what you want to make..." className="min-w-0 flex-1 rounded-xl border border-[#333333] bg-[#121212] px-4 py-3 text-sm outline-none placeholder:text-[#808080] transition focus:border-[#D4A858] focus:ring-2 focus:ring-[#D4A858]/20" />
+              <button type="button" onClick={handleCreate} className="rounded-xl bg-[#E82070] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#f03a8b] hover:shadow-[0_0_24px_rgba(232,32,112,0.45)]">Create</button>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="relative mt-4 flex flex-wrap gap-2">
               {suggestedPrompts.map((suggestion) => <button key={suggestion} type="button" onClick={() => setPrompt(suggestion)} className="rounded-full border border-[#333333] bg-[#232323] px-3 py-1.5 text-xs text-[#B5B5B5] transition hover:border-[#D4A858] hover:text-[#D4A858]">{suggestion}</button>)}
             </div>
           </div>
 
-          <section className="mt-10">
-            <div className="mb-4"><p className="text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/60">Quick Create</p><h2 className="mt-1 text-lg font-semibold">Start with an outcome</h2></div>
+          <section className="mt-12">
+            <div className="mb-5"><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Quick Create</p><h2 className="mt-1.5 text-xl font-semibold">Start with an outcome</h2></div>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {quickCreate.map(([title, detail, icon]) => <button key={title} type="button" className="group rounded-xl border border-[#333333] bg-[#1E1E1E] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323]"><span className="inline-flex text-[#D4A858]"><Icon type={icon} /></span><h3 className="mt-3 text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{detail}</p><span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#D4A858]">Launch <span aria-hidden="true">→</span></span></button>)}
+              {quickCreate.map(([title, detail, icon, route]) => <button key={title} type="button" onClick={() => router.push(route)} className="group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(212,168,88,0.12)]"><span className="inline-flex text-[#D4A858]"><Icon type={icon} /></span><h3 className="mt-3 text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{detail}</p><span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#D4A858]">Launch <span aria-hidden="true">→</span></span></button>)}
             </div>
           </section>
 
-          <section className="mt-10">
-            <div className="mb-4"><p className="text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/60">Creative Workspaces</p><h2 className="mt-1 text-lg font-semibold">Your operating destinations</h2></div>
+          <section className="mt-12">
+            <div className="mb-5"><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Creative Workspaces</p><h2 className="mt-1.5 text-xl font-semibold">Your operating destinations</h2></div>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {workspaces.map(([title, detail, icon]) => <button key={title} type="button" className="group rounded-xl border border-[#333333] bg-[#1E1E1E] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323]"><span className="inline-flex text-[#B5B5B5] group-hover:text-[#D4A858]"><Icon type={icon} /></span><h3 className="mt-3 text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{detail}</p></button>)}
+              {workspaces.map(([title, detail, icon, route]) => route ? <button key={title} type="button" onClick={() => router.push(route)} className="group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(212,168,88,0.12)]"><span className="inline-flex text-[#B5B5B5] group-hover:text-[#D4A858]"><Icon type={icon} /></span><h3 className="mt-3 text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{detail}</p><span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#D4A858]">Open <span aria-hidden="true">→</span></span></button> : <div key={title} className="rounded-2xl border border-[#2A2A2A] bg-[#1A1A1A] p-5 text-left"><span className="inline-flex text-[#808080]"><Icon type={icon} /></span><h3 className="mt-3 text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{detail}</p><span className="mt-4 inline-block rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-wider text-white/40">Coming Soon</span></div>)}
             </div>
           </section>
 
-          <section className="mt-10">
-            <div className="mb-4"><p className="text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/60">Continue Working</p><h2 className="mt-1 text-lg font-semibold">Pick up where you left off</h2></div>
-            {continueWorking.length ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{continueWorking.map((asset) => <button key={asset.id} type="button" onClick={() => setSelectedId(asset.id)} className="rounded-xl border border-[#333333] bg-[#1E1E1E] p-3 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858]"><div className="truncate text-xs font-semibold">{asset.title}</div><div className="mt-2 text-[10px] text-[#808080]">{assetType(asset)} · Continue</div></button>)}</div> : <div className="rounded-xl border border-dashed border-[#333333] bg-[#1E1E1E] px-5 py-7 text-center"><p className="text-sm text-[#B5B5B5]">Your creative queue is waiting.</p><p className="mt-1 text-xs text-[#808080]">Create something above and it will appear here.</p></div>}
+          <section className="mt-12">
+            <div className="mb-5"><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Continue Working</p><h2 className="mt-1.5 text-xl font-semibold">Pick up where you left off</h2></div>
+            {continueWorking.length ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{continueWorking.map((asset) => { const key = assetStudioKey(asset); const label = STUDIO_LABELS[key] || "Creative Work"; const title = asset.title || asset.prompt || label; const relative = relativeTime(assetTimestamp(asset)); return <button key={asset.id} type="button" onClick={() => router.push(studioRouteForAsset(asset))} className="rounded-2xl border border-[#333333] bg-[#1B1B1B] p-3 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323]"><div className="truncate text-xs font-semibold">{title}</div><div className="mt-2 text-[10px] text-[#808080]">{label}{asset.model ? ` · ${asset.model}` : ""}</div>{relative ? <div className="mt-1 text-[10px] text-[#D4A858]/70">{relative}</div> : null}</button>; })}</div> : <div className="rounded-2xl border border-dashed border-[#333333] bg-[#1B1B1B] px-5 py-7 text-center"><p className="text-sm text-[#B5B5B5]">Your creative queue is waiting.</p><p className="mt-1 text-xs text-[#808080]">Create something above and it will appear here.</p></div>}
           </section>
 
-          <section className="mt-10 pb-4">
-            <div className="mb-4 flex items-end justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/60">Recent Assets</p><h2 className="mt-1 text-lg font-semibold">From your Creative Library</h2></div><span className="text-xs text-white/35">{assets.length} available</span></div>
-            {loading ? <div className="h-40 flex items-center justify-center text-[#D4A858] text-sm">Loading creative assets…</div> : loadError ? <div className="h-40 flex items-center justify-center text-[#E82070] text-sm">{loadError}</div> : recentAssets.length === 0 ? <div className="h-40 flex items-center justify-center text-[#808080] text-sm">No creative assets yet.</div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">{recentAssets.map((asset) => { const url = assetUrl(asset); return <button key={asset.id} type="button" onClick={() => setSelectedId(asset.id)} className={`text-left rounded-xl overflow-hidden border ${selected?.id === asset.id ? "border-[#D4A858]" : "border-[#333333]"} bg-[#1E1E1E] hover:border-[#D4A858] hover:bg-[#232323]`}><div className="aspect-square bg-[#121212] flex items-center justify-center">{url && assetType(asset).includes("image") ? <img src={url} alt={asset.title} className="w-full h-full object-cover" /> : <span className="text-xs uppercase tracking-widest text-[#808080]">{assetType(asset)}</span>}</div><div className="p-2"><div className="truncate text-xs font-semibold">{asset.title}</div><div className="text-[10px] text-[#808080] mt-0.5">{asset.provider || "Legacy"}</div></div></button>; })}</div>}
+          <section className="mt-12 pb-6">
+            <div className="mb-5 flex items-end justify-between gap-3"><div><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Recent Assets</p><h2 className="mt-1.5 text-xl font-semibold">From your Creative Library</h2></div><span className="text-xs text-white/35">{assets.length} available</span></div>
+            {loading ? <div className="h-40 flex items-center justify-center text-[#D4A858] text-sm">Loading creative assets…</div> : loadError ? <div className="h-40 flex items-center justify-center text-[#E82070] text-sm">{loadError}</div> : recentAssets.length === 0 ? <div className="h-40 flex items-center justify-center text-[#808080] text-sm">No creative assets yet.</div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">{recentAssets.map((asset) => { const url = assetUrl(asset); return <button key={asset.id} type="button" onClick={() => setSelectedId(asset.id)} className={`text-left rounded-2xl overflow-hidden border ${selected?.id === asset.id ? "border-[#D4A858]" : "border-[#333333]"} bg-[#1B1B1B] hover:border-[#D4A858] hover:bg-[#232323]`}><div className="aspect-square bg-[#121212] flex items-center justify-center">{url && assetType(asset).includes("image") ? <img src={url} alt={asset.title} className="w-full h-full object-cover" /> : <span className="text-xs uppercase tracking-widest text-[#808080]">{assetType(asset)}</span>}</div><div className="p-2"><div className="truncate text-xs font-semibold">{asset.title}</div><div className="text-[10px] text-[#808080] mt-0.5">{asset.provider || "Legacy"}</div></div></button>; })}</div>}
           </section>
         </section>
       </main>
