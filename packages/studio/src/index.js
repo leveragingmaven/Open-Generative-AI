@@ -18,6 +18,15 @@ export { default as AiInfluencerStudio } from './components/AiInfluencerStudio';
 export { default as PublishingStudio } from './components/PublishingStudio';
 export { TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from './studioNavigation.js';
 export { default as AssetLibraryStudio } from './components/AssetLibraryStudio';
+export { default as KnowledgeCenterStudio } from './components/KnowledgeCenterStudio';
+export { default as CreativeMemoryStudio } from './components/CreativeMemoryStudio';
+export { default as CommandBar } from './components/CommandBar';
+export { default as ComingSoonStudio } from './components/ComingSoonStudio';
+export { default as CampaignWorkspace } from './components/CampaignWorkspace';
+export { default as CampaignChip } from './components/CampaignChip';
+export { CampaignStore, CAMPAIGN_STATUSES } from './lib/campaigns/CampaignStore.js';
+export { CampaignProvider, useActiveCampaign } from './lib/campaigns/CampaignContext.js';
+export { COMMAND_SECTIONS, searchCommandDestinations } from './commandBarRegistry.js';
 export {
   providerRegistry,
   workflowProvider,

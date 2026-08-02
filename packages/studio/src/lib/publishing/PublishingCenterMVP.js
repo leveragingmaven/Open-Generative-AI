@@ -1,6 +1,7 @@
 import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { readPublishingDrafts, readPublishingHistory, savePublishingDraft, savePublishingJob } from "./publishingHistory.js";
 import { readAssetHistory } from "../assets/historyManager.js";
+import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
 
 export class PublishingCenterMVP {
   constructor(options = {}) {
@@ -19,11 +20,14 @@ export class PublishingCenterMVP {
    * Create a new publishing draft from an existing asset
    */
   createDraftFromAsset(asset, options = {}) {
+    const campaignInfo = assetCampaignInfo(asset);
     const draft = this.publishingProvider.createDraft({
       assetIds: [asset.id],
       assets: [asset],
       caption: asset.description || asset.title || "",
       title: asset.title || "",
+      campaignId: options.campaignId || campaignInfo?.campaignId || null,
+      campaignName: options.campaignName || campaignInfo?.campaignName || null,
       platforms: [],
       scheduledAt: null,
     }, { storage: this.storage });

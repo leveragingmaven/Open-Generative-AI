@@ -6,6 +6,8 @@ import { downloadAsset } from "../lib/assets/assetManager.js";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createImageStudioRequest, executeImageStudioRequest } from "../lib/intelligence/ImageStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -858,7 +860,10 @@ export default function ImageStudio({
   const [maxImages, setMaxImages] = useState(1);
 
   // ── Prompt / upload state ───────────────────────────────────────────────
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [uploadedImageUrls, setUploadedImageUrls] = useState([]);
   const [swapImageUrl, setSwapImageUrl] = useState(null);
   const [uploadHistory, setUploadHistory] = useState([]); // persisted reference images history
@@ -879,6 +884,7 @@ export default function ImageStudio({
   // Use prop history if provided, otherwise local
   const history = historyItems ?? localHistory;
   const mavenSync = useMavenSyncIntegration();
+  const { activeCampaign } = useActiveCampaign();
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
@@ -1260,14 +1266,14 @@ export default function ImageStudio({
 
       results.forEach((res) => {
         if (res && res.url) {
-          const entry = {
+          const entry = withCampaignMetadata({
             id: res.id || Math.random().toString(36).substring(7),
             url: res.url,
             prompt: prompt.trim(),
             model: selectedModelId,
             aspect_ratio: selectedAr,
             timestamp: new Date().toISOString(),
-          };
+          }, activeCampaign, "image");
           addToHistory(entry);
           onGenerationComplete?.({
             url: res.url,

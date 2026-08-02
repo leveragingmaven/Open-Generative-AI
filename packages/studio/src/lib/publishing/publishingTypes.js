@@ -48,6 +48,7 @@ export function normalizePublishingDraft(input = {}) {
     tenantId: input.tenantId || null,
     projectId: input.projectId || null,
     campaignId: input.campaignId || null,
+    campaignName: input.campaignName || null,
     contentPlanId: input.contentPlanId || null,
     assetIds,
     assets: assets.map((asset) => ({

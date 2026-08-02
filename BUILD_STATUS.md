@@ -680,3 +680,15 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - `feat: add MavenSync Hub integration foundation`
 - `feat: add MuAPI social publishing foundation`
 - `feat: harden design and workflow studio integrations`
+
+## Milestone: Creative OS Phase 2 Complete (2026-08-01)
+
+- See `docs/milestones/MILESTONE_2026-08-01_Creative_OS_Phase_2_Complete.md` for the full summary.
+- Creative OS completed its transition from a collection of creative tools into a campaign-centered operating system.
+- Added a shared Campaign Context, the Campaign Dashboard/Workspace, and the campaign-stamping helper (`campaignAssetMetadata.js`); every generated asset now records `campaignId`, `campaignName`, and `createdFromStudio`.
+- The Creative Library now operates as the active campaign's asset set with a campaign-scoped filter and Clear Filter action.
+- Publishing drafts preserve campaign ownership via `PublishingCenterMVP.createDraftFromAsset` and `publishingTypes.js`.
+- Added two real workspaces (removed "coming soon"): **Knowledge Center** (`KnowledgeCenterStudio`) and **Creative Memory** (`CreativeMemoryStudio`), both read-only over the existing `creative_memory` and campaign stores with no invented data or API calls.
+- Added `knowledge-center` and `memory` tabs/navigation + live Command Bar entries; Automation and further intelligence orchestration remain on the roadmap.
+- Reliability: hardened workflow execution (branching, async, retries, cancellation, friendly errors) and improved marketing thumbnail rendering; performance and runtime validated.
+- Validation: `npm run build:studio` clean; **59/59** tests pass; headless CDP validation of campaign ownership, campaign filtering, publishing drafts, and both new workspaces (zero network calls) passed. No application-code or test files were changed for this documentation milestone.

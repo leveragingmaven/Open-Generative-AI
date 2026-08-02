@@ -5,6 +5,8 @@ import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/provi
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2vModels,
@@ -464,7 +466,10 @@ export default function VideoStudio({
   const [openDropdown, setOpenDropdown] = useState(null); // 'model'|'ar'|'duration'|'resolution'|'quality'|'mode'|null
 
   // ── prompt ──
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [promptDisabled, setPromptDisabled] = useState(false);
 
   // ── refs ──
@@ -479,6 +484,7 @@ export default function VideoStudio({
 
   // ── derived data ──
   const history = historyItems ?? localHistory;
+  const { activeCampaign } = useActiveCampaign();
 
   const getCurrentModels = useCallback(() => {
     if (v2vMode) return v2vModels;
@@ -1109,13 +1115,13 @@ export default function VideoStudio({
         const genId = res.id || Date.now().toString();
         setLastGenerationId(null);
         setLastGenerationModel(null);
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
           model: selectedModel,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)
@@ -1159,7 +1165,7 @@ export default function VideoStudio({
           setLastGenerationId(null);
           setLastGenerationModel(null);
         }
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: trimmedPrompt,
@@ -1167,7 +1173,7 @@ export default function VideoStudio({
           aspect_ratio: selectedAr,
           duration: selectedDuration,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)
@@ -1218,7 +1224,7 @@ export default function VideoStudio({
           setLastGenerationId(null);
           setLastGenerationModel(null);
         }
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: trimmedPrompt,
@@ -1226,7 +1232,7 @@ export default function VideoStudio({
           aspect_ratio: selectedAr,
           duration: selectedDuration,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)

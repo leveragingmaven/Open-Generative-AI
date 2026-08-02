@@ -5,6 +5,9 @@ import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createAIInfluencerStudioRequest, executeAIInfluencerStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import CampaignChip from "./CampaignChip.jsx";
 
 const CDN = "https://cdn.muapi.ai/influencer";
 
@@ -347,7 +350,10 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
   });
 
   const [aspectRatio, setAspectRatio] = useState("3:4");
-  const [customPrompt, setCustomPrompt] = useState("");
+  const [customPrompt, setCustomPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [isGeneratingInternal, setIsGeneratingInternal] = useState(false);
   const [currentResult, setCurrentResult] = useState(null);   // latest generated image
   const [history, setHistory] = useState([]);                  // all generated images
@@ -355,6 +361,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
   const [errorMsg, setErrorMsg] = useState("");
 
   const isGenerating = externalIsGenerating || isGeneratingInternal;
+  const { activeCampaign } = useActiveCampaign();
 
   // ── Build recipe values from selections ────────────────────────────────────
   const getPromptValues = useCallback(() => {
@@ -405,7 +412,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
       }
       if (res?.url) {
         setCurrentResult(res.url);
-        setHistory((prev) => [{ url: res.url, ts: Date.now() }, ...prev]);
+        setHistory((prev) => [withCampaignMetadata({ url: res.url, ts: Date.now() }, activeCampaign, "ai-influencer"), ...prev]);
         setSelectedHistoryIdx(0);
       }
     } catch (err) {
@@ -669,6 +676,9 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
 
         {/* Custom prompt bar at bottom */}
         <div className="px-6 pb-4 shrink-0">
+          <div className="mb-2 flex items-center justify-between">
+            <CampaignChip />
+          </div>
           <input
             type="text"
             value={customPrompt}

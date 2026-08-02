@@ -5,6 +5,8 @@ import { processLipSync, uploadFile } from "../lib/providers/ProviderRegistry.js
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import {
   lipsyncModels,
   imageLipSyncModels,
@@ -368,6 +370,7 @@ export default function LipSyncStudio({
   // If historyItems prop is provided, use it; otherwise use internal state.
   const [internalHistory, setInternalHistory] = useState([]);
   const history = historyItems ?? internalHistory;
+  const { activeCampaign } = useActiveCampaign();
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   // ── Dropdown state ──────────────────────────────────────────────────────
@@ -661,13 +664,13 @@ export default function LipSyncStudio({
       if (!res?.url) throw new Error("No video URL returned by API");
 
       const genId = res.id || Date.now().toString();
-      const entry = {
+      const entry = withCampaignMetadata({
         id: genId,
         url: res.url,
         prompt,
         model: selectedModelId,
         timestamp: new Date().toISOString(),
-      };
+      }, activeCampaign, "lipsync");
 
       if (!historyItems) addToInternalHistory(entry);
 

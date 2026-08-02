@@ -7,6 +7,7 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
+import CampaignChip from "../CampaignChip.jsx";
 
 const DEFAULT_POSITION_CLASS =
   "absolute bottom-4 w-full max-w-[95%] lg:max-w-4xl z-30 animate-fade-in-up";
@@ -300,6 +301,7 @@ export function PromptComposer({
   return (
     <div className={joinClasses(positionClassName, className)} style={style}>
       <div className={joinClasses(DEFAULT_PANEL_CLASS, panelClassName)}>
+        <CampaignChip className="self-start" />
         {children}
       </div>
     </div>

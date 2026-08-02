@@ -10,14 +10,26 @@ function legacyAssets(storage = globalThis?.localStorage) {
   if (!storage) return [];
   return LEGACY_HISTORY_KEYS.flatMap((key) => {
     try {
-      const values = JSON.parse(storage.getItem(key) || "[]");
-      return Array.isArray(values) ? values.map((item) => createCreativeAsset({
-        ...item,
-        id: item.id || `legacy-${key}-${item.url}`,
-        title: item.title || item.prompt || "Legacy Creative Asset",
-        generatedFiles: item.generatedFiles || (item.url ? [item.url] : []),
-        metadata: { ...(item.metadata || {}), legacyHistoryKey: key },
-      })) : [];
+      const raw = storage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      const values = Array.isArray(parsed)
+        ? parsed
+        : parsed?.localHistory || parsed?.history || parsed?.internalHistory || (Array.isArray(parsed.items) ? parsed.items : []) || [];
+      return values.map((item) => {
+        const normalized = createCreativeAsset({
+          ...item,
+          id: item.id || `legacy-${key}-${item.url}`,
+          title: item.title || item.prompt || "Legacy Creative Asset",
+          generatedFiles: item.generatedFiles || (item.url ? [item.url] : []),
+        });
+        if (item.campaignId != null) normalized.campaignId = item.campaignId;
+        if (item.campaign != null) normalized.campaign = item.campaign;
+        if (item.metadata && typeof item.metadata === "object") {
+          normalized.metadata = { ...item.metadata, legacyHistoryKey: key };
+        }
+        return normalized;
+      });
     } catch { return []; }
   });
 }
@@ -34,7 +46,7 @@ export class AssetLibraryService {
   }
 
   list(options = {}) {
-    const canonical = this.repository?.list?.() || [];
+    const canonical = this.repository?.list?.() || this.repository?.listAssets?.() || [];
     const legacy = options.includeLegacy === false ? [] : legacyAssets(this.storage);
     const seen = new Set();
     return [...canonical, ...legacy].filter((asset) => {

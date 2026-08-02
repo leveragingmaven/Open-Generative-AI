@@ -5,6 +5,8 @@ import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateAudio, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { audioModels, getAudioModelById } from "../models.js";
 
 // ---------------------------------------------------------------------------
@@ -506,6 +508,7 @@ export default function AudioStudio({
   // ── History state ────────────────────────────────────────────────────
   const [internalHistory, setInternalHistory] = useState([]);
   const history = historyItems ?? internalHistory;
+  const { activeCampaign } = useActiveCampaign();
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   const selectedModel = getAudioModelById(selectedModelId);
@@ -655,14 +658,14 @@ export default function AudioStudio({
       }
 
       const title = params.title || params.prompt || `Generated ${selectedModel.name}`;
-      const entry = {
+      const entry = withCampaignMetadata({
         id: res.id || Date.now().toString(),
         url: res.url,
         title,
         prompt: params.prompt || "",
         model: selectedModelId,
         timestamp: new Date().toISOString(),
-      };
+      }, activeCampaign, "audio");
 
       if (!historyItems) addToInternalHistory(entry);
 

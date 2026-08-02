@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, AssetLibraryStudio, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -31,6 +31,13 @@ function MenuIcon({ type }) {
     chevron: <path d="M6 9l6 6 6-6" />,
   };
   return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
+}
+
+// Renders the Active Campaign name in the Creative OS header when one is set.
+function CampaignHeaderLabel() {
+  const { activeCampaign } = useActiveCampaign();
+  if (!activeCampaign) return null;
+  return <p className="truncate text-[11px] font-medium text-[#F0D9A8] mt-0.5">{activeCampaign.name}</p>;
 }
 
 export default function StandaloneShell({ agencyMode = false, allowedTabIds = null }) {
@@ -80,6 +87,14 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   }, [slug, idFromParams, tabFromParams]);
 
   const { id: urlWorkflowId } = getWorkflowInfo();
+
+  const isComingSoonRoute = !idFromParams && slug[0] === 'coming-soon';
+  const [comingSoonName, setComingSoonName] = useState('This destination');
+  useEffect(() => {
+    if (!isComingSoonRoute) return;
+    const name = new URLSearchParams(window.location.search).get('name');
+    if (name) setComingSoonName(name);
+  }, [isComingSoonRoute]);
 
   // The no-slug Studio entry point is the Creative OS home; explicit slugs keep their existing tabs.
   const getInitialTab = () => {
@@ -217,6 +232,21 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   const handleNavigationItemClick = (event, tabId) => {
     if (handleTabClick(event, tabId)) {
       setIsMobileOpen(false);
+    }
+  };
+
+  // Command Bar navigation: reuse the in-shell tab pattern for tab destinations,
+  // full route navigation otherwise (e.g. Coming Soon placeholder pages).
+  const handleCommandNavigate = (route) => {
+    if (route === '/studio') {
+      handleTabChange('asset-library');
+      return;
+    }
+    const tabId = route.replace(/^\/studio\//, '');
+    if (visibleTabs.find((tab) => tab.id === tabId)) {
+      handleTabChange(tabId);
+    } else {
+      router.push(route);
     }
   };
 
@@ -450,6 +480,21 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           <AssetLibraryStudio />
         </div>
       )}
+      {visibleTabIds.has('campaigns') && (
+        <div className={activeTab === 'campaigns' ? "h-full w-full" : "hidden"}>
+          <CampaignWorkspace onNavigate={handleTabChange} />
+        </div>
+      )}
+      {visibleTabIds.has('knowledge-center') && (
+        <div className={activeTab === 'knowledge-center' ? "h-full w-full" : "hidden"}>
+          <KnowledgeCenterStudio />
+        </div>
+      )}
+      {visibleTabIds.has('memory') && (
+        <div className={activeTab === 'memory' ? "h-full w-full" : "hidden"}>
+          <CreativeMemoryStudio />
+        </div>
+      )}
     </>
   );
 
@@ -600,12 +645,12 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   ];
 
   const workspaceItems = [
-    { key: 'campaigns', label: 'Campaigns', icon: 'campaign', route: null },
+    { key: 'campaigns', label: 'Campaigns', icon: 'campaign', tabId: 'campaigns' },
     { key: 'publishing', label: 'Publishing', icon: null, tabId: 'publishing' },
     { key: 'creative-library', label: 'Creative Library', icon: null, tabId: 'asset-library' },
     { key: 'automation', label: 'Automation', icon: 'automation', route: null },
-    { key: 'knowledge', label: 'Knowledge Center', icon: 'knowledge', route: null },
-    { key: 'memory', label: 'Creative Memory', icon: 'memory', route: null },
+    { key: 'knowledge', label: 'Knowledge Center', icon: 'knowledge', tabId: 'knowledge-center' },
+    { key: 'memory', label: 'Creative Memory', icon: 'memory', tabId: 'memory' },
   ];
 
   const menuTab = (id) => visibleTabs.find((item) => item.id === id);
@@ -854,19 +899,13 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
               </button>
               <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
-                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{tabById(activeTab)?.label || 'Home'}</p>
+                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isComingSoonRoute ? comingSoonName : (tabById(activeTab)?.label || 'Home')}</p>
+                <CampaignHeaderLabel />
               </div>
             </div>
 
             <div className="hidden md:flex items-center gap-2 flex-1 justify-center min-w-0 px-6">
-              <div className="flex items-center gap-2.5 rounded-xl bg-[#1B1B1B] border border-[#2A2A2A] px-4 h-10 w-full max-w-xl text-white/40 transition-all focus-within:border-[#D4A858]/60 focus-within:ring-2 focus-within:ring-[#D4A858]/20">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="M21 21l-4.35-4.35" />
-                </svg>
-                <input readOnly placeholder="Search" className="bg-transparent text-[13px] outline-none w-full placeholder:text-white/40" />
-                <span className="hidden lg:inline-flex text-[10px] px-1.5 py-0.5 rounded border border-[#D4A858]/25 text-[#D4A858]/70">⌘K</span>
-              </div>
+              <CommandBar onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} />
             </div>
 
             <div className="flex-shrink-0 flex items-center gap-3">
@@ -906,7 +945,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
         {/* Center content: the mounted studio */}
         <div className="flex-1 min-h-0 relative overflow-hidden bg-[#121212]">
-          {studioContent}
+          {isComingSoonRoute ? <ComingSoonStudio name={comingSoonName} /> : studioContent}
         </div>
       </div>
 
@@ -1336,5 +1375,5 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   );
 
   // /studio/* routes render inside the Creative OS shell; /workflow/:id routes keep the legacy shell.
-  return idFromParams ? legacyShell : creativeShell;
+  return <CampaignProvider>{idFromParams ? legacyShell : creativeShell}</CampaignProvider>;
 }

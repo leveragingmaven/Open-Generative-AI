@@ -1,45 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { PublishingCenterMVP } from '../lib/publishing/PublishingCenterMVP.js';
-import { PublishingCenterUI } from '../lib/publishing/PublishingCenterUI.js';
+import { initPublishingCenter } from '../lib/publishing/PublishingCenterUI.js';
 
 export default function PublishingStudio({ apiKey, droppedFiles, onFilesHandled, onGenerationComplete, onGenerationError }) {
-  const [container, setContainer] = useState(null);
+  // React-owned mount point for the imperative PublishingCenterUI widget.
+  const containerRef = useRef(null);
   const [publishingCenter, setPublishingCenter] = useState(null);
   const [publishingCenterUI, setPublishingCenterUI] = useState(null);
 
   useEffect(() => {
+    const containerDiv = containerRef.current;
+    if (!containerDiv) return;
+
     // Initialize the publishing center with localStorage
     const storage = localStorage;
     const center = new PublishingCenterMVP({ storage });
     setPublishingCenter(center);
 
-    // Create a container div for the UI
-    const containerDiv = document.createElement('div');
-    containerDiv.className = 'h-full w-full';
-    setContainer(containerDiv);
-    
     // Initialize the UI - note: we don't set window variable anymore
-    const ui = PublishingCenterUI.initPublishingCenter(containerDiv, { storage });
+    const ui = initPublishingCenter(containerDiv, { storage });
     setPublishingCenterUI(ui);
-    
+
     return () => {
-      if (containerDiv.parentNode) {
-        containerDiv.parentNode.removeChild(containerDiv);
-      }
+      // Clear the imperative content React does not manage
+      containerDiv.innerHTML = '';
     };
   }, []);
-
-  useEffect(() => {
-    if (container && publishingCenterUI) {
-      // Render the UI
-      container.innerHTML = '';
-      container.appendChild(document.createElement('div')).className = 'h-full w-full';
-      publishingCenterUI.container = container.firstChild;
-      publishingCenterUI.render();
-    }
-  }, [container, publishingCenterUI]);
 
   // Enhanced error logging to capture full error details
   const enhancedOnGenerationError = (error) => {
@@ -72,8 +60,6 @@ export default function PublishingStudio({ apiKey, droppedFiles, onFilesHandled,
   // in the UI components should be improved separately
   
   return (
-    <div className="h-full w-full">
-      {container}
-    </div>
+    <div ref={containerRef} className="h-full w-full" />
   );
 }

@@ -18,9 +18,12 @@ import {
 import { validateWorkflowDefinition } from "../lib/intelligence/WorkflowDefinition.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { executeWorkflowStudioRuntime } from "../lib/intelligence/WorkflowStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import dynamic from "next/dynamic";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { notify } from "../lib/notifications/notify.js";
+import CampaignChip from "./CampaignChip.jsx";
 
 const WorkflowUI = dynamic(() => import("./WorkflowUI"), {
   ssr: false,
@@ -36,18 +39,43 @@ const WorkflowUI = dynamic(() => import("./WorkflowUI"), {
   ),
 });
 
+// Single-flight guard for the template list. WorkflowStudio's mount effect can
+// run more than once (e.g. hydration/remount in the app shell), which used to
+// issue duplicate get-template-workflows requests and re-render the grid.
+// Reusing the in-flight promise keeps it to a single request on the critical
+// path while still refetching on later tab switches.
+let inFlightTemplates = null;
+function loadWorkflowTemplates(apiKey) {
+  if (!inFlightTemplates) {
+    inFlightTemplates = (async () => {
+      try {
+        return await getNormalizedWorkflowTemplates(apiKey);
+      } catch (normalizationError) {
+        console.warn("Normalized workflow templates unavailable; using raw templates.", normalizationError);
+        return getTemplateWorkflows(apiKey);
+      }
+    })().finally(() => {
+      inFlightTemplates = null;
+    });
+  }
+  return inFlightTemplates;
+}
+
 function WorkflowCard({ workflow, onClick, activeTab, onRename, onDelete }) {
   const [showOptions, setShowOptions] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <div
       onClick={() => onClick(workflow)}
       className="group relative aspect-[3/4] rounded-lg overflow-hidden cursor-pointer border border-white/5 bg-[#0a0a0a] transition-all hover:border-[#22d3ee]/30 hover:scale-[1.02] shadow-2xl"
     >
-      {workflow.thumbnail ? (
+      {workflow.thumbnail && !imgFailed ? (
         <img
           src={workflow.thumbnail}
           alt={workflow.name}
+          loading="lazy"
+          onError={() => setImgFailed(true)}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
         />
       ) : (
@@ -135,6 +163,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
   const params = useParams();
   const router = useRouter();
   const integration = useMavenSyncIntegration();
+  const { activeCampaign } = useActiveCampaign();
   const slug = params?.slug || [];
   const idFromParams = params?.id;     // exists on /workflow/[id]/[tab] route
   const tabFromParams = params?.tab;   // exists on /workflow/[id]/[tab] route
@@ -220,6 +249,19 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
               (Array.isArray(prop.examples) ? prop.examples[0] : prop.examples) ||
               "";
           });
+
+          let handoffPrompt = "";
+          if (typeof window !== "undefined") {
+            try { handoffPrompt = sessionStorage.getItem("hero_prompt") || ""; sessionStorage.removeItem("hero_prompt"); } catch (e) { /* ignore */ }
+            if (!handoffPrompt) handoffPrompt = new URLSearchParams(window.location.search).get("prompt") || "";
+          }
+          if (handoffPrompt) {
+            const firstTextKey = Object.keys(schema.properties || {}).find((key) => {
+              const prop = schema.properties[key];
+              return prop && (prop.type === "string" || !prop.type);
+            });
+            if (firstTextKey) initial[firstTextKey] = handoffPrompt;
+          }
           setFormData(initial);
         } else {
           console.warn("Input schema not available for this workflow:", results[0].reason);
@@ -390,12 +432,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         setLoading(true);
         let data = [];
         if (activeMainTab === "templates") {
-          try {
-            data = await getNormalizedWorkflowTemplates(apiKey);
-          } catch (normalizationError) {
-            console.warn("Normalized workflow templates unavailable; using raw templates.", normalizationError);
-            data = await getTemplateWorkflows(apiKey);
-          }
+          data = await loadWorkflowTemplates(apiKey);
         } else if (activeMainTab === "my-workflows") {
           data = await getUserWorkflows(apiKey);
         } else if (activeMainTab === "published") {
@@ -443,8 +480,11 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         },
         legacyExecute: (runtimeError) => executeNormalizedWorkflow(apiKey, selectedWorkflow.id, inputs, integration),
       });
+      const campaignTagged = (data.assets || []).map((asset) =>
+        withCampaignMetadata(asset, activeCampaign, "workflow"),
+      );
       await Promise.allSettled(
-        (data.assets || []).map((asset) =>
+        campaignTagged.map((asset) =>
           integration.registerAsset?.({
             ...asset,
             metadata: {
@@ -455,12 +495,20 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
           }),
         ),
       );
-      setResult(data);
+      setResult({ ...data, assets: campaignTagged });
       notify.success("Workflow completed.");
     } catch (err) {
       console.error("Execution failed:", err);
-      notify.error("Workflow execution failed.", { error: err });
-      setError(err.message || "Execution failed");
+      // MuAPI returns a 403 with this body when a template workflow is executed
+      // before being duplicated into the user's account. Surface it as a friendly
+      // Creative OS notification instead of the raw exception.
+      if (/duplicate this workflow to use it/i.test(String(err?.message || err || ""))) {
+        notify.warning("This workflow must be duplicated before it can be executed.");
+        setError("This workflow must be duplicated before it can be executed.");
+      } else {
+        notify.error("Workflow execution failed.", { error: err });
+        setError(err.message || "Execution failed");
+      }
     } finally {
       setIsExecuting(false);
     }
@@ -891,25 +939,28 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
                 Create and manage your asynchronous AI processing pipelines
               </p>
             </div>
-            <button
-              onClick={() => handleCreateWorkflow()}
-              className="px-6 py-3 bg-[#22d3ee] text-black text-xs font-black uppercase tracking-widest rounded-lg hover:bg-white transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(34, 211, 238,0.3)] flex items-center gap-2"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="flex items-end gap-3">
+              <CampaignChip />
+              <button
+                onClick={() => handleCreateWorkflow()}
+                className="px-6 py-3 bg-[#22d3ee] text-black text-xs font-black uppercase tracking-widest rounded-lg hover:bg-white transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(34, 211, 238,0.3)] flex items-center gap-2"
               >
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              Create Workflow
-            </button>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Create Workflow
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 border-b border-white/5">

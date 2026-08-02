@@ -5,9 +5,18 @@ import { useRouter } from "next/navigation";
 import { AssetLibraryService } from "../lib/intelligence/AssetLibraryService.js";
 import { localAssetManager } from "../lib/intelligence/AssetManager.js";
 import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 
 function assetUrl(asset) { return asset.generatedFiles?.[0] || asset.url || null; }
 function assetType(asset) { return asset.metadata?.assetType || asset.kind || "creative"; }
+
+function assetCampaignId(asset) {
+  const value = asset.campaignId || asset.campaign || asset.metadata?.campaign || asset.metadata?.campaignId;
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return value.id || value._id || null;
+  return String(value);
+}
 
 const STUDIO_ROUTES = {
   image: "/studio/image",
@@ -123,6 +132,7 @@ function Icon({ type }) {
 
 export default function AssetLibraryStudio() {
   const router = useRouter();
+  const { activeCampaign, clearActiveCampaign } = useActiveCampaign();
   const service = useMemo(() => {
     try {
       return new AssetLibraryService({
@@ -150,6 +160,15 @@ export default function AssetLibraryStudio() {
   useEffect(() => { reload(); }, [query, sort]);
   const selected = useMemo(() => assets.find((asset) => asset.id === selectedId) || null, [assets, selectedId]);
 
+  // When a campaign is active, the Creative Library operates as the campaign's
+  // asset set: only assets associated with that campaign (via existing metadata)
+  // are shown. With no active campaign, everything renders as before.
+  const scopedAssets = useMemo(() => {
+    if (!activeCampaign) return assets;
+    const campaignId = String(activeCampaign.id);
+    return assets.filter((asset) => assetCampaignId(asset) === campaignId);
+  }, [assets, activeCampaign]);
+
   const toggleFavorite = () => {
     if (!selected) return;
     service.setFavorite(selected.id, !selected.favorite);
@@ -157,7 +176,16 @@ export default function AssetLibraryStudio() {
   };
 
   const handleCreate = () => {
-    router.push(heroStudioRoute(prompt));
+    const target = heroStudioRoute(prompt);
+    const trimmed = (prompt || "").trim();
+    const params = new URLSearchParams();
+    if (trimmed) params.set("prompt", trimmed);
+    if (activeCampaign) params.set("campaign", activeCampaign.id);
+    const query = params.toString();
+    if (trimmed && target.includes("/studio/workflows")) {
+      try { sessionStorage.setItem("hero_prompt", trimmed); } catch (e) { /* ignore */ }
+    }
+    router.push(query ? `${target}?${query}` : target);
   };
 
   const suggestedPrompts = ["Launch a social campaign", "Turn this into a short video", "Build a visual identity"];
@@ -174,11 +202,11 @@ export default function AssetLibraryStudio() {
     ["Creative Library", "Every asset you have created", "library", "/studio/asset-library"],
     ["Publishing", "Schedule and distribute your work", "publishing", "/studio/publishing"],
     ["Automation", "Run creative processes on repeat", "automation", null],
-    ["Knowledge Center", "Your brand, voice, and references", "knowledge", null],
-    ["Creative Memory", "The system that remembers you", "memory", null],
+    ["Knowledge Center", "Your brand, voice, and references", "knowledge", "/studio/knowledge-center"],
+    ["Creative Memory", "The system that remembers you", "memory", "/studio/memory"],
   ];
-  const continueWorking = useMemo(() => [...assets].sort((a, b) => (assetTimestamp(b) || 0) - (assetTimestamp(a) || 0)).slice(0, 4), [assets]);
-  const recentAssets = assets.slice(0, 6);
+  const continueWorking = useMemo(() => [...scopedAssets].sort((a, b) => (assetTimestamp(b) || 0) - (assetTimestamp(a) || 0)).slice(0, 4), [scopedAssets]);
+  const recentAssets = scopedAssets.slice(0, 6);
 
   return (
     <div className="h-full w-full bg-[#121212] text-white overflow-y-auto">
@@ -190,6 +218,23 @@ export default function AssetLibraryStudio() {
               <h1 className="mt-2 text-3xl md:text-4xl font-semibold tracking-tight">Make something <span className="text-[#E82070]">meaningful.</span></h1>
             </div>
           </div>
+
+          {activeCampaign && (
+            <div className="mb-10 flex flex-wrap items-center gap-3 rounded-2xl border border-[#D4A858]/25 bg-[#D4A858]/[0.06] px-4 py-3">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-[#D4A858]/70">Viewing</span>
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#D4A858]/40 bg-[#D4A858]/[0.12] px-3 py-1 text-xs font-semibold text-[#FFE7C0]">
+                <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#D4A858]" />
+                <span className="truncate">{activeCampaign.name}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => clearActiveCampaign()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#333333] bg-[#1B1B1B] px-3 py-1 text-[11px] font-semibold text-[#B5B5B5] transition hover:border-[#E82070] hover:bg-[#E82070]/10 hover:text-white"
+              >
+                Clear Filter
+              </button>
+            </div>
+          )}
 
           <div className="relative overflow-hidden rounded-3xl border border-[#333333] bg-[#1B1B1B] p-5 md:p-8 shadow-[0_0_60px_rgba(212,168,88,0.10),0_20px_60px_rgba(0,0,0,0.4)]">
             <div className="pointer-events-none absolute -top-24 -right-20 w-72 h-72 rounded-full bg-[#D4A858]/10 blur-3xl" />
@@ -225,7 +270,7 @@ export default function AssetLibraryStudio() {
           </section>
 
           <section className="mt-12 pb-6">
-            <div className="mb-5 flex items-end justify-between gap-3"><div><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Recent Assets</p><h2 className="mt-1.5 text-xl font-semibold">From your Creative Library</h2></div><span className="text-xs text-white/35">{assets.length} available</span></div>
+            <div className="mb-5 flex items-end justify-between gap-3"><div><p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-[#D4A858]/80"><span className="inline-block h-px w-6 bg-[#D4A858]/60" />Recent Assets</p><h2 className="mt-1.5 text-xl font-semibold">From your Creative Library</h2></div><span className="text-xs text-white/35">{scopedAssets.length} available</span></div>
             {loading ? <div className="h-40 flex items-center justify-center text-[#D4A858] text-sm">Loading creative assets…</div> : loadError ? <div className="h-40 flex items-center justify-center text-[#E82070] text-sm">{loadError}</div> : recentAssets.length === 0 ? <div className="h-40 flex items-center justify-center text-[#808080] text-sm">No creative assets yet.</div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">{recentAssets.map((asset) => { const url = assetUrl(asset); return <button key={asset.id} type="button" onClick={() => setSelectedId(asset.id)} className={`text-left rounded-2xl overflow-hidden border ${selected?.id === asset.id ? "border-[#D4A858]" : "border-[#333333]"} bg-[#1B1B1B] hover:border-[#D4A858] hover:bg-[#232323]`}><div className="aspect-square bg-[#121212] flex items-center justify-center">{url && assetType(asset).includes("image") ? <img src={url} alt={asset.title} className="w-full h-full object-cover" /> : <span className="text-xs uppercase tracking-widest text-[#808080]">{assetType(asset)}</span>}</div><div className="p-2"><div className="truncate text-xs font-semibold">{asset.title}</div><div className="text-[10px] text-[#808080] mt-0.5">{asset.provider || "Legacy"}</div></div></button>; })}</div>}
           </section>
         </section>
