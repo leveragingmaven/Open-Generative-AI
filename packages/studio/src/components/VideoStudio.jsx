@@ -1051,17 +1051,6 @@ export default function VideoStudio({
     const creative = enrichCreativeRequest({ studio: "video", userRequest: trimmedPrompt, activeCampaign });
     const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
 
-    // ── [DEV-VALIDATION] Creative Brief v1 pipeline trace — REMOVE AFTER VALIDATION ──
-    console.groupCollapsed("%c[Creative Brief v1] generation trace", "color:#b8860b;font-weight:bold");
-    console.log("User Request:", trimmedPrompt);
-    console.log("Creative Context:", creative.context);
-    console.log("Creative Brief:", creative.brief);
-    console.log("Studio Translator Output:", creative.directive?.text ?? creative.text);
-    console.log("Final Prompt:", enrichedPrompt);
-    console.log("Recipe Selected:", v2vMode ? "videoTransform" : "video");
-    console.groupEnd();
-    // ── [DEV-VALIDATION] end ──
-
     if (v2vMode) {
       if (!uploadedVideoUrl) {
         alert("Please upload a video first.");
