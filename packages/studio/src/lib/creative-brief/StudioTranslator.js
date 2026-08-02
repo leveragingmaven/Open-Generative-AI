@@ -68,7 +68,7 @@ export function translateImage(brief) {
   if (b?.style) parts.push(`style: ${b.style}`);
   if (b?.tone) parts.push(`mood: ${b.tone}`);
   parts.push("high detail, balanced composition, professional lighting");
-  if (b?.brand) parts.push(`brand${palettePhrase(b.brand)}`);
+  if (b?.brand) parts.push(`brand${brandContext(b.brand)}`);
   parts.push("no text or watermarks");
   return finalize(brief, compose(b?.goal, parts), { aspect: b?.format?.aspect });
 }
@@ -85,7 +85,7 @@ export function translateVideo(brief) {
   if (b?.tone) parts.push(`mood: ${b.tone}`);
   if (b?.format?.motion) parts.push(`camera: ${b.format.motion}`);
   parts.push("smooth continuous motion, stable framing, professional video");
-  if (b?.brand) parts.push(`brand${palettePhrase(b.brand)}`);
+  if (b?.brand) parts.push(`brand${brandContext(b.brand)}`);
   parts.push("no flicker, no morphing artifacts");
   return finalize(brief, compose(b?.goal, parts), {
     aspect: b?.format?.aspect,
@@ -104,7 +104,7 @@ export function translateMarketing(brief) {
   if (b?.subject) parts.push(`feature: ${b.subject}`);
   if (b?.tone) parts.push(`tone: ${b.tone}`);
   parts.push("clear, eye-catching marketing visual");
-  if (b?.brand) parts.push(`brand${palettePhrase(b.brand)}`);
+  if (b?.brand) parts.push(`brand${brandContext(b.brand)}`);
   parts.push("leave negative space for text overlay, no clashing colors");
   return finalize(brief, compose(b?.goal, parts), { aspect: b?.format?.aspect });
 }

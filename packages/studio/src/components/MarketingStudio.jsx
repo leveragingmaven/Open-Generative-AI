@@ -485,6 +485,17 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
     try {
       const creative = enrichCreativeRequest({ studio: "marketing", userRequest: prompt.trim(), activeCampaign });
       const enrichedPrompt = (creative.text || "").trim() || prompt.trim();
+
+      // ── [DEV-VALIDATION] Creative Brief v1 pipeline trace — REMOVE AFTER VALIDATION ──
+      console.groupCollapsed("%c[Creative Brief v1] generation trace", "color:#b8860b;font-weight:bold");
+      console.log("User Request:", prompt.trim());
+      console.log("Creative Context:", creative.context);
+      console.log("Creative Brief:", creative.brief);
+      console.log("Studio Translator Output:", creative.directive?.text ?? creative.text);
+      console.log("Final Prompt:", enrichedPrompt);
+      console.log("Recipe Selected:", "marketing");
+      console.groupEnd();
+      // ── [DEV-VALIDATION] end ──
       const recipe = buildRecipe("marketing", { prompt: enrichedPrompt });
       const legacyParams = {
         ...recipe,
