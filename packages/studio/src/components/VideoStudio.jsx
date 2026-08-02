@@ -7,6 +7,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2vModels,
@@ -1047,6 +1048,8 @@ export default function VideoStudio({
     const currentModel = getCurrentModel();
     const isExtendMode = currentModel?.requiresRequestId;
     const trimmedPrompt = prompt.trim();
+    const creative = enrichCreativeRequest({ studio: "video", userRequest: trimmedPrompt, activeCampaign });
+    const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
 
     if (v2vMode) {
       if (!uploadedVideoUrl) {
@@ -1107,9 +1110,9 @@ export default function VideoStudio({
           v2vParams.image_url = uploadedImageUrl;
         }
         if (currentModel?.hasPrompt && trimmedPrompt) {
-          v2vParams.prompt = buildRecipe("videoTransform", { prompt: trimmedPrompt }).prompt;
+          v2vParams.prompt = buildRecipe("videoTransform", { prompt: enrichedPrompt }).prompt;
         }
-        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "videoTransform", operation: "video_transform", capability: "video_editing", prompt: trimmedPrompt, inputs: v2vParams, references: [uploadedVideoUrl, uploadedImageUrl].filter(Boolean), output: { modality: "video" }, apiKey }), { legacyExecute: () => processV2V(apiKey, v2vParams) });
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "videoTransform", operation: "video_transform", capability: "video_editing", prompt: enrichedPrompt, inputs: v2vParams, references: [uploadedVideoUrl, uploadedImageUrl].filter(Boolean), output: { modality: "video" }, apiKey }), { legacyExecute: () => processV2V(apiKey, v2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1120,6 +1123,7 @@ export default function VideoStudio({
           url: res.url,
           prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
           model: selectedModel,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
         }, activeCampaign, "video");
         addToLocalHistory(entry);
@@ -1133,14 +1137,14 @@ export default function VideoStudio({
           });
       } else if (imageMode) {
         const maxImgs = getMaxImagesForI2VModel(selectedModel);
-        const i2vRecipe = buildRecipe("video", { prompt: trimmedPrompt });
+        const i2vRecipe = buildRecipe("video", { prompt: enrichedPrompt });
         const i2vParams = { ...i2vRecipe, model: selectedModel };
         if (maxImgs > 2) {
           i2vParams.images_list = uploadedImageUrls;
         } else {
           i2vParams.image_url = uploadedImageUrl;
         }
-        if (trimmedPrompt) i2vParams.prompt = trimmedPrompt;
+        if (trimmedPrompt) i2vParams.prompt = enrichedPrompt;
         i2vParams.aspect_ratio = selectedAr;
         const i2vModel = i2vModels.find((m) => m.id === selectedModel);
         if (uploadedEndImageUrl && i2vModel?.lastImageField) {
@@ -1154,7 +1158,7 @@ export default function VideoStudio({
         if (selectedMode) i2vParams.mode = selectedMode;
         if (showEffect && selectedEffect) i2vParams.name = selectedEffect;
 
-        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "image_to_video", capability: "video_generation", prompt: trimmedPrompt, inputs: i2vParams, references: uploadedImageUrls, output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateI2V(apiKey, i2vParams) });
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "image_to_video", capability: "video_generation", prompt: enrichedPrompt, inputs: i2vParams, references: uploadedImageUrls, output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateI2V(apiKey, i2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1172,6 +1176,7 @@ export default function VideoStudio({
           model: selectedModel,
           aspect_ratio: selectedAr,
           duration: selectedDuration,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
         }, activeCampaign, "video");
         addToLocalHistory(entry);
@@ -1185,9 +1190,9 @@ export default function VideoStudio({
           });
       } else {
         // T2V (including extend mode)
-        const videoRecipe = buildRecipe("video", { prompt: trimmedPrompt });
+        const videoRecipe = buildRecipe("video", { prompt: enrichedPrompt });
         const params = { ...videoRecipe, model: selectedModel };
-        if (trimmedPrompt) params.prompt = trimmedPrompt;
+        if (trimmedPrompt) params.prompt = enrichedPrompt;
 
         if (isExtendMode) {
           params.request_id = lastGenerationId;
@@ -1210,7 +1215,7 @@ export default function VideoStudio({
         if (selectedQuality) params.quality = selectedQuality;
         if (selectedMode) params.mode = selectedMode;
 
-        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "video_generation", capability: "video_generation", prompt: trimmedPrompt, inputs: params, references: [uploadedVideoUrl, ...uploadedImageUrls].filter(Boolean), output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateVideo(apiKey, params) });
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "video_generation", capability: "video_generation", prompt: enrichedPrompt, inputs: params, references: [uploadedVideoUrl, ...uploadedImageUrls].filter(Boolean), output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateVideo(apiKey, params) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1231,6 +1236,7 @@ export default function VideoStudio({
           model: selectedModel,
           aspect_ratio: selectedAr,
           duration: selectedDuration,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
         }, activeCampaign, "video");
         addToLocalHistory(entry);

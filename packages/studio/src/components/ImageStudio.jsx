@@ -8,6 +8,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createImageStudioRequest, executeImageStudioRequest } from "../lib/intelligence/ImageStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -1211,6 +1212,9 @@ export default function ImageStudio({
     setGenerateError(null);
 
     try {
+      const trimmedPrompt = prompt.trim();
+      const creative = enrichCreativeRequest({ studio: "image", userRequest: trimmedPrompt, activeCampaign });
+      const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
       const results = await Promise.all(
         Array.from({ length: batchSize }).map(async () => {
           if (imageMode) {
@@ -1221,7 +1225,7 @@ export default function ImageStudio({
               aspect_ratio: selectedAr,
             };
             if (swapImageUrl) genParams.swap_url = swapImageUrl;
-            if (prompt.trim()) genParams.prompt = prompt.trim();
+            if (trimmedPrompt) genParams.prompt = enrichedPrompt;
             if (currentQualityField && selectedQuality) {
               genParams[currentQualityField] = selectedQuality;
             }
@@ -1238,7 +1242,7 @@ export default function ImageStudio({
             }), { legacyExecute: () => generateI2I(apiKey, genParams) });
           } else {
             const recipe = buildRecipe("image", {
-              prompt: prompt.trim(),
+              prompt: enrichedPrompt,
               parameters: {
                 model: selectedModelId,
               },
@@ -1251,7 +1255,7 @@ export default function ImageStudio({
               genParams[currentQualityField] = selectedQuality;
             }
             return await executeImageStudioRequest(createImageStudioRequest({
-              prompt: prompt.trim(),
+              prompt: enrichedPrompt,
               model: selectedModelId,
               aspectRatio: selectedAr,
               qualityField: currentQualityField,
@@ -1272,6 +1276,7 @@ export default function ImageStudio({
             prompt: prompt.trim(),
             model: selectedModelId,
             aspect_ratio: selectedAr,
+            brief: creative?.brief || null,
             timestamp: new Date().toISOString(),
           }, activeCampaign, "image");
           addToHistory(entry);

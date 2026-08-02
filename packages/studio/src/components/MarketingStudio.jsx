@@ -7,6 +7,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMarketingStudioRequest, executeMarketingStudioRequest } from "../lib/intelligence/MarketingStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -482,7 +483,9 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
     setIsGenerating(true);
     try {
-      const recipe = buildRecipe("marketing", { prompt: prompt.trim() });
+      const creative = enrichCreativeRequest({ studio: "marketing", userRequest: prompt.trim(), activeCampaign });
+      const enrichedPrompt = (creative.text || "").trim() || prompt.trim();
+      const recipe = buildRecipe("marketing", { prompt: enrichedPrompt });
       const legacyParams = {
         ...recipe,
         aspect_ratio: params.ratio,
@@ -492,7 +495,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
         video_files: params.videoUrl ? [params.videoUrl] : []
       };
       const result = await executeMarketingStudioRequest(createMarketingStudioRequest({
-        prompt: prompt.trim(),
+        prompt: enrichedPrompt,
         ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,
@@ -507,6 +510,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           url: result.url,
           prompt,
           format: params.format,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString()
         }, activeCampaign, "marketing");
         if (!historyItems) {
