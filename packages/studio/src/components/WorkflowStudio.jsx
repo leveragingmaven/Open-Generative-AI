@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   getTemplateWorkflows,
@@ -200,29 +200,57 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
   const [isExecuting, setIsExecuting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  
+  // Tracks the workflow whose opening tab was auto-selected from its content,
+  // so the content-based decision only runs once per workflow open.
+  const autoTabDecidedFor = useRef(null);
 
   // Handlers defined early so they can be used in effects
   const handleSelectWorkflow = useCallback(
-    async (wf, fromUrl = false) => {
+    (wf, fromUrl = false) => {
       setSelectedWorkflow(wf);
       setResult(null);
       setError(null);
-      
-      const targetTab = urlTab || "playground";
+
+      // Fix 1/2/4: pick the opening tab from the workflow itself whenever
+      // possible. New workflows (no id) keep opening in Playground; existing
+      // workflows that contain nodes open directly in Builder; existing
+      // workflows that are empty open in Playground. When the definition isn't
+      // loaded yet, existing workflows default to Builder and the content-based
+      // decision is applied once the definition finishes loading.
+      const isNew = !wf?.id;
+      const defMatches = workflowDef && workflowDef.workflow_id === wf?.id;
+      const nodesKnown = defMatches && Array.isArray(workflowDef?.data?.nodes);
+      const targetTab = isNew
+        ? "playground"
+        : nodesKnown
+          ? workflowDef.data.nodes.length > 0
+            ? "builder"
+            : "playground"
+          : urlTab || "builder";
+
       setActiveSubTab(targetTab);
 
       if (!fromUrl) {
-        // Always route to /workflow/[id] so the builder library's useParams().id resolves correctly
-        router.push(`/workflow/${wf.id}/${targetTab}`);
+        if (isNew) {
+          router.push(`/workflow/${wf.id}/playground`);
+        } else if (nodesKnown) {
+          router.push(`/workflow/${wf.id}/${targetTab}`);
+        } else {
+          // Content not known yet: open without a tab segment so the loaded
+          // definition can pick the correct tab (Builder vs Playground).
+          router.push(`/workflow/${wf.id}`);
+        }
       }
     },
-    [router, urlTab],
+    [router, urlTab, workflowDef],
   );
 
-  // Dedicated data fetching effect for the active workflow
+  // Dedicated data fetching effect for the active workflow.
+  // apiKey may be null in agency mode: the host /api/workflow proxy injects the
+  // server-side MUAPI_API_KEY, so detail loading must not be gated on a client key
+  // (otherwise the builder would be stuck on the loading placeholder forever).
   useEffect(() => {
-    if (!selectedWorkflow?.id || !apiKey) return;
+    if (!selectedWorkflow?.id) return;
 
     async function loadWorkflowDetails() {
       try {
@@ -282,6 +310,27 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         setNodeSchemas(nodes);
         setWorkflowDef(def);
 
+        // Fix 4: once the definition is available, pin the opening tab to its
+        // content — Builder when the workflow contains nodes, Playground when it
+        // is empty. This only applies when the URL carries no explicit tab
+        // (deep-links and user tab toggles are respected as-is).
+        if (Array.isArray(def?.data?.nodes)) {
+          const pathTab =
+            typeof window !== "undefined"
+              ? window.location.pathname.endsWith("/builder")
+                ? "builder"
+                : window.location.pathname.endsWith("/playground")
+                  ? "playground"
+                  : null
+              : null;
+          if (pathTab === null && autoTabDecidedFor.current !== wfId) {
+            autoTabDecidedFor.current = wfId;
+            const desiredTab = def.data.nodes.length > 0 ? "builder" : "playground";
+            setActiveSubTab(desiredTab);
+            router.replace(`/workflow/${wfId}/${desiredTab}`, { scroll: false });
+          }
+        }
+
         if (results[1].status === 'rejected' || results[2].status === 'rejected') {
           console.error("Builder components failed to load:", results[1].reason, results[2].reason);
           if (!nodes.length && !def.nodes?.length) {
@@ -299,7 +348,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
     }
 
     loadWorkflowDetails();
-  }, [selectedWorkflow?.id, apiKey]);
+  }, [selectedWorkflow?.id, apiKey, router]);
 
   const handleCreateWorkflow = useCallback(
     async (fromUrl = false) => {
@@ -313,8 +362,9 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
             data: { nodes: [] },
           };
           const response = await createWorkflow(apiKey, payload);
-          // Route to /workflow/[id] so useParams().id works in the builder library
-          router.push(`/workflow/${response.workflow_id}/builder`);
+          // Route to /workflow/[id]/playground so the new (empty) workflow
+          // opens in Playground (creation flow) and useParams().id resolves.
+          router.push(`/workflow/${response.workflow_id}/playground`);
           return;
         }
 
@@ -322,7 +372,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         setSelectedWorkflow({ id: null, name: "Untitled Workflow" });
         setNodeSchemas([]);
         setWorkflowDef({ nodes: [], edges: [] });
-        setActiveSubTab("builder");
+        setActiveSubTab("playground");
       } catch (err) {
         setError("Failed to initialize workflow: " + err.message);
       } finally {
@@ -372,8 +422,9 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
     if (typeof window !== 'undefined' && urlWorkflowId && urlWorkflowId !== 'new') {
       const path = window.location.pathname;
       if (path.startsWith('/studio/workflows/')) {
-        const tab = urlTab || 'builder';
-        router.replace(`/workflow/${urlWorkflowId}/${tab}`);
+        // Redirect without a tab segment so the loaded definition picks the
+        // correct tab (Builder when the workflow has nodes, Playground when empty).
+        router.replace(`/workflow/${urlWorkflowId}`);
       }
     }
   }, [urlWorkflowId, urlTab, router]);

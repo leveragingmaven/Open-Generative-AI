@@ -720,3 +720,69 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 - **Tests:** creative-brief suite grew from 17 to **29 tests** (new v1.1 cases for subject precedence, brand rule matrix, tone vocabulary, negatives emission/absence). Suite totals now **88/88** package studio library tests and **44/44** top-level repository tests pass; `npm run build:studio` clean (191 files).
 - **Cleanup (2026-08-02):** all temporary `[DEV-VALIDATION]` logging blocks removed from `ImageStudio.jsx`, `VideoStudio.jsx`, and `MarketingStudio.jsx`, and the temporary `context` field was dropped from `enrichCreativeRequest` returns in `creative-brief/index.js` (its only consumers were the removed trace blocks).
 - **Deferred (per user):** Facebook-vs-Pinterest differentiation and approved-brief memory promotion.
+
+## Milestone: Creative Skill Pack V1 (2026-08-02)
+
+- Implemented **Creative Skills V1**: a config-driven backend intelligence layer that establishes the existence of curated Creative Skills inside Creative OS. Creative Skill Packs are produced by the separate Knowledge Compiler, reviewed by the MavenSync team, and integrated directly into the codebase by a coding AI. Creative OS does not compile knowledge, does not import from the Hub, and never exposes skills to end users.
+- **Design principles:** skills are internal backend intelligence only — no runtime registration, no user installation/management, no databases, no front-end libraries, no import pipelines, no marketplace. Version 1 is a configuration layer with lookup only. Activation, matching, routing, scoring, and request analysis belong to the future Creative Skills Engine and are intentionally absent (even as metadata).
+- **Files added:**
+  - `packages/studio/src/lib/skills/product-hero-photography.js` — first approved pack (compiler-produced **Product Hero Photography**), a plain `export default { ... }` config object carrying creative knowledge only (vocabulary, craft guidance, constraints, evaluation rules, provenance). No freeze in the skill file.
+  - `packages/studio/src/lib/skills/index.js` — builds the immutable public library `SKILL_LIBRARY = Object.freeze({ ... })` (frozen only here) and exposes the single V1 API `getSkill(skillId)` (lookup only, mirrors `RecipeResolver.resolve`).
+  - `packages/studio/src/lib/skills/skills.test.js` — 4 focused Node smoke tests (library load, `getSkill` returns expected object, unknown ID throws, `SKILL_LIBRARY` frozen).
+- **Files modified:** none beyond this status document. `Creative Brief`, `Creative Context`, `CreativeIntelligenceEngine`, `Studio Translators`, `Recipe Engine`, `Provider Registry`, and the generation pipeline are untouched.
+- **Registration model:** adding the next approved pack requires only one new skill file beside `product-hero-photography.js`, one import, and one line in `SKILL_LIBRARY`.
+- **Validation:** `npm run build:studio` clean; `node --test packages/studio/src/**/*.test.js` — existing 88 package studio library tests plus 4 new Creative Skill tests pass.
+
+## Milestone: Creative Skill enrichment inside Creative Brief V1 (2026-08-02)
+
+- Confirmed by architecture review that the existing **Creative Brief layer** (`lib/creative-brief`) is the correct extension point. No separate Creative Skills Engine is introduced in Version 1.
+- Implemented a **single additive enrichment stage** inside `enrichCreativeRequest()`: Creative Context → Creative Brief → **one approved Creative Skill** → Studio Translator. First integration uses `getSkill("product-hero-photography")`.
+- **Files added:**
+  - `packages/studio/src/lib/creative-brief/CreativeSkill.js` — `applyCreativeSkill(brief, skill)` (pure; enriches `style` with vocabulary meanings + craft guidance, carries `constraints`, and records applied `craft.vocabulary` + `skill` provenance/`creativePrinciples`; returns a new brief, never mutates the input; no-op for missing/inactive skills) and `isSkillApplicableToStudio(skill, studio)` (declarative eligibility from the pack's own `supportedStudios`).
+  - `packages/studio/src/lib/creative-brief/CreativeSkill.test.js` — 13 Node tests (enrichment mapping, constraints/principles carried, input immutability, no-op cases, studio gating, default/inline/`null` skill modes, unknown skillId fails open, `SKILL_LIBRARY` untouched).
+- **Files modified:**
+  - `packages/studio/src/lib/creative-brief/index.js` — `enrichCreativeRequest` accepts `skill` (object, skillId resolved via `getSkill`, or `null` to skip); defaults to `product-hero-photography` and applies it only to the studios the pack declares.
+- **Intentionally untouched:** Studio Translators, Recipe Engine (`RECIPE_LIBRARY`/`PROMPT_LIBRARY`/`RecipeResolver`), Creative OS engines, Provider layer (`ProviderRegistry`/`MuApiProvider`/`muapi.js`/`models.js`), and `SKILL_LIBRARY` (still frozen, still lookup-only). No matching, scoring, routing, or new engine.
+- **Validation:** `npm run build:studio` clean (196 files); `node --test` studio library suite — 105/105 pass (13 new Creative Skill tests + 92 existing).
+
+## Milestone: Camera Movement Skill Pack V1 (2026-08-02)
+
+- Added the first professional **Camera Movement Skill Pack** using the existing Creative Skills architecture. Converted the camera movement prompts source document into 7 reusable backend Creative Skills, one per source family. Configuration-only: no activation, matching, scoring, routing, discovery, or runtime behavior.
+- **Files added** (all under `packages/studio/src/lib/skills/`):
+  - `camera-pan-tilt.js` — Static Shot, Pan Left/Right, Whip Pan Left/Right, Tilt Up/Down (7 movements).
+  - `camera-zoom-lens.js` — Slow Zoom In/Out, Fast Zoom In/Out, Crash Zoom In/Out (6 movements).
+  - `camera-dolly-tracking.js` — Dolly In/Out, Tracking, Follow/Over-the-Shoulder, Reverse Tracking/Walk-and-Talk, Side, Low, Vehicle Tracking, Chase (9 movements).
+  - `camera-physical-movement.js` — Truck Left/Right, Slider Left/Right, Pedestal Up/Down, Push Past, Arc Left/Right, Orbit Clockwise/Counterclockwise (11 movements).
+  - `camera-human-camera.js` — Handheld, Body-Mounted/Snorricam (2 movements).
+  - `camera-drone-crane.js` — Crane Up/Down, Drone Push In/Pull Back, Helicopter Shot (5 movements).
+  - `camera-special-techniques.js` — First Person View, Tilt Shift, Infinite Zoom, Earth Zoom Out, Time Lapse, Pass Through Objects (6 movements).
+  - Each skill follows the Product Hero Photography pattern (`skillId`, `name`, `version`, `schemaVersion`, `category`, `supportedStudios`, `creativePrinciples`, `vocabulary`, `craftGuidance`, `constraints`, `evaluationRules`, `provenance`, `status`) and adds a `movements` catalog that preserves the source's per-shot movement/speed/framing/end-state data. `craftGuidance` covers when/why/composition/pacing/framing/mistakes; `supportedStudios` is `["video", "marketing"]`.
+- **Files modified:**
+  - `packages/studio/src/lib/skills/index.js` — registered the 7 new skills in the existing `SKILL_LIBRARY` (still frozen, still lookup-only; no registration redesign).
+  - `packages/studio/src/lib/skills/skills.test.js` — extended to 7 tests: all 8 skills load, every skill passes the approved schema, camera skills carry a grounded `movements` catalog, `getSkill` returns expected objects, unknown IDs throw, library frozen.
+  - `packages/studio/src/lib/creative-brief/CreativeSkill.test.js` — count assertion updated to library-growth-safe check (frozen + approved skills present).
+- **Source-fidelity notes:** the source defines zoom and crash-zoom in both directions; the pack preserves all six (in/out) under the requested Fast Zoom / Crash Zoom families.
+- **Intentionally untouched:** Creative OS, Creative Brief, Recipe Engine, Studio Translators, Provider layer, and the `SKILL_LIBRARY`/`getSkill` contract. The enrichment stage can now consume any of the 8 approved skills via `getSkill`.
+- **Validation:** `npm run build:studio` clean (203 files); `node --test` studio library suite — 107/107 pass (6 skills tests + 101 existing).
+
+## Milestone: Workflow Studio UX & Reliability Fix (2026-08-02)
+
+- Follow-up to the Workflow Studio investigation (`reports/WorkflowStudio_Graph_Investigation.md`). Strictly a UX and reliability improvement: existing workflows now open directly into the Builder (graph immediately visible), brand-new workflows still open in Playground, and the builder loading overlay can never permanently block the UI. No redesign; node architecture, workflow engine, API contracts, and the workflow JSON format are untouched.
+- **Files modified:**
+  - `packages/studio/src/components/WorkflowStudio.jsx` — content-based opening tab:
+    - `handleSelectWorkflow` chooses the tab from the workflow itself (new/no-id → Playground; loaded definition with nodes → Builder; loaded empty definition → Playground; unknown content → defaults to Builder, then content decides once loaded). Existing-workflow opens with unknown content route to `/workflow/:id` (no tab segment) so the definition can pick the correct tab.
+    - `loadWorkflowDetails` auto-pins the tab to the definition's content (Builder when nodes present, Playground when empty) only when the URL carries no explicit tab (deep-links and the Playground/Full Workflow toggles are respected), then syncs the URL with `router.replace`.
+    - `handleCreateWorkflow` now routes new workflows to `/workflow/:id/playground` (creation flow preserved; was `builder`).
+    - Legacy `/studio/workflows/:id` redirect now targets `/workflow/:id` (no tab) so content-based selection applies.
+    - Relaxed the `loadWorkflowDetails` guard so detail loading is no longer blocked when `apiKey` is null in agency mode (the host `/api/workflow` proxy injects the server-side `MUAPI_API_KEY`); previously the builder stayed on the "Loading Builder..." placeholder forever.
+  - `packages/Vibe-Workflow/packages/workflow-builder/src/components/NodeFlow.jsx` (submodule) + rebuilt `dist/` — `isRestoring` loading overlay fix: the fallback definition-restore effect now always clears `isRestoring` (success, empty definition, missing nodes, and failed schema/definition requests), guarded by a `restoreAttemptedRef` so re-renders cannot re-trigger the fetch.
+- **Validation:**
+  - `npm run build:workflow` clean; rebuilt `workflow-builder/dist` contains the fix (`restoreAttemptedRef` + `.finally` present).
+  - `npm run build:studio` clean (203 files).
+  - `node --test tests/*.test.js` — 44/44 pass.
+  - `node --test` studio intelligence/skills/campaigns/creative-brief suite — 103/103 pass.
+  - `node --test packages/studio/src/lib/publishing/*.test.js` — 4/4 pass.
+  - Live proxy/upstream chain re-verified in the investigation; graph renders from `initialWorkflowData`/`initialNodeSchemas` on the Builder tab.
+- **Remaining Workflow Studio limitations discovered (not fixed):**
+  - `WorkflowBuilder` still drops the `workflowId` prop (`WorkflowBuilder.jsx` renders `NodeFlow` with only `initialNodeSchemas`/`initialWorkflowData`); harmless for rendering because the graph derives entirely from those props, but any future builder logic that needs the id would have to read it from `useParams()`.
+  - Host app rebuild (`npm run build` / `next build`) is required for the running servers to pick up the rebuilt `workflow-builder/dist` and updated `studio` source (the servers on 3001/3002 currently serve the prior `.next` build).
