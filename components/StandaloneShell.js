@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinStudio, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -465,6 +465,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           <AppsStudio apiKey={studioApiKey} />
         </div>
       )}
+      {visibleTabIds.has('ai-twin') && (
+        <div className={activeTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
+          <AiTwinStudio apiKey={studioApiKey} />
+        </div>
+      )}
       {visibleTabIds.has('ai-influencer') && (
         <div className={activeTab === 'ai-influencer' ? "h-full w-full" : "hidden"}>
           <AiInfluencerStudio apiKey={studioApiKey} />
@@ -788,6 +793,9 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
                     </div>
                   )}
 
+                  {visibleTabIds.has('ai-twin') && (
+                    renderNavItem(menuTab('ai-twin'))
+                  )}
                   {visibleTabIds.has('ai-influencer') && (
                     renderNavItem(menuTab('ai-influencer'))
                   )}

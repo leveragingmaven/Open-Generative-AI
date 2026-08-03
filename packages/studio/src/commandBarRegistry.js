@@ -58,6 +58,13 @@ export const COMMAND_SECTIONS = [
         route: '/studio/ai-influencer',
       },
       {
+        id: 'ai-twin',
+        label: 'AI Twin Studio',
+        tabId: 'ai-twin',
+        keywords: ['twin', 'identity', 'likeness', 'digital identity', 'digital twin', 'avatar'],
+        route: '/studio/ai-twin',
+      },
+      {
         id: 'workflow',
         label: 'Workflow',
         tabId: 'workflows',

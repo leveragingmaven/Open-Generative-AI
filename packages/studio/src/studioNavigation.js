@@ -172,6 +172,17 @@ export const TABS = [
     )
   },
   {
+    id: 'ai-twin',
+    label: 'AI Twin Studio',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+        <path d="M12 3l1.2 2.4 2.6.4-1.9 1.8.4 2.6L12 8.9 9.7 10.2l.4-2.6L8.2 5.8l2.6-.4L12 3z" />
+      </svg>
+    )
+  },
+  {
     id: 'asset-library',
     label: 'Creative Asset Library',
     icon: (

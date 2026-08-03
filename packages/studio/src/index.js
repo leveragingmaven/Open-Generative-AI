@@ -15,6 +15,8 @@ export { default as DesignAgentStudio } from './components/DesignAgentStudio';
 export { default as AppsStudio } from './components/AppsStudio';
 export { default as McpCliStudio } from './components/McpCliStudio';
 export { default as AiInfluencerStudio } from './components/AiInfluencerStudio';
+export { default as AiTwinStudio } from './components/AiTwinStudio';
+export * from './lib/twin';
 export { default as PublishingStudio } from './components/PublishingStudio';
 export { TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from './studioNavigation.js';
 export { default as AssetLibraryStudio } from './components/AssetLibraryStudio';
