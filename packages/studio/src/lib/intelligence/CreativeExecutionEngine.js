@@ -63,6 +63,7 @@ export class CreativeExecutionEngine {
         executionContextId: context.id,
         correlationId: context.correlationId,
         executionStatus: CREATIVE_EXECUTION_STATUS.PLANNED,
+        ...(input.metadata || {}),
       },
     }));
     if (context.idempotencyKey) this.idempotency.set(context.idempotencyKey, job);
@@ -80,7 +81,8 @@ export class CreativeExecutionEngine {
   transition(jobId, status, changes = {}) {
     const job = this.persistence.getJob(jobId);
     if (!job) return null;
-    const updated = this.persistence.saveJob(updateCreativeJob(job, { ...changes, status }));
+    const metadata = changes.metadata ? { ...(job.metadata || {}), ...changes.metadata } : job.metadata;
+    const updated = this.persistence.saveJob(updateCreativeJob(job, { ...changes, metadata, status }));
     this.events.emit(`job.${status}`, updated);
     return updated;
   }

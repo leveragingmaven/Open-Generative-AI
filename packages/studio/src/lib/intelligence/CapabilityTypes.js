@@ -25,6 +25,13 @@ export const CAPABILITIES = Object.freeze({
   INPAINTING: "inpainting",
   OUTPAINTING: "outpainting",
   PROMPT_ENHANCEMENT: "prompt_enhancement",
+  LONG_FORM_VIDEO_ANALYSIS: "long_form_video_analysis",
+  HIGHLIGHT_EXTRACTION: "highlight_extraction",
+  MOTION_GRAPHICS: "motion_graphics",
+  MOTION_GRAPHICS_EDIT: "motion_graphics_edit",
+  PERFORMANCE_TRANSFER: "performance_transfer",
+  IDENTITY_PRESERVATION: "identity_preservation",
+  MOTION_TRANSFER: "motion_transfer",
 });
 
 export const CAPABILITY_KINDS = Object.freeze({

@@ -7,12 +7,42 @@ export {
   TWIN_SOURCES,
   TWIN_ASSET_TYPES,
   TWIN_ASSET_CATALOG,
+  TWIN_APPROVAL_MODES,
+  TWIN_DEFAULT_SETTINGS,
+  TWIN_DEFAULT_PROVIDERS,
   getTwinAssetType,
   createTwinProfile,
   updateTwinProfile,
   createTwinCandidate,
   createTwinAsset,
 } from "./TwinProfile.js";
+
+export {
+  TWIN_BLUEPRINTS,
+  TWIN_PERMISSIONS,
+  TWIN_KNOWLEDGE_COLLECTIONS,
+  listBlueprints,
+  getBlueprint,
+  getBlueprintSkillIds,
+  createTwinFromBlueprint,
+} from "./TwinBlueprints.js";
+
+export {
+  TWIN_CONVERSATIONS_STORAGE_KEY,
+  createTwinMessage,
+  listTwinConversations,
+  listAllConversations,
+  getTwinConversation,
+  createTwinConversation,
+  updateTwinConversation,
+  deleteTwinConversation,
+  deleteTwinConversationsForTwin,
+  appendTwinMessage,
+  getConversationMessages,
+  listPinnedTwinConversations,
+  listFavoriteTwinConversations,
+  searchTwinConversations,
+} from "./TwinConversationStore.js";
 
 export {
   TWINS_STORAGE_KEY,

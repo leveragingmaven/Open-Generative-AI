@@ -96,6 +96,53 @@ test("invalid status falls back to draft", () => {
   assert.equal(createTwinProfile({ status: "banana" }).status, TWIN_STATUSES.DRAFT);
 });
 
+test("createTwinProfile normalizes blueprint source and workspace fields", () => {
+  const twin = createTwinProfile({
+    name: "Maya",
+    source: "blueprint",
+    role: "Brand Designer",
+    personality: "Disciplined",
+    knowledge: ["brand", "visual"],
+    brandVoice: "clear, direct",
+    campaignAccess: ["camp-1"],
+    preferredWorkflows: ["brand-asset"],
+    providers: { default: "muapi" },
+    settings: { temperature: 0.5, approvalMode: "manual", permissions: ["generate"] },
+  });
+  assert.equal(twin.source, TWIN_SOURCES.BLUEPRINT);
+  assert.equal(twin.role, "Brand Designer");
+  assert.equal(twin.personality, "Disciplined");
+  assert.deepEqual(twin.knowledge, ["brand", "visual"]);
+  assert.equal(twin.brandVoice, "clear, direct");
+  assert.deepEqual(twin.campaignAccess, ["camp-1"]);
+  assert.deepEqual(twin.preferredWorkflows, ["brand-asset"]);
+  assert.equal(twin.providers.default, "muapi");
+  assert.equal(twin.settings.temperature, 0.5);
+  assert.equal(twin.settings.approvalMode, "manual");
+  assert.deepEqual(twin.settings.permissions, ["generate"]);
+});
+
+test("createTwinProfile applies twin settings defaults", () => {
+  const twin = createTwinProfile();
+  assert.equal(twin.settings.temperature, 0.7);
+  assert.equal(twin.settings.approvalMode, "review");
+  assert.equal(twin.settings.defaultWorkflowId, null);
+  assert.deepEqual(twin.settings.permissions, []);
+  assert.deepEqual(twin.providers.enabled, ["muapi"]);
+  assert.equal(twin.providers.default, "muapi");
+});
+
+test("createTwinProfile coerces invalid settings", () => {
+  const twin = createTwinProfile({
+    settings: { temperature: 99, approvalMode: "banana", permissions: "no" },
+    providers: { default: "banana" },
+  });
+  assert.equal(twin.settings.temperature, 0.7);
+  assert.equal(twin.settings.approvalMode, "review");
+  assert.deepEqual(twin.settings.permissions, []);
+  assert.deepEqual(twin.providers.enabled, ["muapi", "banana"]);
+});
+
 test("getTwinAssetType resolves catalog entries", () => {
   assert.equal(getTwinAssetType(TWIN_ASSET_TYPES.HERO_PORTRAIT).label, "Hero Portrait");
   assert.equal(getTwinAssetType("does-not-exist"), null);

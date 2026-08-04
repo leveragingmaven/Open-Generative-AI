@@ -22,10 +22,13 @@ import {
   PromptPopoverHeader,
   PromptDurationIcon,
   PromptQualityIcon,
+  PromptSegmentedControl,
+  PromptSegmentOption,
   PromptTextarea,
   promptControlClassName,
   promptMediaButtonClassName,
 } from "./prompt/PromptComposer.jsx";
+import MarketingMotionPanel from "./motion/MarketingMotionPanel.jsx";
 
 const SCROLLBAR_STYLE = `
   .custom-scrollbar-thin::-webkit-scrollbar {
@@ -390,8 +393,10 @@ function SimpleDropdown({ isOpen, title, options, selected, onSelect, onClose })
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, onGenerationComplete, onGenerationError, historyItems }) {
+export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, onGenerationComplete, onGenerationError, historyItems, motionTarget = null, onMotionTargetHandled = null }) {
   const PERSIST_KEY = "hg_marketing_studio_persistent";
+
+  const [view, setView] = useState("ads"); // 'ads' | 'motion'
   
   const [prompt, setPrompt] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -420,6 +425,16 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   const [slideDirection, setSlideDirection] = useState("next"); // 'next' | 'prev'
 
   const textareaRef = useRef(null);
+
+  // Command Bar motion intent → open the Motion Graphics view once. Routing
+  // context (recipe + skill) is informational; the panel always resolves the
+  // template/skill/recipe from the shared job builder + Workflow Template Library.
+  useEffect(() => {
+    if (motionTarget?.recipeId === "motionGraphics") {
+      setView("motion");
+      onMotionTargetHandled?.();
+    }
+  }, [motionTarget?.recipeId, onMotionTargetHandled]);
 
   // ── Persistence ───────────────────────────────────────────────────────────
 
@@ -532,7 +547,35 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative overflow-hidden">
       <style>{SCROLLBAR_STYLE}</style>
-      
+
+      {/* ── CAPABILITY SWITCH ── */}
+      <div className="relative z-10 pt-4">
+        <PromptSegmentedControl>
+          <PromptSegmentOption
+            type="button"
+            onClick={() => setView("ads")}
+            selected={view === "ads"}
+          >
+            AI Video Ads
+          </PromptSegmentOption>
+          <PromptSegmentOption
+            type="button"
+            onClick={() => setView("motion")}
+            selected={view === "motion"}
+          >
+            Motion Graphics
+          </PromptSegmentOption>
+        </PromptSegmentedControl>
+      </div>
+
+      {view === "motion" ? (
+        <MarketingMotionPanel
+          apiKey={apiKey}
+          motionTarget={motionTarget}
+          onExit={() => setView("ads")}
+        />
+      ) : (
+      <>
       {/* ── MAIN CONTENT AREA ── */}
       <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
         {history.length > 0 ? (
@@ -1063,6 +1106,8 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
             )}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

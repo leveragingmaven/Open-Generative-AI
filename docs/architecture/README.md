@@ -43,6 +43,10 @@ Creative_OS_Architecture_v1.md
 - [Publishing Engine](engines/Publishing_Engine.md)
 - [Analytics Engine](engines/Analytics_Engine.md)
 
+## Skills
+
+- [Creative Skill Standard v2.0](Creative_Skill_Standard_v2.md) — the official reference every Creative Skill follows
+
 ## Decisions
 
 - [ADR Guide](adr/README.md)

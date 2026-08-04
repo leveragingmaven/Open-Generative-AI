@@ -44,7 +44,9 @@ export function createCreativeAsset(input = {}) {
     height: input.height ?? null,
     duration: input.duration ?? null,
     parentAsset: input.parentAsset || null,
+    subtype: input.subtype || null,
     version: input.version ?? 1,
+    metadata: input.metadata && typeof input.metadata === "object" ? { ...input.metadata } : {},
   };
 }
 

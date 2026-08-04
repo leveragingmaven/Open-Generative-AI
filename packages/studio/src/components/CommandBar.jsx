@@ -64,7 +64,7 @@ export default function CommandBar({ onNavigate, enabledTabIds = null }) {
     setOpen(false);
     setQuery("");
     inputRef.current?.blur();
-    onNavigate(item.route);
+    onNavigate(item.route, item.params);
   };
 
   const handleKeyDown = (event) => {
@@ -137,13 +137,20 @@ export default function CommandBar({ onNavigate, enabledTabIds = null }) {
                     className={`w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${active ? "bg-[#D4A858]/[0.12] text-white" : "text-[#C7C7C7] hover:bg-white/[0.05]"}`}
                   >
                     <span className="truncate">{item.label}</span>
-                    {item.status === "coming-soon" ? (
-                      <span className="flex-shrink-0 inline-flex rounded-full border border-white/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-white/40">Coming Soon</span>
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#D4A858]/60">
-                        <path d="M5 12h14M12 5l7 7-7 7" />
-                      </svg>
-                    )}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {item.studio && (
+                        <span className="hidden rounded-full border border-[#22d3ee]/25 bg-[#22d3ee]/[0.07] px-2 py-0.5 text-[9px] uppercase tracking-wider text-[#22d3ee] md:inline-flex">
+                          {item.studio}
+                        </span>
+                      )}
+                      {item.status === "coming-soon" ? (
+                        <span className="flex-shrink-0 inline-flex rounded-full border border-white/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-white/40">Coming Soon</span>
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#D4A858]/60">
+                          <path d="M5 12h14M12 5l7 7-7 7" />
+                        </svg>
+                      )}
+                    </span>
                   </button>
                 );
               })}

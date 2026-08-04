@@ -6,6 +6,9 @@
 // belong to the future Creative Skills Engine.
 
 import productHeroPhotography from "./product-hero-photography.js";
+import aiClipping from "./ai-clipping.js";
+import vibeMotion from "./vibe-motion.js";
+import recast from "./recast.js";
 import cameraPanTilt from "./camera-pan-tilt.js";
 import cameraZoomLens from "./camera-zoom-lens.js";
 import cameraDollyTracking from "./camera-dolly-tracking.js";
@@ -16,6 +19,9 @@ import cameraSpecialTechniques from "./camera-special-techniques.js";
 
 export const SKILL_LIBRARY = Object.freeze({
   [productHeroPhotography.skillId]: productHeroPhotography,
+  [aiClipping.skillId]: aiClipping,
+  [vibeMotion.skillId]: vibeMotion,
+  [recast.skillId]: recast,
   [cameraPanTilt.skillId]: cameraPanTilt,
   [cameraZoomLens.skillId]: cameraZoomLens,
   [cameraDollyTracking.skillId]: cameraDollyTracking,

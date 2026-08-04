@@ -20,6 +20,24 @@ export const TWIN_STATUSES = Object.freeze({
 export const TWIN_SOURCES = Object.freeze({
   HUB: "hub",
   PHOTOS: "photos",
+  BLUEPRINT: "blueprint",
+});
+
+// Twin approval modes — how the twin routes creative work before it executes.
+export const TWIN_APPROVAL_MODES = Object.freeze(["auto", "review", "manual"]);
+
+// Default creative settings applied to every new twin. Settings are stored on
+// the twin record (no separate store) so a twin is self-contained.
+export const TWIN_DEFAULT_SETTINGS = Object.freeze({
+  temperature: 0.7,
+  approvalMode: "review",
+  defaultWorkflowId: null,
+  permissions: [],
+});
+
+export const TWIN_DEFAULT_PROVIDERS = Object.freeze({
+  default: "muapi",
+  enabled: ["muapi"],
 });
 
 // Reusable Twin Asset types. Once approved, these become available throughout
@@ -85,6 +103,38 @@ const normalizeStatus = (status) => {
   return TWIN_STATUSES[key] || TWIN_STATUSES.DRAFT;
 };
 
+const normalizeSource = (source) => {
+  if (source === TWIN_SOURCES.HUB) return TWIN_SOURCES.HUB;
+  if (source === TWIN_SOURCES.BLUEPRINT) return TWIN_SOURCES.BLUEPRINT;
+  return TWIN_SOURCES.PHOTOS;
+};
+
+function normalizeTwinSettings(settings = {}) {
+  const temperature = Number(settings.temperature);
+  return {
+    temperature:
+      Number.isFinite(temperature) && temperature >= 0 && temperature <= 2
+        ? temperature
+        : TWIN_DEFAULT_SETTINGS.temperature,
+    approvalMode: TWIN_APPROVAL_MODES.includes(settings.approvalMode)
+      ? settings.approvalMode
+      : TWIN_DEFAULT_SETTINGS.approvalMode,
+    defaultWorkflowId: settings.defaultWorkflowId || TWIN_DEFAULT_SETTINGS.defaultWorkflowId,
+    permissions: Array.isArray(settings.permissions)
+      ? [...settings.permissions]
+      : TWIN_DEFAULT_SETTINGS.permissions,
+  };
+}
+
+function normalizeProviders(providers = {}) {
+  const enabled = Array.isArray(providers.enabled) && providers.enabled.length
+    ? [...providers.enabled]
+    : [...TWIN_DEFAULT_PROVIDERS.enabled];
+  const preferred = providers.default || TWIN_DEFAULT_PROVIDERS.default;
+  if (!enabled.includes(preferred)) enabled.push(preferred);
+  return { default: preferred, enabled };
+}
+
 export function createReferenceImage(input = {}) {
   const createdAt = input.uploadedAt || input.createdAt || now();
   return {
@@ -129,7 +179,12 @@ export function createTwinProfile(input = {}) {
     id: input.id || uid("twin"),
     name: input.name || "My AI Twin",
     status: normalizeStatus(input.status),
-    source: input.source === TWIN_SOURCES.HUB ? TWIN_SOURCES.HUB : TWIN_SOURCES.PHOTOS,
+    source: normalizeSource(input.source),
+    // Role/persona — a twin is a reusable creative collaborator. `role` is the
+    // functional title (e.g. Marketing Strategist); `personality` is the tone of
+    // its conversational and creative behaviour.
+    role: input.role || "",
+    personality: input.personality || "",
     // Path 1: identity imported/referenced from the MavenSync Hub. Never
     // duplicated here — we keep a shallow reference to the Hub knowledge the
     // twin was started from.
@@ -159,6 +214,17 @@ export function createTwinProfile(input = {}) {
         : null,
     // Creative Defaults — preferred Creative Skills for this twin.
     creativeDefaults: Array.isArray(input.creativeDefaults) ? [...input.creativeDefaults] : [],
+    // Knowledge collections the twin is allowed to read (type ids aligned with
+    // the Knowledge Center / Creative Memory types).
+    knowledge: Array.isArray(input.knowledge) ? [...input.knowledge] : [],
+    brandVoice: input.brandVoice || "",
+    // Campaign access — which campaigns this twin may attach work to.
+    campaignAccess: Array.isArray(input.campaignAccess) ? [...input.campaignAccess] : [],
+    // Preferred providers + creative generation settings.
+    providers: normalizeProviders(input.providers),
+    settings: normalizeTwinSettings(input.settings),
+    // Preferred workflows this twin can run (workflow template ids).
+    preferredWorkflows: Array.isArray(input.preferredWorkflows) ? [...input.preferredWorkflows] : [],
     assets: Array.isArray(input.assets) ? input.assets.map((a) => createTwinAsset(a)) : [],
     workflowId: input.workflowId || null,
     campaignId: input.campaignId || null,

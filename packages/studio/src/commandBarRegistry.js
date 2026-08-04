@@ -11,6 +11,9 @@
 //   tabId     — (optional) shell tab backing this destination; used to hide it
 //               when the tab is disabled (e.g. agency mode)
 //   status    — (optional) 'coming-soon' marks a placeholder destination
+//   params    — (optional) extra navigation data (e.g. { twinId, twinBlueprintId })
+
+import { resolveIntent, recommendTwinForIntent } from './lib/intents/IntentRouter.js';
 
 export const COMMAND_SECTIONS = [
   {
@@ -63,6 +66,20 @@ export const COMMAND_SECTIONS = [
         tabId: 'ai-twin',
         keywords: ['twin', 'identity', 'likeness', 'digital identity', 'digital twin', 'avatar'],
         route: '/studio/ai-twin',
+      },
+      {
+        id: 'ai-twin-workspace',
+        label: 'AI Twin Workspace',
+        tabId: 'ai-twin',
+        keywords: ['ai twin', 'twins', 'conversation', 'chat', 'digital identity', 'workspace'],
+        route: '/studio/ai-twin',
+      },
+      {
+        id: 'agents-studio',
+        label: 'Agents Studio',
+        tabId: 'agents',
+        keywords: ['agent', 'agents', 'specialist', 'specialists', 'assistant', 'expert'],
+        route: '/studio/agents',
       },
       {
         id: 'workflow',
@@ -150,6 +167,9 @@ export const COMMAND_SECTIONS = [
 // Returns sections (with their matching items) for a query.
 // An empty query returns every destination so the dropdown doubles as a menu.
 // `enabledTabIds` (optional Set) filters tab-backed destinations.
+// When the query resolves to a registered intent, that intent is surfaced as
+// the primary INTENT section — generated from the Intent Router, never
+// hardcoded here.
 export function searchCommandDestinations(query, enabledTabIds = null) {
   const q = (query || '').trim().toLowerCase();
   const sections = [];
@@ -162,5 +182,63 @@ export function searchCommandDestinations(query, enabledTabIds = null) {
     });
     if (items.length) sections.push({ ...section, items });
   }
+
+  const resolved = resolveIntent(q);
+  if (resolved && (!enabledTabIds || !resolved.intent.target.tabId || enabledTabIds.has(resolved.intent.target.tabId))) {
+    const target = resolved.intent.target;
+    let params;
+    if (target.twinBlueprintId) {
+      const recommendation = recommendTwinForIntent(resolved.intent);
+      params = recommendation
+        ? recommendation.kind === 'twin'
+          ? { twinId: recommendation.twinId, twinBlueprintId: target.twinBlueprintId, view: 'conversations' }
+          : { twinBlueprintId: recommendation.blueprintId, view: 'conversations' }
+        : { twinBlueprintId: target.twinBlueprintId, view: 'conversations' };
+    } else if (resolved.intent.id === 'repurpose-shorts') {
+      // Deep-link into Video Studio Repurpose mode; context is filled by the
+      // studio from the active campaign / Creative Library. The Command Bar
+      // resolves intent and routes context only — never a provider.
+      params = { view: 'repurpose', recipeId: target.recipeId, skillIds: target.skillIds };
+    } else if (resolved.intent.id === 'motion-graphics') {
+      // Deep-link into Marketing Studio Motion Graphics; context is filled by
+      // the studio from the Workflow Template Library / active campaign. The
+      // Command Bar resolves intent and routes context only — never a provider.
+      params = {
+        view: 'motion',
+        recipeId: target.recipeId,
+        skillIds: target.skillIds,
+        intent: resolved.matchedPhrase || null,
+      };
+    } else if (resolved.intent.id === 'talking-avatar') {
+      // Deep-link into Character Studio Performance Transfer; context is filled
+      // by the studio from the identity source / active campaign. The Command
+      // Bar resolves intent and routes context only — never a provider.
+      params = {
+        view: 'character',
+        recipeId: target.recipeId,
+        skillIds: target.skillIds,
+        intent: resolved.matchedPhrase || null,
+      };
+    }
+    sections.unshift({
+      id: 'intents',
+      label: 'INTENT',
+      items: [
+        {
+          id: `intent-${resolved.intent.id}`,
+          label: resolved.intent.name,
+          keywords: [resolved.matchedPhrase, target.recipeId, target.studio].filter(Boolean),
+          route: target.route,
+          tabId: target.tabId,
+          params,
+          intentId: resolved.intent.id,
+          recipeId: target.recipeId,
+          studio: target.studio,
+          status: target.route ? undefined : 'coming-soon',
+        },
+      ],
+    });
+  }
+
   return sections;
 }

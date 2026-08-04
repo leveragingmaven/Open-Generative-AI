@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinStudio, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -118,6 +118,10 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [twinTarget, setTwinTarget] = useState(null);
+  const [repurposeTarget, setRepurposeTarget] = useState(null);
+  const [motionTarget, setMotionTarget] = useState(null);
+  const [characterTarget, setCharacterTarget] = useState(null);
   const [marketingExpanded, setMarketingExpanded] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
   const [showVadooBanner, setShowVadooBanner] = useState(() => {
@@ -237,7 +241,37 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   // Command Bar navigation: reuse the in-shell tab pattern for tab destinations,
   // full route navigation otherwise (e.g. Coming Soon placeholder pages).
-  const handleCommandNavigate = (route) => {
+  // Intent destinations may carry twin params (twinId/twinBlueprintId) which
+  // deep-link straight into the AI Twin Workspace conversation.
+  const handleCommandNavigate = (route, params) => {
+    if (params && (params.twinId || params.twinBlueprintId)) {
+      setTwinTarget({ ...params, requestId: Date.now() });
+      handleTabChange('ai-twin');
+      return;
+    }
+    if (params && params.view === 'repurpose') {
+      // Command Bar intent → Video Studio Repurpose mode with routing context
+      // (recipe/skill). The studio fills source + campaign from its own context.
+      setRepurposeTarget({ ...params, requestId: Date.now() });
+      handleTabChange('video');
+      return;
+    }
+    if (params && params.view === 'motion') {
+      // Command Bar intent → Marketing Studio Motion Graphics view with routing
+      // context (recipe/skill/template). The panel resolves the template and
+      // skill from the shared job builder + Workflow Template Library.
+      setMotionTarget({ ...params, requestId: Date.now() });
+      handleTabChange('marketing');
+      return;
+    }
+    if (params && params.view === 'character') {
+      // Command Bar intent → Character Studio Performance Transfer with routing
+      // context (recipe/skill). The panel resolves identity + skill/recipe from
+      // the shared job builder.
+      setCharacterTarget({ ...params, requestId: Date.now() });
+      handleTabChange('character');
+      return;
+    }
     if (route === '/studio') {
       handleTabChange('asset-library');
       return;
@@ -405,7 +439,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       )}
       {visibleTabIds.has('video') && (
         <div className={activeTab === 'video' ? "h-full w-full" : "hidden"}>
-          <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} />
+          <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} repurposeTarget={repurposeTarget} onRepurposeTargetHandled={() => setRepurposeTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('clipping') && (
@@ -440,7 +474,12 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       )}
       {visibleTabIds.has('marketing') && (
         <div className={activeTab === 'marketing' ? "h-full w-full" : "hidden"}>
-          <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} />
+          <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />
+        </div>
+      )}
+      {visibleTabIds.has('character') && (
+        <div className={activeTab === 'character' ? "h-full w-full" : "hidden"}>
+          <CharacterStudio apiKey={studioApiKey} characterTarget={characterTarget} onCharacterTargetHandled={() => setCharacterTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('workflows') && (
@@ -467,7 +506,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       )}
       {visibleTabIds.has('ai-twin') && (
         <div className={activeTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
-          <AiTwinStudio apiKey={studioApiKey} />
+          <AiTwinTab apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} twinTarget={twinTarget} onTwinTargetHandled={() => setTwinTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('ai-influencer') && (

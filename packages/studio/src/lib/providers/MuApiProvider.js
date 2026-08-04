@@ -26,6 +26,10 @@ export class MuApiProvider extends CreativeProvider {
       marketing_generation: "generateMarketingStudioAd",
       recast: "processRecast",
       lip_sync: "processLipSync",
+      ai_clipping: "runClipping",
+      motion_graphics: "runMotionGraphics",
+      motion_graphics_edit: "runMotionGraphicsEdit",
+      performance_transfer: "processRecast",
     };
     const methodName = methods[operation] || operation;
     if (!methodName || typeof this[methodName] !== "function") this.notImplemented(`execute:${operation || "unknown"}`);

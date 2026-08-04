@@ -11,6 +11,9 @@ const EXPECTED_SKILL_IDS = [
   "camera-human-camera",
   "camera-drone-crane",
   "camera-special-techniques",
+  "ai-clipping",
+  "vibe-motion",
+  "recast",
 ];
 
 const REQUIRED_FIELDS = [

@@ -9,6 +9,7 @@ import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
+import VideoRepurposePanel from "./repurpose/VideoRepurposePanel.jsx";
 import {
   t2vModels,
   i2vModels,
@@ -399,12 +400,15 @@ export default function VideoStudio({
   historyItems,
   droppedFiles,
   onFilesHandled,
+  repurposeTarget = null,
+  onRepurposeTargetHandled,
 }) {
   const PERSIST_KEY = "hg_video_studio_persistent";
 
   // ── mode state ──
   const [imageMode, setImageMode] = useState(false); // i2v
   const [v2vMode, setV2vMode] = useState(false);
+  const [repurposeMode, setRepurposeMode] = useState(false);
 
   // ── model / params ──
   const defaultModel = t2vModels[0];
@@ -486,6 +490,16 @@ export default function VideoStudio({
   // ── derived data ──
   const history = historyItems ?? localHistory;
   const { activeCampaign } = useActiveCampaign();
+
+  // Command Bar repurpose intent → enter Repurpose mode once. The routing
+  // context (recipe/skill) is consumed by the panel; the shell target is cleared
+  // so a repeat navigation re-triggers this effect.
+  useEffect(() => {
+    if (repurposeTarget?.recipeId === "repurposeVideo" && !repurposeMode) {
+      setRepurposeMode(true);
+      onRepurposeTargetHandled?.();
+    }
+  }, [repurposeTarget?.recipeId, repurposeTarget?.requestId, repurposeMode, onRepurposeTargetHandled]);
 
   const getCurrentModels = useCallback(() => {
     if (v2vMode) return v2vModels;
@@ -2138,6 +2152,28 @@ export default function VideoStudio({
         batchSize={1}
         onAddHistoryItem={handleDrawReference}
       />
+
+      {/* ── REPURPOSE MODE ── */}
+      {!repurposeMode && (
+        <button
+          type="button"
+          onClick={() => {
+            setRepurposeMode(true);
+            onRepurposeTargetHandled?.();
+          }}
+          className="absolute top-4 right-4 z-30 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25 transition-colors"
+          title="Repurpose a video into short-form clips (TikTok / Shorts / Reels)"
+        >
+          Repurpose
+        </button>
+      )}
+      {repurposeMode && (
+        <VideoRepurposePanel
+          apiKey={apiKey}
+          repurposeTarget={repurposeTarget}
+          onExit={() => setRepurposeMode(false)}
+        />
+      )}
     </div>
   );
 }
