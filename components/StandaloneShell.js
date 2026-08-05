@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -504,6 +504,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           <AppsStudio apiKey={studioApiKey} />
         </div>
       )}
+      {visibleTabIds.has('mcp-cli') && (
+        <div className={activeTab === 'mcp-cli' ? "h-full w-full" : "hidden"}>
+          <McpCliStudio />
+        </div>
+      )}
       {visibleTabIds.has('ai-twin') && (
         <div className={activeTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
           <AiTwinTab apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} twinTarget={twinTarget} onTwinTargetHandled={() => setTwinTarget(null)} />
@@ -782,6 +787,24 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
                   {visibleTabIds.has('video') && (
                     renderNavItem(menuTab('video'))
                   )}
+                  {visibleTabIds.has('clipping') && (
+                    renderNavItem(menuTab('clipping'))
+                  )}
+                  {visibleTabIds.has('vibe-motion') && (
+                    renderNavItem(menuTab('vibe-motion'))
+                  )}
+                  {visibleTabIds.has('body-swap') && (
+                    renderNavItem(menuTab('body-swap'))
+                  )}
+                  {visibleTabIds.has('cinema') && (
+                    renderNavItem(menuTab('cinema'))
+                  )}
+                  {visibleTabIds.has('character') && (
+                    renderNavItem(menuTab('character'))
+                  )}
+                  {visibleTabIds.has('design-agent') && (
+                    renderNavItem(menuTab('design-agent'))
+                  )}
 
                   {/* Marketing Studio: expandable submenu */}
                   {visibleTabIds.has('marketing') && (
@@ -840,6 +863,12 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
                   )}
                   {visibleTabIds.has('workflows') && (
                     renderNavItem(menuTab('workflows'))
+                  )}
+                  {visibleTabIds.has('agents') && (
+                    renderNavItem(menuTab('agents'))
+                  )}
+                  {visibleTabIds.has('mcp-cli') && (
+                    renderNavItem(menuTab('mcp-cli'))
                   )}
                   {visibleTabIds.has('audio') && (
                     renderNavItem(menuTab('audio'))

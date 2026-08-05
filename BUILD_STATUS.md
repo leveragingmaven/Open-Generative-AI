@@ -915,3 +915,81 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
   - Creative Skills Library complete (Phase 1)
   - Runtime Integration is the next implementation milestone
   - Story Resolution remains the final Storytelling skill before runtime integration
+
+## Milestone: Story Resolution Skill Complete (Skill 015)
+
+- Story Resolution (Skill 015) implemented + Story Continuity (Skill 014).
+- Registered in `SKILL_LIBRARY`; `EXPECTED_SKILL_IDS` updated to 25 entries.
+- Studio suite raised to **666/666 passing**.
+- Commit: `b63686c feat: complete first-generation Creative Skills library`.
+
+## Milestone: Phase 3 Completion Sprint — Sprints 0-3 (AI Twin Recovery) (2026-08-05)
+
+Phase 3 Completion Sprint goal: surface, reconnect, and complete existing functionality
+— no new features, no redesign. Work on branch `mavensync-integration`.
+
+### Sprint 0-1: Inventory + Navigation & Routing Audit
+
+- Audited 3 navigation surfaces: sidebar (`StandaloneShell.js`), Command Bar
+  (`commandBarRegistry.js`), tab registry (`studioNavigation.js`). **22 registered tabs.**
+- Routing contract verified sound (`getInitialTab`, `handleCommandNavigate`, popstate,
+  coming-soon route, Agency Mode filtering).
+- Found: 6 mounted-but-unreachable studios (clipping, vibe-motion, body-swap, cinema,
+  character, design-agent) + 7 missing Command Bar destinations.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint1_Navigation_Routing_Audit.md`.
+
+### Sprint 2 — Workspace Visibility
+
+- Surfaced fully-built but hidden `McpCliStudio` (MCP & CLI) into shell + Command Bar + TABS.
+- Added missing sidebar entries and Command Bar destinations; all 22 tabs now reachable
+  from both surfaces.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint2_Workspace_Visibility.md`.
+- **Validation:** studio suite 666/666, `build:studio`, full `npm run build` all pass.
+
+### Sprint 3 — AI Twin Recovery & Completion
+
+- Audited AI Twin: `AiTwinTab` + `AiTwinWorkspace` (8 sections) + `AiTwinStudio` (9-step
+  wizard) + `lib/twin/*` (10 modules) + Intent Router twin wiring.
+- **Result: fully implemented and wired — no hidden, stubbed, or orphaned functionality.**
+  All checks pass: navigation, UI channels, campaign awareness, Creative Memory, Knowledge,
+  Creative Skills, agent handoff, Command Bar twin deep-links.
+- Twin tests + Intent Router: **60/60**; full suite **666/666**.
+- No code changes (pure audit/recovery verification).
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint3_AI_Twin_Recovery.md`.
+
+### Sprint 4 — Agents Validation & Completion
+
+- Audited Creative OS Agents workspace `AgentStudio` (791 lines):
+  Featured / My Agents / My Chats, categories, search, chat, create/edit,
+  twin assignment, settings — **all Production Ready**.
+- Audited `lib/agents/*` (6 modules): Profile, Store, ChatStore, Runtime,
+  Templates, Categories — **all fully connected**.
+- **Integrations validated (9):** AI Twin, Creative Memory, Knowledge Center,
+  Campaign Context, Creative Skills, Intent Router, Command Bar, Workflow.
+- Agent tests **34/34**; full studio suite **666/666**; app build passes.
+- **Duplicate identified:** vendored `ai-agent` package at `/agents/*`
+  (live-MuAPI server-backed) is separate from Creative OS `AgentStudio`
+  and not linked in nav. Recommendation: **Creative OS `AgentStudio` is
+  canonical**; `/agents/*` preserved, not surfaced.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint4_Agents_Validation_Completion.md`.
+
+### Platform Readiness
+
+| Area | Status | Confidence |
+|---|---|---|
+| Navigation | Complete | 100% |
+| Routing | Complete | 100% |
+| AI Twin | Complete | 100% |
+| Agents | Complete | 100% |
+| Campaigns | Pending | — |
+| Studios | Pending | — |
+
+### Upcoming
+
+- Sprint 5 — Campaign Workspace.
+- Sprint 6 — Studio Audit (incl. Character Studio 3/4 stubs).
+- Sprints 7-9 — Shared Components, Empty States & Polish, Production QA.
+- Phase 3 final deliverables: checklist reports, updated BUILD_STATUS, git commit.
+- Code changes made so far (Sprints 1-2) are **uncommitted**:
+  `StandaloneShell.js`, `studioNavigation.js`, `commandBarRegistry.js`,
+  plus milestone docs.
