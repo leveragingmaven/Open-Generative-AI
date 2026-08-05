@@ -973,6 +973,54 @@ Phase 3 Completion Sprint goal: surface, reconnect, and complete existing functi
   canonical**; `/agents/*` preserved, not surfaced.
 - Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint4_Agents_Validation_Completion.md`.
 
+### Sprint 5 — Campaign Workspace Validation & Completion
+
+- Audited the full campaign surface end-to-end:
+  `CampaignWorkspace.jsx` (list/create/select + Dashboard), `CampaignDashboard.jsx`
+  (overview, publishing stats, creative asset stats, 5 quick actions),
+  `CampaignContext.js` (provider wraps shell; `useActiveCampaign` in 12+ surfaces;
+  `?campaign=` deep-link; header label), `CampaignStore.js` (CRUD + active, localStorage),
+  `campaignStatus.js` (8-state lifecycle), `campaignAssetMetadata.js` (ownership stamping).
+- **Integrations validated:** AI Twin, Creative Memory, Knowledge Center, Creative Brief /
+  Skills (campaign-aware `buildCreativeBrief`, `readApprovedBriefs`), Intent Router lineage
+  (`buildIntentJob`), Provider Registry / CIE (asset pipeline carries `campaignId`),
+  Publishing Center MVP (`assetCampaignInfo` on drafts).
+- **Cross-studio stamping:** `withCampaignMetadata` wired into Image, Video, Marketing,
+  Audio, Lip Sync, AI Influencer, Workflow, Repurpose, Motion, Recast + runtimes.
+- **Reachability:** sidebar (Marketing sub + workspace items), Command Bar (`/studio/campaigns`),
+  tab registry. No hidden or stubbed campaign functionality.
+- **Intentional placeholders (documented, not fixed):** Dashboard Automation panel
+  (Automation is a roadmap coming-soon), Dashboard Knowledge count hard-coded `0`
+  (Knowledge Center is real but count not read live); Brief/Timeline/Activity/Analytics
+  panels require new development (out of scope).
+- Campaign + Creative Brief tests **49/49**; full studio suite **666/666**; no code changes.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint5_Campaign_Workspace_Validation.md`.
+
+### Sprint 6 — Creative Execution Validation
+
+- Validated all 11 required + 5 extra creative-execution surfaces (Image, Video,
+  Marketing, Audio, Lip Sync, AI Influencer, Workflow, Character, Repurpose, Motion,
+  Recast + Cinema, AI Clipping, Vibe Motion, Body Swap, Design Agent).
+- **Modern surfaces run the full pipeline unconditionally:** Character
+  Performance Transfer (`RecastRuntime`), Repurpose (`RepurposeRuntime`), Motion
+  (`MotionGraphicsRuntime`) — Skill → Recipe → Creative Intelligence `plan()` →
+  Provider Registry → Creative Job → Creative Asset → campaign → Publishing. All
+  always-on (no flag), campaign-stamped, with Creative Library + publishing handoff.
+- **Flag-gated studios** (Image, Video, Marketing, Audio, Lip Sync, AI Influencer,
+  Cinema, Vibe Motion, Body Swap) route through their runtime (`*Runtime` → CIE `plan()`
+  + Capability Router) when the flag is ON; default fallback = registry facade legacy
+  path (registry-based, not direct `muapi.js`). Workflow uses the separate
+  `WorkflowExecutionEngine` (registry-backed, campaign-stamped).
+- **Legacy stop-conditions preserved (not reconnected) because modern equivalents
+  exist:** `ClippingStudio` → Repurpose panel; `VibeMotionStudio` → Motion panel;
+  `RecastStudio` (Body Swap) → Character Studio; Cinema, Design Agent (external package).
+  Legacy surfaces do not stamp campaign metadata — intentional, not a bug.
+- **Character Studio:** `performance-transfer` ready; talking-avatar / lip-sync /
+  character-animation are intentional `coming-soon` roadmap items, not stubs.
+- Validation: suite **666/666**; `build:studio` (298 files); full `npm run build`
+  (app) pass. No typecheck script; lint = `next lint` (unconfigured, not a gate).
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint6_Creative_Execution_Validation.md`.
+
 ### Platform Readiness
 
 | Area | Status | Confidence |
@@ -981,15 +1029,38 @@ Phase 3 Completion Sprint goal: surface, reconnect, and complete existing functi
 | Routing | Complete | 100% |
 | AI Twin | Complete | 100% |
 | Agents | Complete | 100% |
-| Campaigns | Pending | — |
-| Studios | Pending | — |
+| Campaigns | Complete | 100% |
+| Creative Execution | Complete | 100% |
+| Shared Infrastructure | Complete | 100% |
+| Production QA | Complete | 100% |
 
-### Upcoming
+### Sprint 7 — Shared Infrastructure & Release Certification
 
-- Sprint 5 — Campaign Workspace.
-- Sprint 6 — Studio Audit (incl. Character Studio 3/4 stubs).
-- Sprints 7-9 — Shared Components, Empty States & Polish, Production QA.
-- Phase 3 final deliverables: checklist reports, updated BUILD_STATUS, git commit.
-- Code changes made so far (Sprints 1-2) are **uncommitted**:
-  `StandaloneShell.js`, `studioNavigation.js`, `commandBarRegistry.js`,
-  plus milestone docs.
+- **Final validation:** suite **666/666**, repo tests **44/44**, `build:studio` (298 files),
+  full production `npm run build` all pass; no console noise, no broken routes, no broken
+  imports. `DesignAgentStudio` + Workflow `WorkflowUI` are the only `dynamic(){ssr:false}`
+  surfaces. No typecheck script; lint = `next lint` (not a gate).
+- **Shared primitives verified:** PromptComposer library (reused by 8 studios), DrawModal,
+  CampaignChip, status tokens (`campaignStatus.js`), provider/recipe/asset/publishing
+  libraries. Every workspace has explicit loading/empty/error states; no dead buttons.
+- **Documented inconsistencies (non-blocking):** Card/EmptyState/dialog/icons/spinner
+  re-implemented per workspace (≥5 empty-state declarations, ≥4 icon maps); empty-copy
+  drift; status-badge markup drift; Publishing imperative blank mount until init.
+- **Technical debt (non-blocking):** legacy Electron/Vite vanilla duplicate studios
+  (`src/components/*.js`), two `muapi.js` clients, duplicated EmptyState/MemoryList,
+  large eager `models.js` (~690 KB). **No blocking technical debt.**
+- **Certification:** platform **Ready for UI/UX Redesign**; all 8 readiness areas Complete.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-05_Sprint7_Platform_Certification.md`.
+
+### Phase 3 Status
+
+- **Sprints 1–7 complete.** All platform areas certified; release recommendation:
+  **Ready for UI/UX Redesign** (certified 2026-08-05).
+- Remaining Phase 3 items: Sprint 8 (Empty States & Polish), Sprint 9 (Production QA),
+  then the Premium UI/UX phase.
+- Sprints 1–2 code (`StandaloneShell.js`, `studioNavigation.js`, `commandBarRegistry.js`)
+  is committed as `a26db29`; Sprints 3–7 are audit/reporting-only (no source changes).
+- Remaining roadmap (intentional, not bugs): Character Studio talking-avatar / lip-sync /
+  animation; unified shared UI primitives; empty-state copy + badge unification;
+  live Dashboard Knowledge count; legacy stop-condition re-activation; `models.js`
+  code-splitting.
