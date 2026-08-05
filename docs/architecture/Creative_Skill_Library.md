@@ -17,7 +17,7 @@ Legend: `✓` built and tested · `□` planned / in progress
 - ✓ Positioning
 - ✓ Offer Strategy
 - ✓ Customer Transformation
-- ✓ CTA Strategy
+- ✓ Call to Action Strategy
 
 ## Storytelling
 
@@ -28,12 +28,22 @@ Legend: `✓` built and tested · `□` planned / in progress
 - ✓ Story Continuity
 - □ Story Resolution
 
-## Future
+## Future Skill Packs
 
 - Sales Psychology
 - Creative Direction
-- Performance
+- Performance Intelligence
 - Living Skill Memory
+
+## Retired / Absorbed
+
+The following were considered as Creative Skill Packs but are no longer planned. Their intent is now provided through **Hub Knowledge** rather than implemented as deterministic Creative Skills:
+
+- Coaching
+- Education
+- Brand Voice
+- Pinterest
+- Instagram
 
 ---
 

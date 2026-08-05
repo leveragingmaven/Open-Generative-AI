@@ -257,6 +257,96 @@ The canonical flow diagram and the standard generation flow (13 steps) are speci
 
 ---
 
+## 6.1 Creative Intelligence Architecture
+
+The architectural refinement reached with the Creative Skills Library foundation. It is a clean separation of three concerns that minimizes duplication, simplifies maintenance, and reduces inference cost.
+
+### Hub Responsibilities
+
+The Hub **owns knowledge**. This includes:
+
+- Brand DNA
+- Knowledge Library
+- Specialist output
+- Campaign strategy
+- Research
+- Customer Psychology
+- 8-Layer Psychology
+- Creator IP
+
+The Hub answers:
+
+> What should be created?
+
+### Creative Skills Responsibilities
+
+Creative Skills **own deterministic reasoning**. Skills evaluate:
+
+- Communication quality
+- Marketing quality
+- Storytelling quality
+- Creative execution
+
+Creative Skills **do not own knowledge**. They consume structured knowledge supplied by the Hub.
+
+### AI Twin Responsibilities
+
+The AI Twin **owns creative performance**. This includes:
+
+- Personality
+- Voice
+- Delivery
+- Rhythm
+- Pauses
+- Communication style
+
+The AI Twin answers:
+
+> How would this creator deliver the content?
+
+### Platform Flow
+
+```text
+Hub
+  ↓
+Creative Brief
+  ↓
+Creative Skills
+  ↓
+AI Twin
+  ↓
+Studios
+  ↓
+Creative Assets
+```
+
+### Architectural Principle
+
+- Knowledge lives in the **Hub**.
+- Reasoning lives in **Creative Skills**.
+- Performance lives in the **AI Twin**.
+
+This separation minimizes duplication, simplifies maintenance, and reduces inference cost.
+
+### Future Architecture
+
+Add to the roadmap: **Living Skill Memory**. Future enhancement only — not implemented.
+
+Purpose: each Creative Skill will eventually own lightweight memory consisting of:
+
+- approved examples
+- rejected examples
+- lessons learned
+- creator preferences
+- statistics
+- confidence
+
+The deterministic reasoning inside each skill remains unchanged while its supporting knowledge evolves over time.
+
+This concept was inspired by enterprise memory architectures but intentionally adapted to preserve MavenSync's low-cost, deterministic architecture.
+
+---
+
 ## 7. AI Twin
 
 - **Identity model:** a Character Identity is one of `influencer`, `twin`, or `upload` (`lib/characters/CharacterIdentity.js`).

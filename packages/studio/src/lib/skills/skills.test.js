@@ -27,6 +27,7 @@ const EXPECTED_SKILL_IDS = [
   "narrative-flow",
   "emotional-pacing",
   "character-perspective",
+  "story-resolution",
 ];
 
 const REQUIRED_FIELDS = [

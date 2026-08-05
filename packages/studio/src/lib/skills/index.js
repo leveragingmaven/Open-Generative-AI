@@ -29,6 +29,7 @@ import storyStructure from "./story-structure.js";
 import narrativeFlow from "./narrative-flow.js";
 import emotionalPacing from "./emotional-pacing.js";
 import characterPerspective from "./character-perspective.js";
+import storyResolution from "./story-resolution.js";
 
 export const SKILL_LIBRARY = Object.freeze({
   [productHeroPhotography.skillId]: productHeroPhotography,
@@ -55,6 +56,7 @@ export const SKILL_LIBRARY = Object.freeze({
   [narrativeFlow.skillId]: narrativeFlow,
   [emotionalPacing.skillId]: emotionalPacing,
   [characterPerspective.skillId]: characterPerspective,
+  [storyResolution.skillId]: storyResolution,
 });
 
 // Version 1 public API: lookup only. Mirrors RecipeResolver.resolve.
@@ -188,3 +190,15 @@ export {
   evaluateCharacterPerspective,
   verifyCharacterPerspective,
 } from "./character-perspective.js";
+export {
+  STORY_RESOLUTION_SKILL_ID,
+  RESOLUTION_PATTERNS,
+  CLOSURE_MARKERS,
+  TRANSFORMATION_MARKERS,
+  RESOLUTION_VOCAB,
+  analyzeStoryResolution,
+  buildRecommendations as buildStoryResolutionRecommendations,
+  preserveStoryResolution,
+  evaluateStoryResolution,
+  verifyStoryResolution,
+} from "./story-resolution.js";
