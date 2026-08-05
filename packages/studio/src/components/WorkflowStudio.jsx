@@ -24,6 +24,19 @@ import dynamic from "next/dynamic";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { notify } from "../lib/notifications/notify.js";
 import CampaignChip from "./CampaignChip.jsx";
+import {
+  EmptyState,
+  ErrorState,
+  ExperiencePage,
+  LoadingState,
+  PrimaryButton,
+  SecondaryButton,
+  StatusBadge,
+  WorkspaceCard,
+  WorkspaceHeader,
+  WorkspaceHero,
+  WorkspaceSection,
+} from "./experience/ExperienceComponents.jsx";
 
 const WorkflowUI = dynamic(() => import("./WorkflowUI"), {
   ssr: false,
@@ -61,52 +74,70 @@ function loadWorkflowTemplates(apiKey) {
   return inFlightTemplates;
 }
 
+const WORKFLOW_VIEWS = {
+  templates: { label: "Templates", eyebrow: "Workflow Library", description: "Existing ready-made workflows from the current provider." },
+  "my-workflows": { label: "My Workflows", eyebrow: "Continue Working", description: "Your existing saved workflows and Builder projects." },
+  published: { label: "Published", eyebrow: "Shared Workflows", description: "Existing published workflows available from the current provider." },
+};
+
+function WorkflowIcon({ type, size = 18 }) {
+  const paths = {
+    workflow: <><path d="M7 7h10v4H7zM4 15h6v4H4zM14 15h6v4h-6z" /><path d="M12 11v2M7 13h10M7 13v2M17 13v2" /></>,
+    library: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 12 9 5 9-5M3 16l9 5 9-5" /></>,
+    run: <><path d="m8 5 11 7-11 7V5Z" /></>,
+    activity: <><path d="M3 12h4l2-6 4 12 2-6h6" /></>,
+    arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    status: <><circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.2 2.2L16 9" /></>,
+  };
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
+}
+
+function workflowDescription(workflow) {
+  return workflow.description || workflow.raw?.description || "Open this existing workflow to review its inputs, execution controls, and Builder definition.";
+}
+
 function WorkflowCard({ workflow, onClick, activeTab, onRename, onDelete }) {
   const [showOptions, setShowOptions] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  const nodeCount = activeTab === "my-workflows"
+    ? Array.isArray(workflow.nodes) ? workflow.nodes.length : Array.isArray(workflow.data?.nodes) ? workflow.data.nodes.length : null
+    : null;
 
   return (
-    <div
-      onClick={() => onClick(workflow)}
-      className="group relative aspect-[3/4] rounded-lg overflow-hidden cursor-pointer border border-white/5 bg-[#0a0a0a] transition-all hover:border-[#22d3ee]/30 hover:scale-[1.02] shadow-2xl"
-    >
-      {workflow.thumbnail && !imgFailed ? (
-        <img
-          src={workflow.thumbnail}
-          alt={workflow.name}
-          loading="lazy"
-          onError={() => setImgFailed(true)}
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-        />
-      ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center">
-          <svg
-            width="40"
-            height="40"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="1"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="opacity-20"
-          >
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
+    <WorkspaceCard as="article" interactive className="group relative overflow-hidden p-0">
+      <button type="button" onClick={() => onClick(workflow)} className="block w-full text-left focus:outline-none">
+        <div className="relative aspect-[16/10] overflow-hidden bg-black/20">
+          {workflow.thumbnail && !imgFailed ? (
+            <img src={workflow.thumbnail} alt="" loading="lazy" onError={() => setImgFailed(true)} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[rgba(212,168,88,0.12)] to-[rgba(214,40,113,0.08)] text-[var(--ms-color-gold-muted)]"><WorkflowIcon type="workflow" size={30} /></div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
+          <div className="absolute bottom-3 left-3"><StatusBadge tone="gold">{workflow.category || "General"}</StatusBadge></div>
         </div>
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+        <div className="p-4">
+          <h3 className="line-clamp-2 min-h-9 text-xs font-semibold leading-[1.4] text-white">{workflow.name || "Untitled Workflow"}</h3>
+          <p className="mt-2 line-clamp-2 min-h-8 text-[10px] leading-4 text-[var(--ms-color-text-muted)]">{workflowDescription(workflow)}</p>
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--ms-color-border-subtle)] pt-3">
+            <span className="text-[9px] text-[var(--ms-color-text-muted)]">{nodeCount === null ? (workflow.version ? `Version ${workflow.version}` : "Existing workflow") : `${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`}</span>
+            <span className="inline-flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-pink-primary)]">Open <WorkflowIcon type="arrow" size={12} /></span>
+          </div>
+        </div>
+      </button>
       
       {/* Options Dropdown for My Workflows */}
       {activeTab === 'my-workflows' && (
         <div 
-          className="absolute top-2 right-2 z-30"
+          className="absolute top-3 right-3 z-30"
           onClick={(e) => { e.stopPropagation(); }}
         >
           <button
             onClick={() => setShowOptions(!showOptions)}
             onBlur={() => setTimeout(() => setShowOptions(false), 200)}
-            className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors"
+            aria-label={`More actions for ${workflow.name || "workflow"}`}
+            aria-expanded={showOptions}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 backdrop-blur-md transition-colors hover:text-white"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
@@ -114,7 +145,7 @@ function WorkflowCard({ workflow, onClick, activeTab, onRename, onDelete }) {
           </button>
           
           {showOptions && (
-            <div className="absolute top-10 right-0 w-32 bg-[#111] border border-white/10 rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in duration-200">
+            <div className="absolute right-0 top-10 w-32 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-surface-elevated)] py-1 shadow-2xl animate-in fade-in zoom-in duration-200">
               <button
                 onClick={() => onRename(workflow)}
                 className="w-full px-4 py-2 text-left text-[11px] font-bold text-white/70 hover:text-[#22d3ee] hover:bg-white/5 transition-colors flex items-center gap-2"
@@ -139,23 +170,76 @@ function WorkflowCard({ workflow, onClick, activeTab, onRename, onDelete }) {
         </div>
       )}
 
-      {/* Community Profile Info */}
+      {/* Published profile info */}
       {activeTab === 'published' && workflow.user_name && (
-        <div className="absolute top-2 left-2 z-20 flex items-center gap-2 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
+        <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-2 py-1 backdrop-blur-md">
           <img src={workflow.user_profile || "/user_profile.png"} alt="profile" className="w-4 h-4 rounded-full" />
           <span className="text-[9px] font-black text-white/80 uppercase tracking-widest">{workflow.user_name}</span>
         </div>
       )}
+    </WorkspaceCard>
+  );
+}
 
-      <div className="absolute inset-x-0 bottom-0 p-4">
-        <div className="text-[10px] font-bold text-[#22d3ee] uppercase tracking-wider mb-1 opacity-80">
-          {workflow.category || "General"}
+function WorkflowCommandCenter({ activeMainTab, setActiveMainTab, workflows, loading, error, activeCampaign, onCreate, onSelect, onRename, onDelete }) {
+  const view = WORKFLOW_VIEWS[activeMainTab];
+  return (
+    <ExperiencePage>
+      <WorkspaceHeader
+        eyebrow="Workflow"
+        title="Automations at a glance."
+        description="See what is available, return to saved workflows, and open the existing Builder or execution workspace."
+        actions={<div className="flex flex-wrap items-center gap-3"><CampaignChip /><PrimaryButton type="button" onClick={onCreate} className="min-h-9 px-4 py-2 text-xs"><WorkflowIcon type="plus" size={14} /> Create Workflow</PrimaryButton></div>}
+      />
+
+      <WorkspaceHero className="mt-5">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(380px,0.85fr)] lg:items-center">
+          <div>
+            <StatusBadge tone="gold"><WorkflowIcon type="workflow" size={13} /> Command center</StatusBadge>
+            <h2 className="mt-4 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">Workflow Command Center</h2>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-[var(--ms-color-text-secondary)]">Browse every existing workflow source, continue saved work, and move into execution or the Builder without changing how either one works.</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <SecondaryButton type="button" onClick={() => setActiveMainTab("my-workflows")} className="min-h-9 px-4 py-2 text-xs">Continue Working <WorkflowIcon type="arrow" size={13} /></SecondaryButton>
+              <SecondaryButton type="button" onClick={() => setActiveMainTab("templates")} className="min-h-9 px-4 py-2 text-xs">Browse Templates</SecondaryButton>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2" aria-label="Workflow status summary">
+            <WorkspaceCard className="bg-black/10 p-3"><p className="text-xl font-semibold">{loading ? "—" : workflows.length}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Available in view</p></WorkspaceCard>
+            <WorkspaceCard className="bg-black/10 p-3"><p className="truncate text-sm font-semibold">{view.label}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Current source</p></WorkspaceCard>
+            <WorkspaceCard className="bg-black/10 p-3"><p className="text-sm font-semibold">Not reported</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Running now</p></WorkspaceCard>
+            <WorkspaceCard className="bg-black/10 p-3"><p className="truncate text-sm font-semibold">{activeCampaign?.name || "No active campaign"}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Campaign context</p></WorkspaceCard>
+          </div>
         </div>
-        <h3 className="text-sm font-bold text-white truncate group-hover:text-[#22d3ee] transition-colors">
-          {workflow.name || "Untitled Flow"}
-        </h3>
+      </WorkspaceHero>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <WorkspaceSection title="Continue Working" description="Return to your existing saved workflows and their current Builder definitions.">
+          {activeMainTab === "my-workflows" && !loading && workflows.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">{workflows.slice(0, 2).map((workflow) => <WorkspaceCard key={workflow.id} className="flex items-center gap-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><WorkflowIcon type="workflow" /></span><div className="min-w-0 flex-1"><h3 className="truncate text-xs font-semibold">{workflow.name || "Untitled Workflow"}</h3><p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{workflow.category || "Saved workflow"}</p></div><button type="button" onClick={() => onSelect(workflow)} aria-label={`Continue ${workflow.name || "workflow"}`} className="text-[var(--ms-color-pink-primary)]"><WorkflowIcon type="arrow" size={15} /></button></WorkspaceCard>)}</div>
+          ) : (
+            <WorkspaceCard className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><WorkflowIcon type="workflow" /></span><div><h3 className="text-xs font-semibold">Your saved workflows</h3><p className="mt-1 text-[9px] leading-4 text-[var(--ms-color-text-muted)]">Open My Workflows to use the existing saved-workflow source.</p></div></div><SecondaryButton type="button" onClick={() => setActiveMainTab("my-workflows")} className="min-h-9 px-4 py-2 text-xs">View My Workflows</SecondaryButton></WorkspaceCard>
+          )}
+        </WorkspaceSection>
+
+        <WorkspaceSection title="Status" description="Only execution state supplied by the existing Workflow experience is shown.">
+          <WorkspaceCard className="flex items-start gap-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"><WorkflowIcon type="status" /></span><div><h3 className="text-xs font-semibold">{loading ? "Loading current source" : "Workflow library ready"}</h3><p className="mt-1 text-[9px] leading-4 text-[var(--ms-color-text-muted)]">Live run status remains inside the opened workflow where the existing execution controls report it.</p></div></WorkspaceCard>
+        </WorkspaceSection>
       </div>
-    </div>
+
+      {error ? <ErrorState className="mt-5" title="Workflow source unavailable" description={error} /> : null}
+
+      <WorkspaceSection title="Workflow Library" description="Every existing template, saved workflow, and published workflow remains available from its current source.">
+        <div role="tablist" aria-label="Workflow sources" className="mb-5 grid gap-2 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-surface)] p-2 sm:grid-cols-3">
+          {Object.entries(WORKFLOW_VIEWS).map(([id, item]) => <button key={id} type="button" role="tab" aria-selected={activeMainTab === id} onClick={() => setActiveMainTab(id)} className={`rounded-[var(--ms-radius-control)] px-4 py-3 text-left transition ${activeMainTab === id ? "bg-[rgba(214,40,113,0.14)] text-white shadow-[inset_0_0_0_1px_rgba(214,40,113,0.3)]" : "text-[var(--ms-color-text-secondary)] hover:bg-white/[0.03] hover:text-white"}`}><span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-gold-muted)]">{item.eyebrow}</span><span className="mt-1 block text-xs font-semibold">{item.label}</span></button>)}
+        </div>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-sm font-semibold">{view.label}</h3><p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{view.description}</p></div>{!loading ? <StatusBadge tone="neutral">{workflows.length} available</StatusBadge> : null}</div>
+        {loading ? <LoadingState title={`Loading ${view.label}`} description="Retrieving workflows from the existing provider..." /> : workflows.length ? <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{workflows.map((workflow) => <WorkflowCard key={workflow.id} workflow={workflow} onClick={onSelect} activeTab={activeMainTab} onRename={onRename} onDelete={onDelete} />)}</div> : <EmptyState title={`No ${view.label.toLowerCase()} found`} description="The existing provider did not return workflows for this source." icon={<WorkflowIcon type="library" />} action={activeMainTab === "my-workflows" ? <PrimaryButton type="button" onClick={onCreate} className="min-h-9 px-4 py-2 text-xs">Create Workflow</PrimaryButton> : null} />}
+      </WorkspaceSection>
+
+      <WorkspaceSection title="Recent Activity" description="Execution history is shown only when supplied by the existing Workflow system.">
+        <EmptyState title="No cross-workflow activity available" description="The current Workflow launcher does not provide an execution-history feed. Open a workflow to view the run state and results already exposed by its existing execution workspace." icon={<WorkflowIcon type="activity" />} />
+      </WorkspaceSection>
+    </ExperiencePage>
   );
 }
 
@@ -565,7 +649,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
     }
   };
 
-  if (loading && !selectedWorkflow) {
+  if (loading && !selectedWorkflow && urlWorkflowId) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="animate-spin text-[#22d3ee] text-3xl">◌</div>
@@ -977,6 +1061,23 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
   }
 
   // Render main workflow list
+  if (!renamingWorkflow) {
+    return (
+      <WorkflowCommandCenter
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+        workflows={workflows}
+        loading={loading}
+        error={error}
+        activeCampaign={activeCampaign}
+        onCreate={() => handleCreateWorkflow()}
+        onSelect={handleSelectWorkflow}
+        onRename={(workflow) => { setRenamingWorkflow(workflow); setNewWorkflowName(workflow.name); }}
+        onDelete={handleDeleteWorkflow}
+      />
+    );
+  }
+
   return (
     <div className="h-full w-full flex flex-col p-8 overflow-y-auto custom-scrollbar">
       <div className="max-w-7xl mx-auto w-full">

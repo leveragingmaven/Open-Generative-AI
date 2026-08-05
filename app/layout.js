@@ -7,6 +7,9 @@ const inter = Inter({
 });
 
 export const metadata = {
+  icons: {
+    icon: '/mavensync-logo.png',
+  },
   title: 'Open Generative AI — Free AI Image & Video Studio',
   description: 'Generate AI images and videos using 200+ models — Flux, Midjourney, Kling, Veo, Seedance and more.',
 };

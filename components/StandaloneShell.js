@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPERIENCE_WORKSPACES } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -56,6 +56,8 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   ), [agencyMode, enabledTabIds]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
   const isStudioHome = slug.length === 0;
+  const isCreateWorkspace = !idFromParams && slug[0] === 'create';
+  const isIntelligenceWorkspace = !idFromParams && slug[0] === 'intelligence';
   const effectiveVisibleTabIds = useMemo(() => {
     if (!isStudioHome || !agencyMode) return visibleTabIds;
     return new Set([...visibleTabIds, 'asset-library']);
@@ -68,7 +70,6 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       }))
       .filter((category) => category.tabIds.length > 0)
   ), [effectiveVisibleTabIds]);
-  const exploreAppsTab = agencyMode ? null : EXPLORE_APPS_TAB;
   const getVisibleNavigationCategory = useCallback((tabId) => (
     navigationCategories.find((category) => category.tabIds.includes(tabId))
   ), [navigationCategories]);
@@ -122,7 +123,10 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   const [repurposeTarget, setRepurposeTarget] = useState(null);
   const [motionTarget, setMotionTarget] = useState(null);
   const [characterTarget, setCharacterTarget] = useState(null);
-  const [marketingExpanded, setMarketingExpanded] = useState(true);
+  const [expandedWorkspaceId, setExpandedWorkspaceId] = useState(() => {
+    const routeTab = slug[0];
+    return EXPERIENCE_WORKSPACES.find((workspace) => workspace.tabIds.includes(routeTab))?.id || null;
+  });
   const [hasMounted, setHasMounted] = useState(false);
   const [showVadooBanner, setShowVadooBanner] = useState(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('vadoo_banner_dismissed') !== '1';
@@ -167,6 +171,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       setExpandedCategoryId(activeCategory.id);
     }
   }, [activeCategory?.id]);
+
+  useEffect(() => {
+    const workspace = EXPERIENCE_WORKSPACES.find((item) => item.tabIds.includes(activeTab));
+    if (workspace && !workspace.route) setExpandedWorkspaceId(workspace.id);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!effectiveVisibleTabIds.has(activeTab)) {
@@ -424,61 +433,67 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     </div>
   );
 
-  if (!agencyMode && !apiKey && !isStudioHome) {
+  if (!agencyMode && !apiKey && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
 
   const studioApiKey = agencyMode ? null : apiKey;
+  const creativeStudioFrameClass = (isActive) => (
+    isActive ? "ms-creative-studio h-full w-full" : "hidden"
+  );
 
   const studioContent = (
     <>
+      {isStudioHome && <MavenSyncDashboard />}
+      {isCreateWorkspace && <MavenSyncCreateWorkspace />}
+      {isIntelligenceWorkspace && <MavenSyncIntelligenceWorkspace />}
       {visibleTabIds.has('image') && (
-        <div className={activeTab === 'image' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'image' && !isCreateWorkspace && !isIntelligenceWorkspace)}>
           <ImageStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />
         </div>
       )}
       {visibleTabIds.has('video') && (
-        <div className={activeTab === 'video' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'video')}>
           <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} repurposeTarget={repurposeTarget} onRepurposeTargetHandled={() => setRepurposeTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('clipping') && (
-        <div className={activeTab === 'clipping' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'clipping')}>
           <ClippingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />
         </div>
       )}
       {visibleTabIds.has('vibe-motion') && (
-        <div className={activeTab === 'vibe-motion' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'vibe-motion')}>
           <VibeMotionStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />
         </div>
       )}
       {visibleTabIds.has('lipsync') && (
-        <div className={activeTab === 'lipsync' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'lipsync')}>
           <LipSyncStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />
         </div>
       )}
       {visibleTabIds.has('body-swap') && (
-        <div className={activeTab === 'body-swap' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'body-swap')}>
           <RecastStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />
         </div>
       )}
       {visibleTabIds.has('cinema') && (
-        <div className={activeTab === 'cinema' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'cinema')}>
           <CinemaStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />
         </div>
       )}
       {visibleTabIds.has('audio') && (
-        <div className={activeTab === 'audio' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'audio')}>
           <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />
         </div>
       )}
       {visibleTabIds.has('marketing') && (
-        <div className={activeTab === 'marketing' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'marketing')}>
           <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('character') && (
-        <div className={activeTab === 'character' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'character')}>
           <CharacterStudio apiKey={studioApiKey} characterTarget={characterTarget} onCharacterTargetHandled={() => setCharacterTarget(null)} />
         </div>
       )}
@@ -493,7 +508,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         </div>
       )}
       {visibleTabIds.has('design-agent') && (
-        <div className={activeTab === 'design-agent' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'design-agent')}>
           {activeTab === 'design-agent' && (
             <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
           )}
@@ -515,7 +530,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         </div>
       )}
       {visibleTabIds.has('ai-influencer') && (
-        <div className={activeTab === 'ai-influencer' ? "h-full w-full" : "hidden"}>
+        <div className={creativeStudioFrameClass(activeTab === 'ai-influencer')}>
           <AiInfluencerStudio apiKey={studioApiKey} />
         </div>
       )}
@@ -524,7 +539,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />
         </div>
       )}
-      {effectiveVisibleTabIds.has('asset-library') && (
+      {effectiveVisibleTabIds.has('asset-library') && !isStudioHome && (
         <div className={activeTab === 'asset-library' ? "h-full w-full" : "hidden"}>
           <AssetLibraryStudio />
         </div>
@@ -676,31 +691,13 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   // Creative OS shell: persistent dark chrome for every /studio/* route.
   const sidebarItemBase =
-    'group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[15px] font-medium border border-transparent transition-all duration-150';
+    'group relative flex items-center gap-3 rounded-[var(--ms-radius-button)] px-3.5 py-2.5 text-[14px] font-medium border border-transparent transition-all duration-[var(--ms-motion-hover)]';
 
   const sidebarItemActive =
-    'bg-[#D4A858]/[0.16] text-[#D4A858] border-[#D4A858]/30 shadow-[0_0_22px_rgba(212,168,88,0.16)] hover:brightness-110 before:content-[""] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-[20px] before:w-[3px] before:rounded-r-full before:bg-[#D4A858] before:shadow-[0_0_10px_rgba(212,168,88,0.8)]';
+    'bg-[rgba(212,168,88,0.13)] text-[var(--ms-color-gold-primary)] border-[var(--ms-color-border-emphasized)] shadow-[var(--ms-shadow-gold)] before:content-[""] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-[20px] before:w-[3px] before:rounded-r-full before:bg-[var(--ms-color-gold-primary)]';
 
   const sidebarItemIdle =
-    'text-white/60 hover:text-white hover:bg-[#D4A858]/[0.07] hover:border-[#D4A858]/40 hover:-translate-y-px';
-
-  const marketingSubItems = [
-    { id: 'campaigns', label: 'Campaigns', icon: 'campaign' },
-    { id: 'social', label: 'Social Media', icon: 'social' },
-    { id: 'email', label: 'Email Marketing', icon: 'email' },
-    { id: 'blog', label: 'Blog & SEO', icon: 'blog' },
-    { id: 'ads', label: 'Ads & Copy', icon: 'ads' },
-    { id: 'brand', label: 'Brand Kit', icon: 'brand' },
-  ];
-
-  const workspaceItems = [
-    { key: 'campaigns', label: 'Campaigns', icon: 'campaign', tabId: 'campaigns' },
-    { key: 'publishing', label: 'Publishing', icon: null, tabId: 'publishing' },
-    { key: 'creative-library', label: 'Creative Library', icon: null, tabId: 'asset-library' },
-    { key: 'automation', label: 'Automation', icon: 'automation', route: null },
-    { key: 'knowledge', label: 'Knowledge Center', icon: 'knowledge', tabId: 'knowledge-center' },
-    { key: 'memory', label: 'Creative Memory', icon: 'memory', tabId: 'memory' },
-  ];
+    'text-[var(--ms-color-text-secondary)] hover:text-[var(--ms-color-text-primary)] hover:bg-[rgba(212,168,88,0.06)] hover:border-[var(--ms-color-border-subtle)]';
 
   const menuTab = (id) => visibleTabs.find((item) => item.id === id);
   const tabById = (id) => visibleTabs.find((item) => item.id === id);
@@ -719,6 +716,56 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         <span className={`shrink-0 ${isActive ? 'text-[#D4A858]' : 'text-white/45 group-hover:text-[#D4A858]'}`}>{tab.icon}</span>
         <span className="truncate">{tab.label}</span>
       </a>
+    );
+  };
+
+  const workspaceIcon = (workspaceId) => ({
+    dashboard: 'home',
+    create: 'campaign',
+    intelligence: 'knowledge',
+    campaigns: 'campaign',
+    'creative-library': 'library',
+    publishing: 'social',
+    workflow: 'automation',
+    system: 'automation',
+  }[workspaceId] || 'library');
+
+  const renderWorkspaceGroup = (workspace) => {
+    const tabs = workspace.tabIds.map(menuTab).filter(Boolean);
+    if (!tabs.length) return null;
+    const isWorkspaceLanding = (workspace.id === 'create' && isCreateWorkspace) || (workspace.id === 'intelligence' && isIntelligenceWorkspace);
+    const isActive = (workspace.tabIds.includes(activeTab) && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) || isWorkspaceLanding;
+    const expanded = expandedWorkspaceId === workspace.id;
+    return (
+      <div key={workspace.id}>
+        <div className={`${sidebarItemBase} w-full p-0 ${isActive ? sidebarItemActive : sidebarItemIdle}`}>
+          {workspace.route ? (
+            <a href={workspace.route} aria-current={isActive ? 'page' : undefined} className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-2.5">
+              <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
+              <span className="flex-1 truncate text-left">{workspace.label}</span>
+            </a>
+          ) : (
+            <button type="button" onClick={() => setExpandedWorkspaceId(expanded ? null : workspace.id)} className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-2.5">
+              <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
+              <span className="flex-1 truncate text-left">{workspace.label}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpandedWorkspaceId(expanded ? null : workspace.id)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${workspace.label}`}
+            className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current transition-colors hover:bg-white/[0.05]"
+          >
+            <span className={`transition-transform duration-[var(--ms-motion-hover)] ${expanded ? 'rotate-180' : ''}`}><MenuIcon type="chevron" /></span>
+          </button>
+        </div>
+        {expanded && (
+          <div className="ml-5 mt-1.5 space-y-1 border-l border-[var(--ms-color-border-subtle)] pl-3">
+            {tabs.map((tab) => renderNavItem(tab))}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -745,213 +792,53 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           <aside
             className={`
               fixed top-0 bottom-0 left-0 z-50 md:static md:z-auto
-              w-72 flex flex-col shrink-0 bg-[#161616]/95 backdrop-blur-md border-r border-[#D4A858]/[0.14] shadow-[inset_-1px_0_0_rgba(212,168,88,0.06)]
+              w-64 flex flex-col shrink-0 bg-[var(--ms-color-background-elevated)]/95 backdrop-blur-md border-r border-[var(--ms-color-border-subtle)] shadow-[inset_-1px_0_0_rgba(212,168,88,0.06)]
               transition-transform duration-200 ease-in-out
               ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             `}
           >
             {/* Brand: MavenSync logo */}
-            <div className="flex-shrink-0 px-5 pt-6 pb-5 border-b border-[#D4A858]/[0.18] flex items-center">
+            <div className="flex-shrink-0 px-5 py-4 border-b border-[#D4A858]/[0.18] flex items-center">
               <a href="/studio" className="flex items-center min-w-0 group" aria-label="MavenSync home">
                 <img
                   src="/mavensync-logo.png"
                   alt="MavenSync"
-                  className="h-10 w-auto object-contain drop-shadow-[0_0_14px_rgba(212,168,88,0.25)] group-hover:drop-shadow-[0_0_20px_rgba(212,168,88,0.5)] transition-[filter]"
+                  className="h-8 w-auto object-contain drop-shadow-[0_0_14px_rgba(212,168,88,0.25)] group-hover:drop-shadow-[0_0_20px_rgba(212,168,88,0.5)] transition-[filter]"
                 />
               </a>
             </div>
 
-            {/* Navigation */}
-            <nav aria-label="MavenSync navigation" className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none py-6 px-3 space-y-8">
-              {/* Home */}
-              <a
-                href="/studio"
-                className={`${sidebarItemBase} ${activeTab === 'asset-library' ? sidebarItemActive : sidebarItemIdle}`}
-              >
-                <span className={`shrink-0 ${activeTab === 'asset-library' ? 'text-[#D4A858]' : 'text-white/45 group-hover:text-[#D4A858]'}`}>
-                  <MenuIcon type="home" />
-                </span>
-                <span>Home</span>
+            {/* Workspace-first navigation. Specialized apps remain one level down. */}
+            <nav aria-label="MavenSync workspaces" className="scrollbar-none flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-3 py-4">
+              <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--ms-color-gold-muted)]">Workspaces</p>
+              <a href="/studio" aria-current={isStudioHome ? 'page' : undefined} className={`${sidebarItemBase} ${isStudioHome ? sidebarItemActive : sidebarItemIdle}`}>
+                <span className="shrink-0"><MenuIcon type="home" /></span>
+                <span>Dashboard</span>
               </a>
-
-              {/* CREATE */}
-              <div>
-                <div className="flex items-center gap-2 px-3 mb-2.5">
-                  <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#D4A858]/80">Create</span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-[#D4A858]/40 to-transparent" />
-                </div>
-                <div className="space-y-1.5">
-                  {visibleTabIds.has('image') && (
-                    renderNavItem(menuTab('image'))
-                  )}
-                  {visibleTabIds.has('video') && (
-                    renderNavItem(menuTab('video'))
-                  )}
-                  {visibleTabIds.has('clipping') && (
-                    renderNavItem(menuTab('clipping'))
-                  )}
-                  {visibleTabIds.has('vibe-motion') && (
-                    renderNavItem(menuTab('vibe-motion'))
-                  )}
-                  {visibleTabIds.has('body-swap') && (
-                    renderNavItem(menuTab('body-swap'))
-                  )}
-                  {visibleTabIds.has('cinema') && (
-                    renderNavItem(menuTab('cinema'))
-                  )}
-                  {visibleTabIds.has('character') && (
-                    renderNavItem(menuTab('character'))
-                  )}
-                  {visibleTabIds.has('design-agent') && (
-                    renderNavItem(menuTab('design-agent'))
-                  )}
-
-                  {/* Marketing Studio: expandable submenu */}
-                  {visibleTabIds.has('marketing') && (
-                    <div>
-                      <div
-                        className={`${sidebarItemBase} ${activeTab === 'marketing' ? sidebarItemActive : sidebarItemIdle} relative pr-9`}
-                      >
-                        <a
-                          href="/studio/marketing"
-                          onClick={(event) => handleNavigationItemClick(event, 'marketing')}
-                          aria-current={activeTab === 'marketing' ? 'page' : undefined}
-                          className="flex items-center gap-2.5 min-w-0 flex-1"
-                        >
-                          <span className={`shrink-0 ${activeTab === 'marketing' ? 'text-[#D4A858]' : 'text-white/45 group-hover:text-[#D4A858]'}`}>
-                            <MenuIcon type="campaign" />
-                          </span>
-                          <span className="truncate">Marketing Studio</span>
-                        </a>
-                        <button
-                          onClick={() => setMarketingExpanded(!marketingExpanded)}
-                          aria-expanded={marketingExpanded}
-                          aria-label={marketingExpanded ? 'Collapse Marketing Studio' : 'Expand Marketing Studio'}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-white/40 hover:text-[#D4A858] hover:bg-[#D4A858]/10 transition-colors"
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${marketingExpanded ? 'rotate-180' : ''}`}>
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
-                        </button>
-                      </div>
-
-                      {marketingExpanded && (
-                        <div className="mt-1.5 ml-[1.15rem] pl-3.5 border-l border-[#D4A858]/[0.18] space-y-1">
-                          {marketingSubItems.map((item) => (
-                            <a
-                              key={item.id}
-                              href="/studio/marketing"
-                              onClick={(event) => handleNavigationItemClick(event, 'marketing')}
-                              className={`flex items-center gap-2.5 rounded-lg py-2 px-2 text-sm font-medium transition-colors ${activeTab === 'marketing' ? 'text-[#D4A858]' : 'text-white/50 hover:text-white hover:bg-white/[0.05]'}`}
-                            >
-                              <span className={`shrink-0 ${activeTab === 'marketing' ? 'text-[#D4A858]' : 'text-white/30'}`}>
-                                <MenuIcon type={item.icon} />
-                              </span>
-                              <span className="truncate">{item.label}</span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {visibleTabIds.has('ai-twin') && (
-                    renderNavItem(menuTab('ai-twin'))
-                  )}
-                  {visibleTabIds.has('ai-influencer') && (
-                    renderNavItem(menuTab('ai-influencer'))
-                  )}
-                  {visibleTabIds.has('workflows') && (
-                    renderNavItem(menuTab('workflows'))
-                  )}
-                  {visibleTabIds.has('agents') && (
-                    renderNavItem(menuTab('agents'))
-                  )}
-                  {visibleTabIds.has('mcp-cli') && (
-                    renderNavItem(menuTab('mcp-cli'))
-                  )}
-                  {visibleTabIds.has('audio') && (
-                    renderNavItem(menuTab('audio'))
-                  )}
-                  {visibleTabIds.has('lipsync') && (
-                    renderNavItem(menuTab('lipsync'))
-                  )}
-                </div>
-              </div>
-
-              {/* WORKSPACES */}
-              <div>
-                <div className="flex items-center gap-2 px-3 mb-2.5">
-                  <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#D4A858]/80">Workspaces</span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-[#D4A858]/40 to-transparent" />
-                </div>
-                <div className="space-y-1.5">
-                  {workspaceItems.map((item) => {
-                    if (item.tabId) {
-                      const tab = tabById(item.tabId);
-                      if (!tab) return null;
-                      const isActive = activeTab === tab.id && tab.id !== 'asset-library';
-                      return (
-                        <a
-                          key={item.key}
-                          href={`/studio/${tab.id}`}
-                          onClick={(event) => handleNavigationItemClick(event, tab.id)}
-                          aria-current={isActive ? 'page' : undefined}
-                          className={`${sidebarItemBase} ${isActive ? sidebarItemActive : sidebarItemIdle}`}
-                        >
-        <span className={`shrink-0 ${isActive ? 'text-[#D4A858]' : 'text-white/45 group-hover:text-[#D4A858]'}`}>{tab.icon}</span>
-                          <span className="truncate">{item.label}</span>
-                        </a>
-                      );
-                    }
-                    return (
-                      <div
-                        key={item.key}
-                        title="Coming soon"
-                        className={`${sidebarItemBase} text-white/40 cursor-not-allowed`}
-                      >
-                        <span className="shrink-0 text-white/30">
-                          <MenuIcon type={item.icon} />
-                        </span>
-                        <span className="truncate">{item.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* RECENT */}
-              <div>
-                <div className="flex items-center gap-2 px-3 mb-2.5">
-                  <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#D4A858]/80">Recent</span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-[#D4A858]/40 to-transparent" />
-                </div>
-                <a
-                  href="/studio"
-                  className={`${sidebarItemBase} ${sidebarItemIdle}`}
-                >
-                  <span className="shrink-0 text-white/45 group-hover:text-[#D4A858]">
-                    <MenuIcon type="history" />
-                  </span>
-                  <span className="truncate">Continue Working</span>
-                </a>
-              </div>
+              {EXPERIENCE_WORKSPACES.filter((workspace) => workspace.id !== 'dashboard').map((workspace) => {
+                if (!workspace.route || workspace.tabIds.length > 1) return renderWorkspaceGroup(workspace);
+                const tab = workspace.tabIds.map(menuTab).find(Boolean);
+                if (!tab) return null;
+                const isActive = !isStudioHome && workspace.tabIds.includes(activeTab);
+                return (
+                  <a
+                    key={workspace.id}
+                    href={workspace.route}
+                    onClick={(event) => handleNavigationItemClick(event, tab.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`${sidebarItemBase} ${isActive ? sidebarItemActive : sidebarItemIdle}`}
+                  >
+                    <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
+                    <span className="truncate">{workspace.label}</span>
+                  </a>
+                );
+              })}
             </nav>
 
-            {/* Explore Apps */}
-            {exploreAppsTab && (
-              <div className="flex-shrink-0 p-3 border-t border-[#D4A858]/[0.14]">
-                <a
-                  href={`/studio/${exploreAppsTab.id}`}
-                  onClick={(event) => handleNavigationItemClick(event, exploreAppsTab.id)}
-                  aria-current={activeTab === exploreAppsTab.id ? 'page' : undefined}
-                  className={`${sidebarItemBase} ${activeTab === exploreAppsTab.id ? sidebarItemActive : sidebarItemIdle}`}
-                >
-                  <span className="shrink-0">{exploreAppsTab.icon}</span>
-                  <span className="truncate">{exploreAppsTab.label}</span>
-                </a>
-              </div>
-            )}
+            <div className="flex-shrink-0 border-t border-[var(--ms-color-border-subtle)] px-5 py-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--ms-color-text-muted)]">Creative operating system</p>
+              <p className="mt-1 text-xs text-[var(--ms-color-text-secondary)]">MavenSync Experience</p>
+            </div>
           </aside>
         </>
       )}
@@ -960,7 +847,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Informational workspace header */}
         {isHeaderVisible && (
-          <header className="flex-shrink-0 h-16 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-6">
+          <header className="flex-shrink-0 h-14 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setIsMobileOpen(!isMobileOpen)}
@@ -975,7 +862,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
               </button>
               <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
-                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isComingSoonRoute ? comingSoonName : (tabById(activeTab)?.label || 'Home')}</p>
+                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeTab)?.label || 'Dashboard'))))}</p>
                 <CampaignHeaderLabel />
               </div>
             </div>
@@ -1020,7 +907,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         )}
 
         {/* Center content: the mounted studio */}
-        <div className="flex-1 min-h-0 relative overflow-hidden bg-[#121212]">
+        <div className="flex-1 min-h-0 relative overflow-hidden bg-[var(--ms-color-background)]">
           {isComingSoonRoute ? <ComingSoonStudio name={comingSoonName} /> : studioContent}
         </div>
       </div>

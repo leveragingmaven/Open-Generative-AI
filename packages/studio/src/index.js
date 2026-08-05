@@ -24,7 +24,25 @@ export * from './lib/twin';
 export * from './lib/intents';
 export * from './lib/agents';
 export { default as PublishingStudio } from './components/PublishingStudio';
-export { TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB } from './studioNavigation.js';
+export { TABS, NAVIGATION_CATEGORIES, EXPLORE_APPS_TAB, EXPERIENCE_WORKSPACES } from './studioNavigation.js';
+export { default as MavenSyncDashboard } from './components/experience/MavenSyncDashboard.jsx';
+export { default as MavenSyncCreateWorkspace } from './components/experience/MavenSyncCreateWorkspace.jsx';
+export { default as MavenSyncIntelligenceWorkspace } from './components/experience/MavenSyncIntelligenceWorkspace.jsx';
+export {
+  ExperiencePage,
+  WorkspaceHeader,
+  WorkspaceHero,
+  WorkspaceSection,
+  WorkspaceCard,
+  StudioLauncherCard,
+  MetricCard,
+  PrimaryButton,
+  SecondaryButton,
+  StatusBadge,
+  EmptyState,
+  LoadingState,
+  ErrorState,
+} from './components/experience/ExperienceComponents.jsx';
 export { default as AssetLibraryStudio } from './components/AssetLibraryStudio';
 export { default as KnowledgeCenterStudio } from './components/KnowledgeCenterStudio';
 export { default as CreativeMemoryStudio } from './components/CreativeMemoryStudio';

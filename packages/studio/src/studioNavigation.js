@@ -301,3 +301,29 @@ export const NAVIGATION_CATEGORIES = [
 ];
 
 export const EXPLORE_APPS_TAB = TABS.find((tab) => tab.id === 'apps');
+
+// Experience Layer workspace architecture. Tab ids and direct routes remain
+// unchanged; this registry changes discovery hierarchy only.
+export const EXPERIENCE_WORKSPACES = [
+  { id: 'dashboard', label: 'Dashboard', route: '/studio', tabIds: [] },
+  {
+    id: 'create',
+    label: 'Create',
+    route: '/studio/create',
+    tabIds: [
+      'image', 'video', 'marketing', 'audio', 'lipsync', 'ai-influencer',
+      'character', 'vibe-motion', 'body-swap', 'cinema', 'clipping', 'design-agent',
+    ],
+  },
+  {
+    id: 'intelligence',
+    label: 'Intelligence',
+    route: '/studio/intelligence',
+    tabIds: ['ai-twin', 'agents', 'knowledge-center', 'memory'],
+  },
+  { id: 'campaigns', label: 'Campaigns', route: '/studio/campaigns', tabIds: ['campaigns'] },
+  { id: 'creative-library', label: 'Creative Library', route: '/studio/asset-library', tabIds: ['asset-library'] },
+  { id: 'publishing', label: 'Publishing', route: '/studio/publishing', tabIds: ['publishing'] },
+  { id: 'workflow', label: 'Workflow', route: '/studio/workflows', tabIds: ['workflows'] },
+  { id: 'system', label: 'System', tabIds: ['mcp-cli', 'apps'] },
+];
