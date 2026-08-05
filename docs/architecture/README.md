@@ -45,7 +45,13 @@ Creative_OS_Architecture_v1.md
 
 ## Skills
 
+- [Creative Skill Library](Creative_Skill_Library.md) — master inventory of every Creative Skill and its completion status
 - [Creative Skill Standard v2.0](Creative_Skill_Standard_v2.md) — the official reference every Creative Skill follows
+- [Voice Performance Intelligence](Voice_Performance_Intelligence.md) — design for the shared expression-intelligence layer ("how does the creator naturally express ideas?")
+
+## Handoff / Onboarding
+
+- [Chief Architect Handoff](Chief_Architect_Handoff.md) — onboarding reference transferring the platform's mental model: vision, principles, system map, information flow, cost strategy, decision framework, and what MavenSync is not
 
 ## Decisions
 

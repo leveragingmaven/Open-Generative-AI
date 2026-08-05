@@ -14,6 +14,19 @@ const EXPECTED_SKILL_IDS = [
   "ai-clipping",
   "vibe-motion",
   "recast",
+  "message-clarity",
+  "curiosity-building",
+  "human-conversation",
+  "trust-building",
+  "problem-discovery",
+  "positioning",
+  "offer-strategy",
+  "customer-transformation",
+  "call-to-action-strategy",
+  "story-structure",
+  "narrative-flow",
+  "emotional-pacing",
+  "character-perspective",
 ];
 
 const REQUIRED_FIELDS = [
@@ -97,6 +110,61 @@ test("unknown skill IDs throw", () => {
 
 test("SKILL_LIBRARY is frozen", () => {
   assert.ok(Object.isFrozen(SKILL_LIBRARY));
+});
+
+test("foundational skills declare advisory dependency metadata", () => {
+  const foundationalIds = EXPECTED_SKILL_IDS.filter((id) => {
+    const skill = SKILL_LIBRARY[id];
+    return skill.category === "communication" || skill.priority === "foundational";
+  });
+  assert.ok(foundationalIds.length >= 5, "foundational skills should hold at least five skills");
+  for (const id of foundationalIds) {
+    const skill = SKILL_LIBRARY[id];
+    assert.ok(Array.isArray(skill.dependsOn), `${id} is missing dependsOn`);
+    assert.ok(Array.isArray(skill.complements), `${id} is missing complements`);
+    assert.ok(Array.isArray(skill.sharedUtilities), `${id} is missing sharedUtilities`);
+    assert.ok(skill.sharedUtilities.includes("communication-utils"), `${id} should reuse the shared utils`);
+  }
+  const trust = SKILL_LIBRARY["trust-building"];
+  assert.deepEqual(trust.dependsOn, ["message-clarity", "curiosity-building"]);
+  assert.deepEqual(trust.complements, ["human-conversation"]);
+  const problem = SKILL_LIBRARY["problem-discovery"];
+  assert.deepEqual(problem.dependsOn, ["message-clarity", "trust-building"]);
+  assert.deepEqual(problem.complements, ["positioning", "customer-transformation"]);
+  const positioning = SKILL_LIBRARY["positioning"];
+  assert.deepEqual(positioning.dependsOn, ["problem-discovery"]);
+  assert.deepEqual(positioning.complements, ["offer-strategy", "customer-transformation"]);
+  const offer = SKILL_LIBRARY["offer-strategy"];
+  assert.deepEqual(offer.dependsOn, ["problem-discovery", "positioning"]);
+  assert.deepEqual(offer.complements, ["customer-transformation", "call-to-action-strategy"]);
+  const transformation = SKILL_LIBRARY["customer-transformation"];
+  assert.deepEqual(transformation.dependsOn, ["problem-discovery", "positioning", "offer-strategy"]);
+  assert.deepEqual(transformation.complements, ["call-to-action-strategy"]);
+  const cta = SKILL_LIBRARY["call-to-action-strategy"];
+  assert.deepEqual(cta.dependsOn, ["offer-strategy", "customer-transformation"]);
+  assert.deepEqual(cta.complements, ["trust-building"]);
+  const story = SKILL_LIBRARY["story-structure"];
+  assert.deepEqual(story.dependsOn, ["message-clarity", "curiosity-building"]);
+  assert.deepEqual(story.complements, ["emotional-pacing", "narrative-flow"]);
+  assert.deepEqual(story.sharedUtilities, ["communication-utils"]);
+  assert.equal(story.category, "storytelling");
+  assert.ok(story.compatibleRecipes.includes("video-script"));
+  assert.ok(story.compatibleRecipes.includes("podcast"));
+  const flow = SKILL_LIBRARY["narrative-flow"];
+  assert.deepEqual(flow.dependsOn, ["story-structure"]);
+  assert.deepEqual(flow.complements, ["emotional-pacing", "character-perspective"]);
+  assert.deepEqual(flow.sharedUtilities, ["communication-utils"]);
+  assert.equal(flow.category, "storytelling");
+  const pacing = SKILL_LIBRARY["emotional-pacing"];
+  assert.deepEqual(pacing.dependsOn, ["story-structure", "narrative-flow"]);
+  assert.deepEqual(pacing.complements, ["character-perspective", "story-continuity"]);
+  assert.deepEqual(pacing.sharedUtilities, ["communication-utils"]);
+  assert.equal(pacing.category, "storytelling");
+  const perspective = SKILL_LIBRARY["character-perspective"];
+  assert.deepEqual(perspective.dependsOn, ["story-structure", "narrative-flow", "emotional-pacing"]);
+  assert.deepEqual(perspective.complements, ["story-continuity"]);
+  assert.deepEqual(perspective.sharedUtilities, ["communication-utils"]);
+  assert.equal(perspective.category, "storytelling");
 });
 
 function cameraIds() {
