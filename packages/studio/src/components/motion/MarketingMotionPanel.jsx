@@ -294,7 +294,7 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
                 type="text"
                 value={brandColors}
                 onChange={(e) => setBrandColors(e.target.value)}
-                placeholder="#22d3ee, #a855f7"
+                placeholder="#E82070, #D4A858"
                 className={inputCls}
               />
             </div>

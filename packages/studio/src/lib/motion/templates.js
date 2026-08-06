@@ -23,7 +23,7 @@ const input = (label, { type = "string", required = false, default: def = undefi
   description,
 });
 
-const BRAND_COLORS_DEFAULT = ["#22d3ee", "#a855f7", "#f43f5e", "#ffffff"];
+const BRAND_COLORS_DEFAULT = ["#E82070", "#D4A858", "#f43f5e", "#ffffff"];
 
 export const WORKFLOW_TEMPLATE_LIBRARY = Object.freeze({
   "logo-reveal": Object.freeze({

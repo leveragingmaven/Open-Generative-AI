@@ -168,7 +168,7 @@ export default function AiTwinWorkspace({ apiKey, isHeaderVisible, onToggleHeade
   }, [twinTarget]);
 
   return (
-    <div className="h-full w-full overflow-hidden bg-[#0d0d0d] text-white">
+    <div className="ms-creative-studio h-full w-full overflow-hidden bg-[#0d0d0d] text-white">
       <div className="flex h-full">
         {/* ── Left rail ─────────────────────────────────────────────────────── */}
         <nav className="flex w-52 shrink-0 flex-col border-r border-white/10 bg-[#111111]">

@@ -130,6 +130,29 @@ function CampaignList({ campaigns }) {
   );
 }
 
+function QuickActionCard({ action, onNavigate }) {
+  const unavailable = action.unavailable;
+  return (
+    <button
+      type="button"
+      disabled={unavailable}
+      onClick={() => !unavailable && onNavigate(action.route)}
+      className={`group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition ${
+        unavailable
+          ? "cursor-not-allowed opacity-70"
+          : "hover:-translate-y-0.5 hover:border-[#E82070] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(232,32,112,0.12)]"
+      }`}
+    >
+      <span className={`inline-flex ${unavailable ? "text-[#808080]" : "text-[#E82070]"}`}><SectionIcon type={action.icon} /></span>
+      <h3 className="mt-3 text-sm font-semibold">{action.label}</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{action.detail}</p>
+      <span className={`mt-4 inline-block text-[11px] ${unavailable ? "text-[#808080]" : "text-[#808080] group-hover:text-[#E82070]"}`}>
+        {unavailable ? "Unavailable" : "Open"} {!unavailable && <span aria-hidden="true">→</span>}
+      </span>
+    </button>
+  );
+}
+
 export default function KnowledgeCenterStudio() {
   const router = useRouter();
   const { activeCampaign, clearActiveCampaign } = useActiveCampaign();
@@ -139,10 +162,10 @@ export default function KnowledgeCenterStudio() {
   const byType = (type) => memories.filter((memory) => memory.type === type);
 
   const quickActions = [
-    { label: "Import Skill", detail: "Bring a capability into this workspace", icon: "skills", route: "/studio/workflows" },
-    { label: "Upload Repository", detail: "Connect a reference source", icon: "repositories", route: "/studio/apps" },
-    { label: "Open Compiler", detail: "Build from connected knowledge", icon: "frameworks", route: "/studio/workflows" },
-    { label: "Manage Knowledge", detail: "Review and curate the Creative Library", icon: "memory", route: "/studio/asset-library" },
+    { label: "Import Skill", detail: "No supported skill import screen exists in this workspace yet.", icon: "skills", unavailable: true },
+    { label: "Upload Repository", detail: "No repository import destination is currently implemented.", icon: "repositories", unavailable: true },
+    { label: "Open Compiler", detail: "No knowledge compiler screen is currently implemented.", icon: "frameworks", unavailable: true },
+    { label: "Review Creative Library", detail: "Open the existing asset library connected to your creative work.", icon: "memory", route: "/studio/asset-library" },
   ];
 
   return (
@@ -187,17 +210,7 @@ export default function KnowledgeCenterStudio() {
             </div>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               {quickActions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  onClick={() => router.push(action.route)}
-                  className="group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(212,168,88,0.12)]"
-                >
-                  <span className="inline-flex text-[#D4A858]"><SectionIcon type={action.icon} /></span>
-                  <h3 className="mt-3 text-sm font-semibold">{action.label}</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{action.detail}</p>
-                  <span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#D4A858]">Open <span aria-hidden="true">→</span></span>
-                </button>
+                <QuickActionCard key={action.label} action={action} onNavigate={(route) => router.push(route)} />
               ))}
             </div>
           </section>

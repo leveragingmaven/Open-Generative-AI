@@ -51,9 +51,14 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       ? new Set((allowedTabIds && allowedTabIds.length > 0 ? allowedTabIds : ['image', 'marketing']))
       : null
   ), [agencyMode, allowedTabIds]);
-  const visibleTabs = useMemo(() => (
-    agencyMode ? TABS.filter((tab) => enabledTabIds.has(tab.id)) : TABS
-  ), [agencyMode, enabledTabIds]);
+  const visibleTabs = useMemo(() => {
+    const filtered = TABS.filter((tab) => tab.id !== 'apps' && (!agencyMode || enabledTabIds.has(tab.id)));
+    if (!agencyMode && !filtered.some((tab) => tab.id === 'mcp-cli')) {
+      const systemTab = TABS.find((tab) => tab.id === 'mcp-cli') || { id: 'mcp-cli', label: 'System' };
+      filtered.push(systemTab);
+    }
+    return filtered;
+  }, [agencyMode, enabledTabIds]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
   const isStudioHome = slug.length === 0;
   const isCreateWorkspace = !idFromParams && slug[0] === 'create';
@@ -103,7 +108,8 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     if (idFromParams || slug.includes('workflow')) candidate = 'workflows';
     else if (slug.includes('agents')) candidate = 'agents';
     else if (slug.includes('design-agent')) candidate = 'design-agent';
-    else if (slug.includes('apps')) candidate = 'apps';
+    else if (slug.includes('apps')) candidate = 'mcp-cli';
+    else if (slug.includes('mcp-cli')) candidate = 'mcp-cli';
     else {
       const firstSegment = slug[0];
       if (firstSegment && visibleTabs.find(t => t.id === firstSegment)) candidate = firstSegment;
@@ -115,6 +121,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialTab());
+  const activeWorkspaceTab = (slug.includes('mcp-cli') || slug.includes('apps')) ? 'mcp-cli' : activeTab;
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -143,6 +150,11 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     getVisibleNavigationCategory(getInitialTab())?.id || navigationCategories[0]?.id || null
   ));
   const activeCategory = getVisibleNavigationCategory(activeTab);
+
+  useEffect(() => {
+    if (!slug.includes('apps')) return;
+    window.location.replace('/studio/mcp-cli');
+  }, [slug]);
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed(prev => {
@@ -219,7 +231,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     const handlePopState = () => {
       const path = window.location.pathname;
       const segments = path.split('/').filter(Boolean);
-      const tabId = segments[1] || 'asset-library';
+      const tabId = segments[1] === 'apps' ? 'mcp-cli' : (segments[1] || 'asset-library');
       if (visibleTabs.find(t => t.id === tabId)) {
         setActiveTab(tabId);
       }
@@ -429,7 +441,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   if (!hasMounted) return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-      <div className="animate-spin text-[#22d3ee] text-3xl">◌</div>
+      <div className="animate-spin text-[#E82070] text-3xl">◌</div>
     </div>
   );
 
@@ -448,114 +460,114 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       {isCreateWorkspace && <MavenSyncCreateWorkspace />}
       {isIntelligenceWorkspace && <MavenSyncIntelligenceWorkspace />}
       {visibleTabIds.has('image') && (
-        <div className={creativeStudioFrameClass(activeTab === 'image' && !isCreateWorkspace && !isIntelligenceWorkspace)}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'image' && !isCreateWorkspace && !isIntelligenceWorkspace)}>
           <ImageStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />
         </div>
       )}
       {visibleTabIds.has('video') && (
-        <div className={creativeStudioFrameClass(activeTab === 'video')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'video')}>
           <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} repurposeTarget={repurposeTarget} onRepurposeTargetHandled={() => setRepurposeTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('clipping') && (
-        <div className={creativeStudioFrameClass(activeTab === 'clipping')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'clipping')}>
           <ClippingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />
         </div>
       )}
       {visibleTabIds.has('vibe-motion') && (
-        <div className={creativeStudioFrameClass(activeTab === 'vibe-motion')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'vibe-motion')}>
           <VibeMotionStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />
         </div>
       )}
       {visibleTabIds.has('lipsync') && (
-        <div className={creativeStudioFrameClass(activeTab === 'lipsync')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'lipsync')}>
           <LipSyncStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />
         </div>
       )}
       {visibleTabIds.has('body-swap') && (
-        <div className={creativeStudioFrameClass(activeTab === 'body-swap')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'body-swap')}>
           <RecastStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />
         </div>
       )}
       {visibleTabIds.has('cinema') && (
-        <div className={creativeStudioFrameClass(activeTab === 'cinema')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'cinema')}>
           <CinemaStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />
         </div>
       )}
       {visibleTabIds.has('audio') && (
-        <div className={creativeStudioFrameClass(activeTab === 'audio')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'audio')}>
           <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />
         </div>
       )}
       {visibleTabIds.has('marketing') && (
-        <div className={creativeStudioFrameClass(activeTab === 'marketing')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'marketing')}>
           <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('character') && (
-        <div className={creativeStudioFrameClass(activeTab === 'character')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'character')}>
           <CharacterStudio apiKey={studioApiKey} characterTarget={characterTarget} onCharacterTargetHandled={() => setCharacterTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('workflows') && (
-        <div className={activeTab === 'workflows' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'workflows' ? "h-full w-full" : "hidden"}>
           <WorkflowStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
         </div>
       )}
       {visibleTabIds.has('agents') && (
-        <div className={activeTab === 'agents' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'agents' ? "h-full w-full" : "hidden"}>
           <AgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
         </div>
       )}
       {visibleTabIds.has('design-agent') && (
-        <div className={creativeStudioFrameClass(activeTab === 'design-agent')}>
-          {activeTab === 'design-agent' && (
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'design-agent')}>
+          {activeWorkspaceTab === 'design-agent' && (
             <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
           )}
         </div>
       )}
       {visibleTabIds.has('apps') && (
-        <div className={activeTab === 'apps' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'apps' ? "h-full w-full" : "hidden"}>
           <AppsStudio apiKey={studioApiKey} />
         </div>
       )}
-      {visibleTabIds.has('mcp-cli') && (
-        <div className={activeTab === 'mcp-cli' ? "h-full w-full" : "hidden"}>
+      {(visibleTabIds.has('mcp-cli') || activeWorkspaceTab === 'mcp-cli') && (
+        <div className={activeWorkspaceTab === 'mcp-cli' ? "h-full w-full" : "hidden"}>
           <McpCliStudio />
         </div>
       )}
       {visibleTabIds.has('ai-twin') && (
-        <div className={activeTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
           <AiTwinTab apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} twinTarget={twinTarget} onTwinTargetHandled={() => setTwinTarget(null)} />
         </div>
       )}
       {visibleTabIds.has('ai-influencer') && (
-        <div className={creativeStudioFrameClass(activeTab === 'ai-influencer')}>
+        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'ai-influencer')}>
           <AiInfluencerStudio apiKey={studioApiKey} />
         </div>
       )}
       {visibleTabIds.has('publishing') && (
-        <div className={activeTab === 'publishing' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'publishing' ? "h-full w-full" : "hidden"}>
           <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />
         </div>
       )}
       {effectiveVisibleTabIds.has('asset-library') && !isStudioHome && (
-        <div className={activeTab === 'asset-library' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'asset-library' ? "h-full w-full" : "hidden"}>
           <AssetLibraryStudio />
         </div>
       )}
       {visibleTabIds.has('campaigns') && (
-        <div className={activeTab === 'campaigns' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'campaigns' ? "h-full w-full" : "hidden"}>
           <CampaignWorkspace onNavigate={handleTabChange} />
         </div>
       )}
       {visibleTabIds.has('knowledge-center') && (
-        <div className={activeTab === 'knowledge-center' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'knowledge-center' ? "h-full w-full" : "hidden"}>
           <KnowledgeCenterStudio />
         </div>
       )}
       {visibleTabIds.has('memory') && (
-        <div className={activeTab === 'memory' ? "h-full w-full" : "hidden"}>
+        <div className={activeWorkspaceTab === 'memory' ? "h-full w-full" : "hidden"}>
           <CreativeMemoryStudio />
         </div>
       )}
@@ -563,9 +575,9 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   );
 
   const dragOverlay = isDragging && (
-    <div className="fixed inset-0 z-[100] bg-[#22d3ee]/10 backdrop-blur-md border-4 border-dashed border-[#22d3ee]/50 flex items-center justify-center pointer-events-none transition-all duration-300">
+    <div className="fixed inset-0 z-[100] bg-[#E82070]/10 backdrop-blur-md border-4 border-dashed border-[#E82070]/50 flex items-center justify-center pointer-events-none transition-all duration-300">
       <div className="bg-[#0a0a0a] p-8 rounded-3xl border border-white/10 shadow-2xl flex flex-col items-center gap-4 scale-110 animate-pulse">
-        <div className="w-20 h-20 bg-[#22d3ee] rounded-2xl flex items-center justify-center">
+        <div className="w-20 h-20 bg-[#E82070] rounded-2xl flex items-center justify-center">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
           </svg>
@@ -591,7 +603,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
           style={{
             borderColor: notif.type === 'success' ? 'rgba(34,211,238,0.35)' : 'rgba(239,68,68,0.35)',
             borderLeftWidth: '3px',
-            borderLeftColor: notif.type === 'success' ? '#22d3ee' : '#ef4444',
+            borderLeftColor: notif.type === 'success' ? '#D4A858' : '#ef4444',
             animation: 'slideInRight 280ms cubic-bezier(0.16,1,0.3,1) forwards',
           }}
         >
@@ -601,7 +613,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
             style={{ background: notif.type === 'success' ? 'rgba(34,211,238,0.12)' : 'rgba(239,68,68,0.12)' }}
           >
             {notif.type === 'success' ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D4A858" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
             ) : (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3"><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             )}
@@ -623,7 +635,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
             {notif.type === 'success' && (
               <button
                 onClick={() => { handleTabChange(notif.tabId); dismissNotification(notif.id); }}
-                className="mt-1.5 text-[11px] font-bold text-[#22d3ee] hover:underline"
+                className="mt-1.5 text-[11px] font-bold text-[#D4A858] hover:underline"
               >
                 Open →
               </button>
@@ -644,19 +656,20 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   );
 
   const settingsModal = !agencyMode && showSettings && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
-      <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-8 w-full max-w-sm shadow-2xl">
-        <h2 className="text-white font-bold text-lg mb-2">Settings</h2>
-        <p className="text-white/40 text-[13px] mb-8">
-          Manage your AI studio preferences and authentication.
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
+      <div className="bg-[var(--ms-color-panel)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-modal)] p-8 w-full max-w-sm shadow-[var(--ms-shadow-card-hover)]">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--ms-color-gold-primary)] mb-2">MavenSync Creative OS</p>
+        <h2 className="text-[var(--ms-color-text-primary)] font-bold text-lg mb-2">Settings</h2>
+        <p className="text-[var(--ms-color-text-secondary)] text-[13px] mb-8">
+          Manage the existing authentication used by your creative studios.
         </p>
 
         <div className="space-y-4 mb-8">
-          <div className="bg-white/5 border border-white/[0.03] rounded-md p-4">
-            <label className="block text-xs font-bold text-white/30 mb-2">
+          <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4">
+            <label className="block text-xs font-bold text-[var(--ms-color-text-muted)] mb-2">
                Active API Key
             </label>
-            <div className="text-[13px] font-mono text-white/80">
+            <div className="text-[13px] font-mono text-[var(--ms-color-text-primary)]">
               {apiKey.slice(0, 8)}••••••••••••••••
             </div>
           </div>
@@ -665,13 +678,13 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         <div className="flex gap-3">
           <button
             onClick={handleKeyChange}
-            className="flex-1 h-10 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold transition-all"
+            className="flex-1 h-10 rounded-md bg-[#E82070]/10 text-[#f5a6c8] hover:bg-[#E82070]/20 text-xs font-semibold transition-all"
           >
             Change Key
           </button>
           <button
             onClick={() => setShowSettings(false)}
-            className="flex-1 h-10 rounded-md bg-white/5 text-white/80 hover:bg-white/10 text-xs font-semibold transition-all border border-white/5"
+            className="flex-1 h-10 rounded-md bg-white/5 text-[var(--ms-color-text-secondary)] hover:bg-white/10 text-xs font-semibold transition-all border border-white/5"
           >
             Close
           </button>
@@ -704,7 +717,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
 
   const renderNavItem = (tab) => {
     if (!tab) return null;
-    const isActive = activeTab === tab.id;
+    const isActive = activeWorkspaceTab === tab.id;
     return (
       <a
         key={tab.id}
@@ -734,7 +747,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     const tabs = workspace.tabIds.map(menuTab).filter(Boolean);
     if (!tabs.length) return null;
     const isWorkspaceLanding = (workspace.id === 'create' && isCreateWorkspace) || (workspace.id === 'intelligence' && isIntelligenceWorkspace);
-    const isActive = (workspace.tabIds.includes(activeTab) && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) || isWorkspaceLanding;
+    const isActive = (workspace.tabIds.includes(activeWorkspaceTab) && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) || isWorkspaceLanding;
     const expanded = expandedWorkspaceId === workspace.id;
     return (
       <div key={workspace.id}>
@@ -819,7 +832,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
                 if (!workspace.route || workspace.tabIds.length > 1) return renderWorkspaceGroup(workspace);
                 const tab = workspace.tabIds.map(menuTab).find(Boolean);
                 if (!tab) return null;
-                const isActive = !isStudioHome && workspace.tabIds.includes(activeTab);
+                const isActive = !isStudioHome && workspace.tabIds.includes(activeWorkspaceTab);
                 return (
                   <a
                     key={workspace.id}
@@ -862,7 +875,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
               </button>
               <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
-                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeTab)?.label || 'Dashboard'))))}</p>
+                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard')))))}</p>
                 <CampaignHeaderLabel />
               </div>
             </div>

@@ -325,5 +325,5 @@ export const EXPERIENCE_WORKSPACES = [
   { id: 'creative-library', label: 'Creative Library', route: '/studio/asset-library', tabIds: ['asset-library'] },
   { id: 'publishing', label: 'Publishing', route: '/studio/publishing', tabIds: ['publishing'] },
   { id: 'workflow', label: 'Workflow', route: '/studio/workflows', tabIds: ['workflows'] },
-  { id: 'system', label: 'System', tabIds: ['mcp-cli', 'apps'] },
+  { id: 'system', label: 'System', route: '/studio/mcp-cli', tabIds: ['mcp-cli'] },
 ];

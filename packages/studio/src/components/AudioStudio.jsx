@@ -373,7 +373,7 @@ function PremiumAudioPlayer({ url, title }) {
           {visualizerHeights.map((h, i) => (
             <div
               key={i}
-              className="w-1.5 rounded-full bg-gradient-to-t from-primary to-[#a855f7] transition-all duration-100"
+              className="w-1.5 rounded-full bg-gradient-to-t from-[#E82070] to-[#D4A858] transition-all duration-100"
               style={{ height: `${h}px` }}
             />
           ))}

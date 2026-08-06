@@ -16,6 +16,7 @@ function imageDraft(overrides = {}) {
         assets: [{ assetId: 'asset-1', url: 'https://cdn.example.test/image.jpg', type: 'image' }],
         caption: 'Caption',
         platforms: ['instagram'],
+        accountIds: { instagram: 101 },
         scheduledAt: '2026-08-01T15:00:00.000Z',
         timezone: 'America/Chicago',
         ...overrides,
@@ -49,11 +50,21 @@ test('platform capability validation rejects unsupported media types', async () 
 
 test('unknown platform capabilities remain explicit unknowns', async () => {
     const { platformCapabilityRegistry } = await import('../packages/studio/src/lib/publishing/platformCapabilities.js');
-    const capabilities = platformCapabilityRegistry.getPlatformCapabilities('threads');
+    const capabilities = platformCapabilityRegistry.getPlatformCapabilities('bluesky');
 
-    assert.equal(capabilities.platform, 'threads');
+    assert.equal(capabilities.platform, 'bluesky');
     assert.equal(capabilities.mediaTypes, 'unknown');
     assert.equal(capabilities.supportsScheduling, 'unknown');
+});
+
+test('verified platforms expose defaults and capability flags', async () => {
+    const { platformCapabilityRegistry } = await import('../packages/studio/src/lib/publishing/platformCapabilities.js');
+
+    assert.equal(platformCapabilityRegistry.getPlatformCapabilities('youtube').enabledByDefault, true);
+    assert.equal(platformCapabilityRegistry.getPlatformCapabilities('tiktok').enabledByDefault, true);
+    assert.equal(platformCapabilityRegistry.getPlatformCapabilities('instagram').enabledByDefault, true);
+    assert.equal(platformCapabilityRegistry.getPlatformCapabilities('threads').enabledByDefault, false);
+    assert.equal(platformCapabilityRegistry.getPlatformCapabilities('threads').capabilityFlag, 'publishing.threads');
 });
 
 test('unsupported publishing operations return explicit capability errors', async () => {
@@ -163,8 +174,45 @@ test('MuAPI publishing client payloads do not include credentials', async () => 
     const body = JSON.parse(captured.options.body);
 
     assert.equal(captured.options.headers['x-api-key'], undefined);
-    assert.equal(body.draft.assets[0].url, 'https://cdn.example.test/image.jpg');
+    assert.equal(body.platform, 'instagram');
+    assert.equal(body.payload.media_url, 'https://cdn.example.test/image.jpg');
+    assert.equal(body.payload.account_id, 101);
+    assert.equal(body.payload.scheduled_at, '2026-08-01T15:00:00.000Z');
     assert.equal(JSON.stringify(body).includes('MUAPI_API_KEY'), false);
+});
+
+test('MuAPI publish payload maps platform account and media fields', async () => {
+    const { createMuApiPublishPayload } = await import('../packages/studio/src/lib/publishing/MuApiPublishingProvider.js');
+
+    const payload = createMuApiPublishPayload(imageDraft({
+        platforms: ['youtube'],
+        accountIds: { youtube: 202 },
+        title: 'Launch Video',
+        caption: 'Campaign caption',
+        assets: [{ assetId: 'asset-1', url: 'https://cdn.example.test/video.mp4', type: 'video' }],
+    }), 'youtube');
+
+    assert.equal(payload.account_id, 202);
+    assert.equal(payload.media_url, 'https://cdn.example.test/video.mp4');
+    assert.equal(payload.title, 'Launch Video');
+    assert.equal(payload.description, 'Campaign caption');
+});
+
+test('MuAPI connected accounts are normalized without tokens', async () => {
+    const { MuApiPublishingProvider } = await import('../packages/studio/src/lib/publishing/MuApiPublishingProvider.js');
+    const provider = new MuApiPublishingProvider({
+        fetchFn: async () => ({
+            ok: true,
+            json: async () => ({ accounts: [{ account_id: 303, platform: 'instagram', account_name: 'Brand IG', access_token: 'secret' }] }),
+        }),
+        mavenSyncClient: { isEnabled: () => false },
+    });
+
+    const accounts = await provider.getConnectedAccounts();
+    assert.equal(accounts[0].id, 303);
+    assert.equal(accounts[0].platform, 'instagram');
+    assert.equal(accounts[0].name, 'Brand IG');
+    assert.equal(accounts[0].access_token, undefined);
 });
 
 test('expired temporary asset URLs fail validation', async () => {

@@ -6,6 +6,27 @@ Phase 4 - MavenSync Experience Layer
 
 Status: Completed
 
+### Milestone - Publishing Experience Completion Sprint (2026-08-06)
+
+- Completed the existing Publishing workflow as a UX/workflow-connection pass: Create Asset -> Creative Library -> Select Asset -> Create Publishing Draft -> Choose Platforms -> Choose Connected Account -> Write Caption -> Publish/Schedule -> Publishing History.
+- Root cause fixed: the Creative Library route was valid, but Publishing opened it without a publishing-selection context and the Library only had a generic `Open Publishing` action instead of creating a draft from the selected asset.
+- Reconnected `PublishingStudio.jsx`, `AssetLibraryStudio.jsx`, and `PublishingCenterMVP.js` so existing Library assets can become real publishing drafts without changing routes, provider execution, scheduler behavior, Campaign Context, or persistence architecture.
+- Added editable draft copy fields for optional title, caption, and hashtags; draft copy is saved through the existing publishing coordinator before publish or schedule.
+- Added connected-account selectors for selected enabled platforms while preserving the existing capability registry model: YouTube, TikTok, and Instagram enabled; Facebook, LinkedIn, Pinterest, Threads, and X remain flagged.
+- Improved publishing empty states so users are guided to select from the Creative Library without fabricated assets, accounts, drafts, metrics, or history.
+- Validation: focused Publishing Center tests 7/7 pass; full repository suite 1387/1387 passes; `npm run build:studio` passes; `npm run build` passes; production route smoke checks return HTTP 200 for `/studio/publishing`, `/studio/asset-library`, and `/studio/asset-library?mode=publish&returnTo=publishing`; `git diff --check` passes with CRLF warnings only.
+- Deliverable: `docs/milestones/MILESTONE_2026-08-06_Publishing_Experience_Complete.md`.
+
+### Milestone - MuAPI Social Publishing Integration (2026-08-06)
+
+- Wired the existing Creative OS Publishing architecture to the verified MuAPI Social Publishing API without replacing the scheduler, queue, history, provider abstraction, Campaign metadata, or Publishing workspace.
+- Updated `app/api/publishing/[[...path]]/route.js` so same-origin Creative OS publishing routes map to MuAPI social accounts, platform publish endpoints, scheduled publishing through `scheduled_at`, post listing, post deletion/cancel, and prediction status retrieval while keeping `MUAPI_API_KEY` server-side.
+- Updated `MuApiPublishingProvider` with Creative OS draft -> MuAPI payload transformation, platform/account mapping, request/post ID handling, per-platform status normalization, partial-failure handling, duplicate submission protection, and sanitized connected-account references.
+- Connected the Publishing workspace to MuAPI account listing/connect URL flows, merged MuAPI post history with local history fallback, required user confirmation before publish/schedule, and kept Facebook, LinkedIn, Pinterest, Threads, and X behind capability flags pending live-account validation.
+- Updated the platform capability registry: YouTube, TikTok, and Instagram are enabled by default; Facebook, LinkedIn, Pinterest, Threads, and X are verified but flagged.
+- Documentation updated in `docs/MUAPI_PUBLISHING.md`; milestone report added at `docs/milestones/MILESTONE_2026-08-06_MuAPI_Social_Publishing_Integration.md`.
+- Validation: focused publishing tests 19/19 pass; full repository suite 1385/1385 passes; `npm run build:studio` passes; `npm run build` passes; fresh production route validation on port 3100 returns HTTP 200 for `/studio/publishing`, `/api/publishing/accounts`, and `/api/publishing/scheduled`.
+
 ### Experience Layer Sprint 9 - Creative Studio Facelift
 
 - Applied the MavenSync Experience Layer as a presentation-only consistency pass across Image, Video, Marketing, Audio, Character, AI Influencer, Lip Sync, Cinema, AI Clipping, Body Swap, Vibe Motion, and the discovered Design Agent production studio.

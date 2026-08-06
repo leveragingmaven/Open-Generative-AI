@@ -14,7 +14,7 @@ body {
 }
 
 :root {
-  --color-primary: #22d3ee;
+  --color-primary: #e82070;
   --bg-app: #030303;
   --bg-panel: #0a0a0a;
   --bg-card: #111111;
@@ -169,7 +169,10 @@ body {
 
 .ms-creative-studio [class*="text-primary"],
 .ms-creative-studio [class*="text-[#22d3ee]"],
-.ms-creative-studio [class*="text-cyan"] {
+.ms-creative-studio [class*="text-cyan"],
+.ms-creative-studio [class*="text-purple"],
+.ms-creative-studio [class*="text-violet"],
+.ms-creative-studio [class*="text-fuchsia"] {
   color: var(--ms-color-gold-primary) !important;
 }
 
@@ -194,7 +197,10 @@ body {
 .ms-creative-studio [class*="bg-black/30"],
 .ms-creative-studio [class*="bg-black/40"],
 .ms-creative-studio [class*="bg-primary/10"],
-.ms-creative-studio [class*="bg-cyan"] {
+.ms-creative-studio [class*="bg-cyan"],
+.ms-creative-studio [class*="bg-purple"],
+.ms-creative-studio [class*="bg-violet"],
+.ms-creative-studio [class*="bg-fuchsia"] {
   background-color: var(--ms-color-background-elevated) !important;
 }
 
@@ -210,7 +216,10 @@ body {
 .ms-creative-studio [class*="border-white["],
 .ms-creative-studio [class*="border-primary"],
 .ms-creative-studio [class*="border-[#22d3ee]"],
-.ms-creative-studio [class*="border-cyan"] {
+.ms-creative-studio [class*="border-cyan"],
+.ms-creative-studio [class*="border-purple"],
+.ms-creative-studio [class*="border-violet"],
+.ms-creative-studio [class*="border-fuchsia"] {
   border-color: var(--ms-color-border-subtle) !important;
 }
 
@@ -236,7 +245,10 @@ body {
 
 .ms-creative-studio [class*="shadow-glow"],
 .ms-creative-studio [class*="shadow-cyan"],
-.ms-creative-studio [class*="shadow-primary"] {
+.ms-creative-studio [class*="shadow-primary"],
+.ms-creative-studio [class*="shadow-purple"],
+.ms-creative-studio [class*="shadow-violet"],
+.ms-creative-studio [class*="shadow-fuchsia"] {
   box-shadow: var(--ms-shadow-gold) !important;
 }
 

@@ -19,6 +19,13 @@ test("keyword search still resolves normal destinations", () => {
   assert.ok(items.some((i) => i.id === "video"), "CREATE Video Studio should still resolve");
 });
 
+test("regular command search does not expose Explore Apps", () => {
+  for (const query of ["", "apps", "explore apps", "marketplace"]) {
+    const items = searchCommandDestinations(query).flatMap((s) => s.items);
+    assert.equal(items.some((i) => i.route === "/studio/apps" || i.id === "apps"), false);
+  }
+});
+
 test("intent phrases resolve to an INTENT command with pipeline metadata", () => {
   const sections = searchCommandDestinations("turn this into shorts");
   const intentSection = sections.find((s) => s.id === "intents");

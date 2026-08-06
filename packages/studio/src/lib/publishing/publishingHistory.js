@@ -21,6 +21,18 @@ export function savePublishingDraft(draft, storage) {
   return normalized;
 }
 
+export function replacePublishingDrafts(drafts, storage) {
+  const normalized = Array.isArray(drafts) ? drafts.map(normalizePublishingDraft) : [];
+  writeList(PUBLISHING_DRAFTS_KEY, normalized, storage);
+  return normalized;
+}
+
+export function deletePublishingDraft(draftId, storage) {
+  const remaining = readPublishingDrafts(storage).filter((draft) => draft.id !== draftId);
+  replacePublishingDrafts(remaining, storage);
+  return { ok: true, draftId };
+}
+
 export function readPublishingHistory(storage) {
   return readList(PUBLISHING_HISTORY_KEY, storage).map(normalizePublishingJob);
 }

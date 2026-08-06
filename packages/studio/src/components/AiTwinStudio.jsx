@@ -488,7 +488,7 @@ export default function AiTwinStudio({ apiKey }) {
 
   if (view === "home") {
     return (
-      <div className="h-full w-full overflow-y-auto bg-[#0d0d0d] text-white">
+      <div className="ms-creative-studio h-full w-full overflow-y-auto bg-[#0d0d0d] text-white">
         <div className="mx-auto max-w-6xl px-8 py-10">
           {/* Hero */}
           <div className="mb-8 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
@@ -595,7 +595,7 @@ export default function AiTwinStudio({ apiKey }) {
   // ── Wizard ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#0d0d0d] text-white">
+    <div className="ms-creative-studio h-full w-full overflow-y-auto bg-[#0d0d0d] text-white">
       <div className="mx-auto max-w-6xl px-8 py-8">
         {/* Stepper */}
         <div className="mb-8">

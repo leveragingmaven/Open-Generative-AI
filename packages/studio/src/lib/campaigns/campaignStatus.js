@@ -16,7 +16,7 @@ export const CAMPAIGN_STATUS_LABELS = {
 export const CAMPAIGN_STATUS_STYLES = {
   draft: "border-[#D4A858]/30 bg-[#D4A858]/[0.08] text-[#F0D9A8]",
   planning: "border-sky-400/30 bg-sky-400/[0.08] text-sky-300",
-  generating: "border-fuchsia-400/30 bg-fuchsia-400/[0.08] text-fuchsia-300",
+  generating: "border-[#E82070]/30 bg-[#E82070]/[0.08] text-[#f5a6c8]",
   review: "border-amber-400/30 bg-amber-400/[0.08] text-amber-300",
   approved: "border-emerald-400/30 bg-emerald-400/[0.08] text-emerald-300",
   queued: "border-white/20 bg-white/[0.05] text-white/60",

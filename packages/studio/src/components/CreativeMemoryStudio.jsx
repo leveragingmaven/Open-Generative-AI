@@ -108,6 +108,34 @@ function StatCard({ label, value, hint }) {
   );
 }
 
+function MemoryQuickActionCard({ action, onNavigate }) {
+  const isUnavailable = action.unavailable || !action.route;
+
+  if (isUnavailable) {
+    return (
+      <div className="rounded-2xl border border-[#333333] bg-[#1B1B1B]/70 p-5 text-left opacity-75">
+        <span className="inline-flex text-[#D4A858]"><MemoryIcon type={action.icon} /></span>
+        <h3 className="mt-3 text-sm font-semibold text-white">{action.label}</h3>
+        <p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{action.detail}</p>
+        <span className="mt-4 inline-block text-[11px] text-[#808080]">Unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(action.route)}
+      className="group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#E82070] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(232,32,112,0.16)]"
+    >
+      <span className="inline-flex text-[#D4A858]"><MemoryIcon type={action.icon} /></span>
+      <h3 className="mt-3 text-sm font-semibold">{action.label}</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{action.detail}</p>
+      <span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#E82070]">Open <span aria-hidden="true">→</span></span>
+    </button>
+  );
+}
+
 function byType(memories, type) {
   return memories.filter((memory) => memory.type === type);
 }
@@ -156,9 +184,9 @@ export default function CreativeMemoryStudio() {
 
   const quickActions = [
     { label: "Refresh Memory", detail: "Reload the memory that the system holds", icon: "recent", route: "/studio/memory" },
-    { label: "Import Memory", detail: "Add a reference that the system should remember", icon: "sources", route: "/studio/apps" },
-    { label: "Archive Memory", detail: "Review and archive stored memories", icon: "archive", route: "/studio/memory" },
-    { label: "Memory Settings", detail: "Manage how memory is configured", icon: "health", route: "/studio/asset-library" },
+    { label: "Import Memory", detail: "No supported memory import screen exists in this workspace yet.", icon: "sources", unavailable: true },
+    { label: "Archive Memory", detail: "No bulk archive action is currently implemented.", icon: "archive", unavailable: true },
+    { label: "Memory Settings", detail: "No separate memory settings screen is currently implemented.", icon: "health", unavailable: true },
   ];
 
   return (
@@ -203,17 +231,11 @@ export default function CreativeMemoryStudio() {
             </div>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               {quickActions.map((action) => (
-                <button
+                <MemoryQuickActionCard
                   key={action.label}
-                  type="button"
-                  onClick={() => router.push(action.route)}
-                  className="group rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#D4A858] hover:bg-[#232323] hover:shadow-[0_0_24px_rgba(212,168,88,0.12)]"
-                >
-                  <span className="inline-flex text-[#D4A858]"><MemoryIcon type={action.icon} /></span>
-                  <h3 className="mt-3 text-sm font-semibold">{action.label}</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-[#B5B5B5]">{action.detail}</p>
-                  <span className="mt-4 inline-block text-[11px] text-[#808080] group-hover:text-[#D4A858]">Open <span aria-hidden="true">→</span></span>
-                </button>
+                  action={action}
+                  onNavigate={(route) => router.push(route)}
+                />
               ))}
             </div>
           </section>

@@ -20,7 +20,7 @@ export default function AiTwinTab({ apiKey, isHeaderVisible, onToggleHeader, twi
   }, [twinTarget]);
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#0d0d0d] text-white">
+    <div className="ms-creative-studio h-full w-full flex flex-col bg-[#0d0d0d] text-white">
       <div className="flex-shrink-0 flex items-center justify-between border-b border-white/10 bg-[#111111] px-6 py-2.5">
         <div className="flex items-center gap-2.5">
           <h2 className="text-sm font-bold tracking-wide text-[#D4A858]">AI Twin</h2>
@@ -34,7 +34,7 @@ export default function AiTwinTab({ apiKey, isHeaderVisible, onToggleHeader, twi
               key={m}
               onClick={() => setMode(m)}
               className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all ${
-                mode === m ? "bg-[#D4A858] text-black" : "text-white/40 hover:text-white hover:bg-white/5"
+                mode === m ? "bg-[#E82070] text-white" : "text-white/40 hover:text-white hover:bg-white/5"
               }`}
             >
               {m === "workspace" ? "Workspace" : "Studio"}

@@ -598,7 +598,7 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
       case "blackforest":
         return { text: "BF", bg: "bg-amber-500/10 text-amber-400 border-amber-500/25" };
       case "bytedance":
-        return { text: "BD", bg: "bg-purple-500/10 text-purple-400 border-purple-500/25" };
+        return { text: "BD", bg: "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/25" };
       case "midjourney":
         return { text: "MJ", bg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/25" };
       case "kling":
@@ -614,9 +614,9 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
       case "alibaba":
         return { text: "AL", bg: "bg-sky-500/10 text-sky-400 border-sky-500/25" };
       case "leonardoai":
-        return { text: "LE", bg: "bg-violet-500/10 text-violet-400 border-violet-500/25" };
+        return { text: "LE", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       case "stability":
-        return { text: "SD", bg: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/25" };
+        return { text: "SD", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       default:
         const name = provider ? provider.toUpperCase() : "AI";
         return { text: name.substring(0, 2), bg: "bg-primary/10 text-primary border-primary/25" };
@@ -770,7 +770,7 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
                         m.family === "kontext"
                           ? "bg-blue-500/10 text-blue-400 border-blue-500/10"
                           : m.family === "effects"
-                            ? "bg-purple-500/10 text-purple-400 border-purple-500/10"
+                            ? "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/10"
                             : "bg-primary/10 text-primary border-primary/10"
                       } border rounded-full flex items-center justify-center font-bold text-xs shadow-inner uppercase`}
                     >
@@ -1461,13 +1461,10 @@ export default function ImageStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#E82070] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                {selectedModelName}
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What would you like to create?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Describe a scene, character, mood, or style — and watch it come to life
+              Describe an image, choose your model and options below, and let MavenSync shape the result.
             </p>
           </div>
         )}

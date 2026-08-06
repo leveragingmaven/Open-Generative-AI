@@ -51,7 +51,7 @@ function timeAgo(dateStr) {
 function AgentAvatar({ agent, className = "", size = "lg" }) {
   return (
     <div className={`relative overflow-hidden rounded-xl ${className}`}>
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 to-fuchsia-500/15" />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#E82070]/15 to-[#D4A858]/15" />
       <div className="absolute inset-0 flex items-center justify-center text-white/40">
         {agent?.avatarPlaceholder ? (
           <span className={`font-black leading-none ${size === "sm" ? "text-sm" : "text-4xl"}`}>{agent.avatarPlaceholder}</span>
@@ -72,7 +72,7 @@ function AgentCard({ agent, onClick, onEdit, onAdd }) {
         onClick={() => onClick(agent)}
         className="absolute inset-0 rounded-xl overflow-hidden border border-white/5 bg-[#0a0a0a] transition-all group-hover:border-[#22d3ee]/30 group-hover:scale-[1.02] shadow-2xl"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 flex items-center justify-center">
+        <div className="absolute inset-0 bg-gradient-to-br from-[#E82070]/10 to-[#D4A858]/10 flex items-center justify-center">
           <span className="text-5xl font-black text-white/15">{agent.avatarPlaceholder || "A"}</span>
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
@@ -357,7 +357,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   if (openChat && openAgent) {
     const twin = getTwin(openConversation?.twinId || twinId);
     return (
-      <div className="h-full flex flex-col bg-[#030303] text-white">
+      <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
         <div className="flex-shrink-0 h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/40">
           <div className="flex items-center gap-4 min-w-0">
             <button
@@ -480,7 +480,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
 
   // ── Browse shell ───────────────────────────────────────────────────────────
   return (
-    <div className="h-full flex flex-col bg-[#030303] text-white">
+    <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
       <div className="flex-shrink-0 h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/40 gap-4">
         <div className="flex items-center gap-6 h-full min-w-0">
           <h2 className="text-sm font-black uppercase tracking-[0.2em] text-[#22d3ee] shrink-0">Agents</h2>
@@ -695,7 +695,7 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
             </Field>
             <Field label="Avatar">
               <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 flex items-center justify-center text-white/60 text-sm font-black">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#E82070]/20 to-[#D4A858]/20 flex items-center justify-center text-white/60 text-sm font-black">
                   {draftProfile.avatarPlaceholder}
                 </div>
                 <input

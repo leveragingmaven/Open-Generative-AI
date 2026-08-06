@@ -96,7 +96,7 @@ const QUICK_CREATE = [
   { title: "Marketing", detail: "Build campaigns", icon: "marketing", href: "/studio/marketing" },
   { title: "Audio", detail: "Voice and sound", icon: "audio", href: "/studio/audio" },
   { title: "Workflow", detail: "Connect steps", icon: "workflow", href: "/studio/workflows" },
-  { title: "More", detail: "Explore apps", icon: "apps", href: "/studio/apps" },
+  { title: "Library", detail: "Review assets", icon: "library", href: "/studio/asset-library" },
 ];
 
 function MetricTile({ icon, label, value, detail, href }) {

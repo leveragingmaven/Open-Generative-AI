@@ -1,93 +1,177 @@
-# MuAPI Social Publishing Foundation
+# MuAPI Social Publishing Integration
 
-## Existing Architecture Discovered
+## Status
 
-No existing Creative Studio social scheduler UI, social account connection screen, queue/calendar/history state, or MuAPI social publishing call path was found in this repository.
+MuAPI Social Publishing is now wired into the existing MavenSync Creative OS Publishing architecture.
 
-Related but separate code exists:
+The integration preserves the original architecture:
 
-- Workflow publishing in `packages/Vibe-Workflow` publishes workflow definitions, not social posts.
-- Agent `is_published` fields publish agent listings, not social posts.
-- `AppsStudio` includes a Social Post app card, but no scheduler implementation.
-- Phase 3 added `packages/studio/src/lib/publishing` as a boundary with MuAPI required as the Creative Studio social publishing transport.
-- Existing MuAPI generation/upload calls use same-origin proxy routes in browser contexts and server-side credentials in Agency Mode.
+- Creative OS remains the publishing interface.
+- `PublishingProvider` remains the provider contract.
+- `MuApiPublishingProvider` is the MuAPI transport adapter.
+- `PublishingCenterMVP` remains the queue/draft/history coordinator.
+- Publishing drafts, Campaign metadata, local history, and Hub-safe status reporting remain intact.
+- No second scheduler was introduced.
 
-Because no repository MuAPI social endpoint contract is present, Phase 4 does not claim live social publishing support. Unsupported live operations return explicit `unsupported_capability` responses.
+## Supported Platforms
 
-## Implemented Foundation
+Enabled by default:
 
-Client/package modules:
+- YouTube
+- TikTok
+- Instagram
 
-- `packages/studio/src/lib/publishing/PublishingProvider.js`
-- `packages/studio/src/lib/publishing/MuApiPublishingProvider.js`
-- `packages/studio/src/lib/publishing/PublishingProviderRegistry.js`
-- `packages/studio/src/lib/publishing/publishingTypes.js`
-- `packages/studio/src/lib/publishing/publishingErrors.js`
-- `packages/studio/src/lib/publishing/platformCapabilities.js`
-- `packages/studio/src/lib/publishing/publishingHistory.js`
-- `packages/studio/src/lib/publishing/publishingStatusReporter.js`
+Verified in the MuAPI API but held behind Creative OS capability flags until live-account validation:
 
-Server route:
+- Facebook — `publishing.facebook`
+- LinkedIn — `publishing.linkedin`
+- Pinterest — `publishing.pinterest`
+- Threads — `publishing.threads`
+- X — `publishing.x`
 
-- `app/api/publishing/[[...path]]/route.js`
+## Architecture
 
-Implemented behavior:
+```text
+Creative OS Publishing Workspace
+  -> PublishingCenterMVP
+  -> PublishingProvider / MuApiPublishingProvider
+  -> /api/publishing same-origin route
+  -> MuAPI Social Publishing API
+  -> Social platforms
+```
 
-- Normalized publishing draft shape.
-- Platform capability registry with known values only where already inferable; unknowns remain explicit.
-- Local publishing draft/history persistence through the Phase 2 storage helpers.
-- Duplicate submission prevention in `MuApiPublishingProvider`.
-- Normalized status mapping including partial platform success.
-- Optional MavenSync Hub publishing status reporting that cannot break MuAPI publishing state.
-- Same-origin publishing API route boundary that strips cookies, authorization, browser `x-api-key`, host, connection, and content-length headers before any future upstream call.
+Creative OS owns:
+
+- Draft creation
+- Asset selection
+- Campaign ownership metadata
+- Platform/account selection
+- Local queue and local history fallback
+- Status display and user confirmation
+
+MuAPI owns:
+
+- Social account authorization
+- Publishing transport
+- Scheduled publishing transport
+- Platform-specific social delivery
+- Provider request/post identifiers
+
+MavenSync Hub owns, when enabled:
+
+- Project, Campaign, tenant, and user context
+- Optional publishing status reporting
+- Future cross-device publishing synchronization
+
+## Server API
+
+All browser publishing calls continue to use same-origin routes under `/api/publishing`.
+
+`app/api/publishing/[[...path]]/route.js` strips browser credentials before calling MuAPI:
+
+- `cookie`
+- `authorization`
+- browser-provided `x-api-key`
+- `host`
+- `connection`
+- `content-length`
+
+The server route injects the server-side `MUAPI_API_KEY`. MuAPI keys are never exposed to browser code.
+
+Mapped routes:
+
+| Creative OS route | MuAPI route |
+|---|---|
+| `GET /api/publishing/accounts` | `GET /social/accounts` |
+| `POST /api/publishing/accounts/connect` | `POST /api/v1/social/{youtube,tiktok,instagram}/connect-url` |
+| `PATCH /api/publishing/accounts/:accountId` | `PATCH /social/accounts/:accountId` |
+| `DELETE /api/publishing/accounts/:accountId` | `DELETE /social/accounts/:accountId` |
+| `POST /api/publishing/publish-now` | platform-specific `/api/v1/*-publish` |
+| `POST /api/publishing/schedule` | `POST /social/publish` with `scheduled_at` |
+| `GET /api/publishing/scheduled` | `GET /social/posts` |
+| `GET /api/publishing/jobs/:jobId` | `GET /api/v1/predictions/:jobId/result` |
+| `POST /api/publishing/jobs/:jobId/cancel` | `DELETE /social/posts/:jobId` |
+
+Rescheduling remains a future enhancement because the verified MuAPI contract does not expose a dedicated reschedule endpoint.
 
 ## Draft Shape
+
+Publishing drafts remain Creative OS-owned local records:
 
 ```json
 {
   "id": "draft-123",
-  "ownerId": "user-123",
-  "tenantId": "tenant-123",
-  "projectId": "project-123",
   "campaignId": "campaign-123",
-  "contentPlanId": "plan-123",
+  "campaignName": "Launch",
   "assetIds": ["asset-123"],
-  "assets": [
-    {
-      "assetId": "asset-123",
-      "url": "https://cdn.example/asset.jpg",
-      "type": "image"
-    }
-  ],
+  "assets": [{ "assetId": "asset-123", "url": "https://cdn.example/asset.mp4", "type": "video" }],
   "caption": "Post caption",
-  "title": "",
-  "description": "",
-  "link": "",
-  "hashtags": [],
-  "platforms": ["instagram"],
+  "title": "Launch Video",
+  "platforms": ["youtube"],
+  "accountIds": { "youtube": 42 },
   "platformOverrides": {
-    "instagram": {
-      "caption": "Instagram-specific caption"
-    }
+    "youtube": { "accountId": 42, "accountName": "Brand Channel" }
   },
-  "scheduledAt": "2026-08-01T15:00:00.000Z",
+  "scheduledAt": "2026-08-06T15:00:00.000Z",
   "timezone": "America/Chicago",
   "status": "draft",
-  "provider": "muapi",
-  "providerPostIds": {},
-  "providerJobId": null,
-  "createdAt": "2026-07-28T20:00:00.000Z",
-  "updatedAt": "2026-07-28T20:00:00.000Z",
-  "publishedAt": null,
-  "error": null
+  "provider": "muapi"
 }
 ```
 
-Creative Studio asset IDs remain separate from temporary delivery URLs. Expired temporary signed URLs fail validation before submission.
+Sensitive OAuth tokens are not stored in the draft, local history, or normalized connected account records.
+
+## Payload Mapping
+
+`MuApiPublishingProvider` transforms Creative OS drafts into MuAPI payloads:
+
+| Creative OS field | MuAPI field |
+|---|---|
+| `accountIds[platform]` / `platformOverrides[platform].accountId` | `account_id` |
+| first draft asset URL | `media_url` |
+| `title` | `title` where supported |
+| `caption` / `description` | `caption` or `description` |
+| `hashtags` | `tags` where supported |
+| `scheduledAt` | `scheduled_at` |
+| platform overrides | platform-specific MuAPI fields |
+
+The provider handles per-platform results and stores partial failures in `platformResults`.
+
+## Connected Accounts
+
+The Publishing workspace now loads MuAPI-connected accounts through the existing provider boundary.
+
+Enabled platforms can initiate MuAPI OAuth/connect URL flows. Capability-flagged platforms are visible as verified future destinations but are not selectable until live-account validation is complete.
+
+Normalized connected accounts retain only reference fields such as:
+
+- account id
+- platform
+- display name / username
+- connection status
+
+They do not retain OAuth tokens.
+
+## Scheduling
+
+Creative OS remains the scheduling interface.
+
+Scheduled publishing uses MuAPI’s `scheduled_at` field through `/social/publish`.
+
+No new scheduler was added. Existing local drafts and queue state remain the Creative OS scheduling surface.
+
+## Publishing History
+
+Publishing history now combines:
+
+- existing local publishing history
+- MuAPI post history from `/social/posts`
+
+If MuAPI history is unavailable, the Publishing workspace falls back to local history and displays a non-blocking notice.
 
 ## Statuses
 
-Normalized statuses:
+Statuses continue to normalize through the existing status system:
 
 - `draft`
 - `validating`
@@ -100,199 +184,28 @@ Normalized statuses:
 - `cancelled`
 - `unknown`
 
-A failure on one platform must be represented in `platformResults` and must not mark every platform as published.
-
-## Platform Capabilities
-
-Capabilities live in `platformCapabilities.js`.
-
-Values are populated only from existing application assumptions or broad media-type behavior already referenced in this project. Unknown support remains `"unknown"` rather than guessed.
-
-The current registry supports lookup for:
-
-- `instagram`
-- `tiktok`
-- `youtube`
-- `linkedin`
-- `facebook`
-- `x`
-- `pinterest`
-
-Unknown platforms return a capability object with unknown values.
-
-## Server API
-
-All browser publishing calls should use same-origin routes under `/api/publishing`. MuAPI credentials must remain server-side in Agency Mode.
-
-### `GET /api/publishing/accounts`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Authentication: same-origin Creative Studio session. Agency Mode uses server-side `MUAPI_API_KEY` only if a future upstream is configured.
-
-Response when unsupported:
-
-```json
-{
-  "error": "MuAPI social publishing endpoint is not configured in this Creative Studio deployment.",
-  "code": "unsupported_capability",
-  "provider": "muapi",
-  "capability": "getConnectedAccounts"
-}
-```
-
-Failure behavior: client receives a normalized unsupported capability error.
-
-### `POST /api/publishing/accounts/connect`
-
-Status: implemented route boundary; proposed MuAPI-hosted account connection operation.
-
-Authentication: same-origin Creative Studio session.
-
-Expected future behavior: initiate or return a MuAPI-hosted OAuth/account connection URL. Creative Studio should retain normalized account references only.
-
-Failure behavior: unsupported until MuAPI endpoint is confirmed.
-
-### `DELETE /api/publishing/accounts/:accountId`
-
-Status: implemented route boundary; proposed disconnect operation.
-
-Authentication: same-origin Creative Studio session.
-
-Failure behavior: unsupported until MuAPI endpoint is confirmed.
-
-### `POST /api/publishing/drafts`
-
-Status: provider-local draft normalization is implemented; server route boundary exists.
-
-Authentication: same-origin Creative Studio session.
-
-MuAPI operation used: none today. Draft persistence is local Creative Studio state.
-
-Failure behavior: invalid drafts fail client-side validation before submission.
-
-### `PATCH /api/publishing/drafts/:draftId`
-
-Status: provider-local draft update is implemented; server route boundary exists.
-
-MuAPI operation used: none today.
-
-### `DELETE /api/publishing/drafts/:draftId`
-
-Status: provider-local draft deletion boundary exists.
-
-MuAPI operation used: none today.
-
-### `POST /api/publishing/schedule`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Authentication: same-origin Creative Studio session.
-
-Sample request:
-
-```json
-{
-  "draft": {
-    "id": "draft-123",
-    "assetIds": ["asset-123"],
-    "platforms": ["instagram"],
-    "caption": "Caption",
-    "scheduledAt": "2026-08-01T15:00:00.000Z",
-    "timezone": "America/Chicago"
-  },
-  "idempotencyKey": "schedule:draft-123"
-}
-```
-
-Normalized response when supported in the future:
-
-```json
-{
-  "id": "job-123",
-  "status": "scheduled",
-  "provider": "muapi",
-  "providerJobId": "muapi-job-123",
-  "platformResults": {
-    "instagram": {
-      "status": "scheduled"
-    }
-  }
-}
-```
-
-Failure behavior: provider saves the draft with `failed` status and keeps original assets attached.
-
-Idempotency behavior: client provider prevents duplicate in-flight submissions for the same idempotency key. Future MuAPI idempotency headers/body fields should be forwarded only after confirmed support.
-
-### `POST /api/publishing/publish-now`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Authentication: same-origin Creative Studio session.
-
-Failure behavior: same as schedule.
-
-### `GET /api/publishing/jobs/:jobId`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Purpose: retrieve normalized job/post status when MuAPI exposes status checks.
-
-### `POST /api/publishing/jobs/:jobId/cancel`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Purpose: cancel a scheduled post when MuAPI supports cancellation.
-
-### `POST /api/publishing/jobs/:jobId/reschedule`
-
-Status: implemented route boundary; live MuAPI operation unsupported until endpoint is confirmed.
-
-Purpose: reschedule a MuAPI-backed post when supported.
-
-## Account Connection Boundary
-
-No existing MuAPI social account connection logic was found in this repository.
-
-Required future behavior:
-
-- Prefer MuAPI-hosted OAuth/account connection.
-- Creative Studio retains normalized account references only.
-- Sensitive social-platform tokens and credentials remain at MuAPI.
-- Expired or revoked accounts return an actionable reconnect state.
-- Automated tests must not initiate live account connection.
-
-## MavenSync Hub Reporting
-
-When MavenSync integration is enabled, publishing status can be reported with:
-
-```json
-{
-  "projectId": "project-123",
-  "campaignId": "campaign-123",
-  "contentPlanId": "plan-123",
-  "publishingDraftId": "draft-123",
-  "assetIds": ["asset-123"],
-  "platforms": ["instagram"],
-  "scheduledAt": "2026-08-01T15:00:00.000Z",
-  "status": "scheduled",
-  "provider": "muapi",
-  "providerJobId": "muapi-job-123",
-  "publishedUrls": [],
-  "error": null,
-  "updatedAt": "2026-07-28T20:00:00.000Z"
-}
-```
-
-Hub reporting failure does not break MuAPI publishing or remove local publishing history.
+MuAPI responses such as `pending`, `processing`, `completed`, `failed`, and `cancelled` are normalized into these Creative OS statuses.
 
 ## Security
 
-- No direct social-platform APIs are implemented.
-- No GHL or n8n publishing transport is implemented.
-- Browser publishing calls use same-origin `/api/publishing/*`.
-- Server routes strip cookies, authorization headers, and browser `x-api-key` before future MuAPI upstream calls.
-- MuAPI service credentials remain server-only.
-- No social passwords, raw OAuth tokens, or permanent auth tokens are stored in localStorage.
-- Client payloads contain normalized draft data and asset references only, not MuAPI credentials.
+- MuAPI API keys remain server-side.
+- Browser payloads do not include `x-api-key`.
+- The route layer strips browser credentials before upstream calls.
+- OAuth tokens are not stored in browser storage.
+- Client payloads contain normalized drafts, account references, asset URLs, and Campaign metadata only.
+- MavenSync Hub reporting failures do not break MuAPI publishing state.
+
+## Current Limitations
+
+- Live-account validation has only been enabled by default for YouTube, TikTok, and Instagram.
+- Facebook, LinkedIn, Pinterest, Threads, and X remain capability-flagged.
+- Dedicated reschedule, recurring scheduling, queue ordering, calendar endpoints, and analytics endpoints are not implemented because they were not verified as available in the current MuAPI contract.
+- Webhook receiving is not implemented yet; polling/status lookup remains the current path.
+
+## Validation
+
+- Focused publishing tests: 19/19 passing.
+- Full repository test suite: 1385/1385 passing.
+- Studio build: passing.
+- Root Next production build: passing.
+- Fresh production route validation on port 3100: `/studio/publishing`, `/api/publishing/accounts`, and `/api/publishing/scheduled` returned HTTP 200.

@@ -659,7 +659,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
 
   if (selectedWorkflow) {
     return (
-      <div className="h-full flex flex-col bg-[#030303] text-white">
+      <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
         {/* Immersive Sub-header / Floating Toggle */}
         {isHeaderVisible ? (
           <div className="flex-shrink-0 h-14 border-b border-white/5 flex items-center justify-between px-6 bg-black/40 z-30">
@@ -1079,7 +1079,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
   }
 
   return (
-    <div className="h-full w-full flex flex-col p-8 overflow-y-auto custom-scrollbar">
+    <div className="ms-creative-studio h-full w-full flex flex-col p-8 overflow-y-auto custom-scrollbar">
       <div className="max-w-7xl mx-auto w-full">
         <div className="flex flex-col gap-6 mb-12">
           <div className="flex items-end justify-between">

@@ -8,6 +8,7 @@ import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import {
   EmptyState,
   ErrorState,
@@ -181,6 +182,8 @@ export default function AssetLibraryStudio() {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [publishingSelectMode, setPublishingSelectMode] = useState(false);
+  const [publishingNotice, setPublishingNotice] = useState(null);
 
   const reload = () => {
     setLoading(true);
@@ -199,6 +202,11 @@ export default function AssetLibraryStudio() {
   };
 
   useEffect(() => { reload(); }, [query, sort, typeFilter, favoriteFilter, archiveFilter]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setPublishingSelectMode(params.get("mode") === "publish" || params.get("returnTo") === "publishing");
+  }, []);
 
   const scopeToCampaign = (list) => {
     if (!activeCampaign) return list;
@@ -247,6 +255,20 @@ export default function AssetLibraryStudio() {
     downloadAsset(assetUrl(selected), { id: selected.id, kind: assetType(selected), prefix: assetTitle(selected) });
   };
 
+  const createPublishingDraft = (asset) => {
+    if (!asset) return;
+    try {
+      const center = new PublishingCenterMVP({ storage: window.localStorage });
+      const draft = center.createDraftFromAsset(asset, {
+        campaignId: activeCampaign?.id,
+        campaignName: activeCampaign?.name,
+      });
+      router.push(`/studio/publishing?draft=${encodeURIComponent(draft.id)}`);
+    } catch (error) {
+      setPublishingNotice(error.message || "Unable to create a publishing draft for this asset.");
+    }
+  };
+
   const selectedCampaignId = assetCampaignId(selected);
   const selectedCampaignName = selected?.campaignName || selected?.metadata?.campaignName || campaignNames.get(String(selectedCampaignId || "")) || null;
   const selectedStatus = selected?.status || selected?.metadata?.status || null;
@@ -259,6 +281,16 @@ export default function AssetLibraryStudio() {
         description="Find every saved asset, understand where it belongs, and move it into its next stage."
         actions={<SecondaryButton type="button" onClick={() => router.push("/studio/publishing")} className="min-h-9 px-4 py-2 text-xs">Open Publishing <Icon type="arrow" size={13} /></SecondaryButton>}
       />
+
+      {publishingSelectMode && (
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3">
+          <StatusBadge tone="gold" dot>Publishing selection</StatusBadge>
+          <span className="min-w-0 flex-1 text-xs font-semibold text-[var(--ms-color-text-secondary)]">Choose an existing asset, then create a publishing draft from its details panel.</span>
+          <button type="button" onClick={() => router.push("/studio/publishing")} className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--ms-color-pink-primary)]">Back to Publishing</button>
+        </div>
+      )}
+
+      {publishingNotice ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{publishingNotice}</div> : null}
 
       {activeCampaign && (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3">
@@ -313,8 +345,8 @@ export default function AssetLibraryStudio() {
         </WorkspaceCard>
       </WorkspaceSection>
 
-      <WorkspaceSection title="Asset Grid" description={`${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
-        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}</div>}
+      <WorkspaceSection title="Asset Grid" description={publishingSelectMode ? `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} available for publishing selection.` : `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
+        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <AssetCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}</div>}
       </WorkspaceSection>
 
       {selected && (
@@ -336,7 +368,8 @@ export default function AssetLibraryStudio() {
                   {assetUrl(selected) ? <PrimaryButton type="button" onClick={downloadSelected} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</PrimaryButton> : null}
                   <SecondaryButton type="button" onClick={toggleFavorite} className="min-h-10 px-4 py-2 text-xs"><Icon type="favorite" size={14} /> {selected.favorite ? "Remove favorite" : "Add favorite"}</SecondaryButton>
                   <SecondaryButton type="button" onClick={() => router.push(studioRouteForAsset(selected))} className="min-h-10 px-4 py-2 text-xs">Open Studio</SecondaryButton>
-                  <SecondaryButton type="button" onClick={() => router.push("/studio/publishing")} className="min-h-10 px-4 py-2 text-xs">Open Publishing</SecondaryButton>
+                  {publishingSelectMode ? <PrimaryButton type="button" onClick={() => createPublishingDraft(selected)} className="min-h-10 px-4 py-2 text-xs">Create Publishing Draft</PrimaryButton> : null}
+                  <SecondaryButton type="button" onClick={() => router.push("/studio/publishing")} className="min-h-10 px-4 py-2 text-xs">{publishingSelectMode ? "Back to Publishing" : "Open Publishing"}</SecondaryButton>
                 </div>
               </div>
             </div>

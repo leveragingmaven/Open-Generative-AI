@@ -213,14 +213,14 @@ test("provider executor composes a template-aware prompt from inputs", async () 
       templateId: "sales-dashboard",
       text: "Revenue is up",
       dataPoints: ["1.2M", "2.4M"],
-      brandColors: ["#22d3ee", "#ffffff"],
+      brandColors: ["#E82070", "#ffffff"],
     }),
     { apiKey: "key" }
   );
   assert.equal(run.ok, true);
   assert.match(captured.prompt, /Revenue is up/);
   assert.match(captured.prompt, /1.2M, 2.4M/);
-  assert.match(captured.prompt, /#22d3ee/);
+  assert.match(captured.prompt, /#E82070/);
   assert.equal(captured.aspect_ratio, "16:9");
   assert.equal(captured.duration_seconds, 8);
   assert.equal(run.normalized.video, "https://cdn.test/promo.mp4");

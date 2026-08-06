@@ -8,78 +8,106 @@ const UNKNOWN_PLATFORM_CAPABILITY = {
   supportsThumbnail: "unknown",
   maxAssets: "unknown",
   captionLimit: "unknown",
+  enabledByDefault: false,
+  capabilityFlag: null,
 };
 
 const CAPABILITIES = {
   instagram: {
     platform: "instagram",
     mediaTypes: ["image", "video", "carousel"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: "unknown",
     supportsTitle: false,
     supportsThumbnail: "unknown",
     maxAssets: 10,
     captionLimit: "unknown",
+    enabledByDefault: true,
+    capabilityFlag: null,
   },
   tiktok: {
     platform: "tiktok",
     mediaTypes: ["video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: false,
     supportsTitle: "unknown",
     supportsThumbnail: "unknown",
     maxAssets: 1,
     captionLimit: "unknown",
+    enabledByDefault: true,
+    capabilityFlag: null,
   },
   youtube: {
     platform: "youtube",
     mediaTypes: ["video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: false,
     supportsTitle: true,
     supportsThumbnail: "unknown",
     maxAssets: 1,
     captionLimit: "unknown",
+    enabledByDefault: true,
+    capabilityFlag: null,
   },
   linkedin: {
     platform: "linkedin",
     mediaTypes: ["image", "video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: false,
     supportsTitle: "unknown",
     supportsThumbnail: "unknown",
     maxAssets: "unknown",
     captionLimit: "unknown",
+    enabledByDefault: false,
+    capabilityFlag: "publishing.linkedin",
   },
   facebook: {
     platform: "facebook",
     mediaTypes: ["image", "video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: "unknown",
     supportsTitle: "unknown",
     supportsThumbnail: "unknown",
     maxAssets: "unknown",
     captionLimit: "unknown",
+    enabledByDefault: false,
+    capabilityFlag: "publishing.facebook",
   },
   x: {
     platform: "x",
     mediaTypes: ["image", "video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: false,
     supportsTitle: false,
     supportsThumbnail: false,
     maxAssets: "unknown",
     captionLimit: "unknown",
+    enabledByDefault: false,
+    capabilityFlag: "publishing.x",
   },
   pinterest: {
     platform: "pinterest",
     mediaTypes: ["image", "video"],
-    supportsScheduling: "unknown",
+    supportsScheduling: true,
     supportsFirstComment: false,
     supportsTitle: true,
     supportsThumbnail: "unknown",
     maxAssets: "unknown",
     captionLimit: "unknown",
+    enabledByDefault: false,
+    capabilityFlag: "publishing.pinterest",
+  },
+  threads: {
+    platform: "threads",
+    mediaTypes: ["image", "video"],
+    supportsScheduling: true,
+    supportsFirstComment: false,
+    supportsTitle: false,
+    supportsThumbnail: "unknown",
+    maxAssets: "unknown",
+    captionLimit: "unknown",
+    enabledByDefault: false,
+    capabilityFlag: "publishing.threads",
   },
 };
 
@@ -91,6 +119,14 @@ export class PlatformCapabilityRegistry {
   getPlatformCapabilities(platform) {
     const key = String(platform || "").toLowerCase();
     return this.capabilities[key] || { platform: key || "unknown", ...UNKNOWN_PLATFORM_CAPABILITY };
+  }
+
+  listPlatformCapabilities() {
+    return Object.values(this.capabilities);
+  }
+
+  listEnabledPlatforms() {
+    return this.listPlatformCapabilities().filter((capability) => capability.enabledByDefault);
   }
 
   validateDraftForPlatform(draft, platform) {

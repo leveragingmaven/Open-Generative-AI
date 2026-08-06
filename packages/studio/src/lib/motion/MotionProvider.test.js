@@ -13,10 +13,10 @@ import { getWorkflowTemplate } from "./templates.js";
 
 test("buildMotionPrompt composes template description plus inputs", () => {
   const template = getWorkflowTemplate("logo-reveal");
-  const prompt = buildMotionPrompt({ template, inputs: { text: "ACME", brandColors: ["#22d3ee", "#ffffff"] } });
+  const prompt = buildMotionPrompt({ template, inputs: { text: "ACME", brandColors: ["#E82070", "#ffffff"] } });
   assert.match(prompt, /logo/i);
   assert.match(prompt, /ACME/);
-  assert.match(prompt, /#22d3ee, #ffffff/);
+  assert.match(prompt, /#E82070, #ffffff/);
 });
 
 test("buildMotionPrompt appends optional user refinement", () => {

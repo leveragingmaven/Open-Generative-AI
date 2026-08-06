@@ -1,7 +1,9 @@
 import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
-import { readPublishingDrafts, readPublishingHistory, savePublishingDraft, savePublishingJob } from "./publishingHistory.js";
-import { readAssetHistory } from "../assets/historyManager.js";
+import { deletePublishingDraft, readPublishingDrafts, readPublishingHistory, replacePublishingDrafts, savePublishingDraft, savePublishingJob } from "./publishingHistory.js";
 import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
+import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
+import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
+import { localAssetManager } from "../intelligence/AssetManager.js";
 
 export class PublishingCenterMVP {
   constructor(options = {}) {
@@ -13,7 +15,12 @@ export class PublishingCenterMVP {
    * Get all available assets from history
    */
   getAvailableAssets() {
-    return readAssetHistory(this.storage);
+    const service = new AssetLibraryService({
+      repository: localAssetManager.adapter,
+      indexer: new InMemoryAssetIndexer(),
+      storage: this.storage,
+    });
+    return service.list();
   }
 
   /**
@@ -40,7 +47,7 @@ export class PublishingCenterMVP {
   /**
    * Update draft platforms
    */
-  updateDraftPlatforms(draftId, platforms) {
+  updateDraftPlatforms(draftId, platforms, options = {}) {
     const drafts = readPublishingDrafts(this.storage);
     const draft = drafts.find(d => d.id === draftId);
     
@@ -51,9 +58,35 @@ export class PublishingCenterMVP {
     const updatedDraft = this.publishingProvider.updateDraft({
       ...draft,
       platforms,
+      accountIds: options.accountIds || draft.accountIds,
+      platformOverrides: options.platformOverrides || draft.platformOverrides,
     }, { storage: this.storage });
 
     // Save using the publishing history abstraction
+    savePublishingDraft(updatedDraft, this.storage);
+    return updatedDraft;
+  }
+
+  /**
+   * Update editable draft metadata without changing publishing execution.
+   */
+  updateDraft(draftId, updates = {}) {
+    const drafts = readPublishingDrafts(this.storage);
+    const draft = drafts.find(d => d.id === draftId);
+
+    if (!draft) {
+      throw new Error("Draft not found");
+    }
+
+    const updatedDraft = this.publishingProvider.updateDraft({
+      ...draft,
+      ...updates,
+      id: draft.id,
+      assetIds: draft.assetIds,
+      assets: draft.assets,
+      createdAt: draft.createdAt,
+    }, { storage: this.storage });
+
     savePublishingDraft(updatedDraft, this.storage);
     return updatedDraft;
   }
@@ -113,17 +146,38 @@ export class PublishingCenterMVP {
     return readPublishingHistory(this.storage);
   }
 
+  async getConnectedAccounts() {
+    if (!this.publishingProvider.getConnectedAccounts) return [];
+    return await this.publishingProvider.getConnectedAccounts();
+  }
+
+  async connectAccount(platform, options = {}) {
+    if (!this.publishingProvider.connectAccount) throw new Error("Connected accounts are unavailable");
+    return await this.publishingProvider.connectAccount({
+      platform,
+      externalUserId: options.externalUserId,
+      redirectTo: options.redirectTo,
+    });
+  }
+
+  async getRemoteHistory() {
+    if (!this.publishingProvider.getScheduledPosts) return [];
+    return await this.publishingProvider.getScheduledPosts();
+  }
+
   /**
    * Delete a draft
    */
   deleteDraft(draftId) {
-    return this.publishingProvider.deleteDraft(draftId, { 
+    const result = this.publishingProvider.deleteDraft(draftId, {
+      storage: this.storage,
       readDrafts: () => readPublishingDrafts(this.storage),
       writeDrafts: (drafts) => {
-        // This relies on the provider's internal storage handling
-        // We don't need to manually save since the provider handles it
+        replacePublishingDrafts(drafts, this.storage);
         return { ok: true, draftId };
       }
     });
+    deletePublishingDraft(draftId, this.storage);
+    return result;
   }
 }
