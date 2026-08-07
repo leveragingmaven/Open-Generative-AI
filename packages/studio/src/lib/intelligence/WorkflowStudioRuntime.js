@@ -1,5 +1,6 @@
 import { WorkflowExecutionEngine } from "./WorkflowExecutionEngine.js";
 import { createWorkflowNode } from "./WorkflowNode.js";
+import { buildCreativeReview, selectCreativeSkillsForStudio } from "../creative-brief/index.js";
 
 export function workflowStudioRuntimeEnabled() {
   const value = typeof process !== "undefined" ? process.env?.CREATIVE_OS_WORKFLOW_STUDIO : undefined;
@@ -12,13 +13,28 @@ export function createWorkflowStudioDefinition(workflow, inputs = {}) {
     type: "asset_reference",
     inputs: value,
   }));
+  const workflowSkills = selectCreativeSkillsForStudio("workflow");
+  const workflowVariants = workflowSkills.find((skill) => skill.skillId === "workflow-variants") || null;
+  const creativeReview = buildCreativeReview({}, { skillIds: ["creative-review", "creative-contracts"] });
   return {
     id: workflow?.id,
     name: workflow?.name,
     version: workflow?.version,
     nodes: inputNodes,
     edges: [],
-    metadata: { compatibility: "workflow-studio" },
+    metadata: {
+      compatibility: "workflow-studio",
+      creativeAdvisory: {
+        workflowVariants: workflowVariants
+          ? {
+              skillId: workflowVariants.skillId,
+              constraints: Array.isArray(workflowVariants.constraints) ? [...workflowVariants.constraints] : [],
+              principles: Array.isArray(workflowVariants.creativePrinciples) ? [...workflowVariants.creativePrinciples] : [],
+            }
+          : undefined,
+        review: creativeReview,
+      },
+    },
   };
 }
 

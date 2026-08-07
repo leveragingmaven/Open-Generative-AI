@@ -4,6 +4,7 @@ import { CapabilityRegistry } from "./CapabilityRegistry.js";
 import { CapabilityRouter } from "./CapabilityRouter.js";
 import { CreativeIntelligenceEngine } from "./CreativeIntelligenceEngine.js";
 import { RecipeResolver } from "./RecipeResolver.js";
+import { getSkill } from "../skills/index.js";
 
 function memoryStub() {
   return {
@@ -60,5 +61,62 @@ test("CreativeIntelligenceEngine preserves optional memory degradation and valid
   const plan = engine.plan({ recipeId: "plain", intent: "Freeform" });
 
   assert.equal(plan.warnings.length, 1);
+  assert.equal(engine.validate(plan).valid, true);
+});
+
+test("CreativeIntelligenceEngine without studio or skills leaves the plan untouched", () => {
+  const engine = new CreativeIntelligenceEngine({
+    memory: { projectMemory: () => ({ memories: [], values: {}, provenance: [] }) },
+    recipes: new RecipeResolver({ recipes: { plain: { id: "plain" } } }),
+    router: { resolve: () => null },
+  });
+  const plan = engine.plan({ recipeId: "plain", intent: "Freeform" });
+  assert.equal(plan.creativeSkills, null);
+});
+
+test("CreativeIntelligenceEngine attaches studio-routed Creative Skill guidance to the plan", () => {
+  const engine = new CreativeIntelligenceEngine({
+    memory: { projectMemory: () => ({ memories: [], values: {}, provenance: [] }) },
+    recipes: new RecipeResolver({ recipes: { video: { id: "video" } } }),
+    router: { resolve: () => null },
+  });
+  const plan = engine.plan({ recipeId: "video", intent: "A product film", studioId: "video" });
+
+  assert.ok(plan.creativeSkills, "creative guidance attached");
+  assert.ok(plan.creativeSkills.skills.some((skill) => skill.skillId === "motion-direction"));
+  assert.ok(plan.creativeSkills.creativePrinciples.length > 0);
+  assert.ok(plan.creativeSkills.constraints.length > 0);
+  assert.ok(plan.creativeSkills.evaluationRules.some((rule) => rule.skillId === "motion-direction"));
+  assert.ok(plan.creativeSkills.qualityGates.length > 0);
+  assert.equal(plan.creativeSkills.review.name, "Creative Review");
+});
+
+test("CreativeIntelligenceEngine reuses explicitly selected skills over studio routing", () => {
+  const engine = new CreativeIntelligenceEngine({
+    memory: { projectMemory: () => ({ memories: [], values: {}, provenance: [] }) },
+    recipes: new RecipeResolver({ recipes: { video: { id: "video" } } }),
+    router: { resolve: () => null },
+  });
+  const selected = [getSkill("b-roll-planning")];
+  const plan = engine.plan({
+    recipeId: "video",
+    intent: "A b-roll sequence",
+    studioId: "video",
+    skills: selected,
+  });
+
+  assert.deepEqual(
+    plan.creativeSkills.skills.map((skill) => skill.skillId),
+    ["b-roll-planning"],
+  );
+});
+
+test("CreativeIntelligenceEngine plan validation is unaffected by creative guidance", () => {
+  const engine = new CreativeIntelligenceEngine({
+    memory: { projectMemory: () => ({ memories: [], values: {}, provenance: [] }) },
+    recipes: new RecipeResolver({ recipes: { video: { id: "video" } } }),
+    router: { resolve: () => null },
+  });
+  const plan = engine.plan({ recipeId: "video", intent: "A film", studioId: "video" });
   assert.equal(engine.validate(plan).valid, true);
 });

@@ -3,6 +3,7 @@ import { createCreativePlan } from "./CreativePlan.js";
 import { createCreativeRequest } from "./CreativeRequest.js";
 import { creativeMemoryEngine } from "./CreativeMemoryEngine.js";
 import { RecipeResolver } from "./RecipeResolver.js";
+import { deriveCreativeSkillGuidance, selectCreativeSkillsForStudio } from "../creative-brief/index.js";
 
 function normalizeRequirements(recipe, input = {}) {
   const requirements = input.capabilityRequirements || recipe.capabilityRequirements || [];
@@ -41,6 +42,17 @@ export class CreativeIntelligenceEngine {
       : null;
     const warnings = [];
     if (!memoryProjection.memories.length) warnings.push("No matching Creative Memory was available for this recipe.");
+    // Creative Skills enrich the plan with creative methodology. Skills already
+    // selected by the Creative Brief are reused (input.skills); when none are
+    // supplied, the studio-routed set is selected declaratively. This is
+    // additive planning guidance only — recipes still own execution and skills
+    // still own creative methodology. Guidance is immutable and never mutates
+    // a skill manifest.
+    const plannedSkills = Array.isArray(input.skills) ? input.skills : undefined;
+    const skills = plannedSkills && plannedSkills.length
+      ? plannedSkills
+      : selectCreativeSkillsForStudio(request.studioId);
+    const creativeSkills = deriveCreativeSkillGuidance(skills, { studio: request.studioId });
     return createCreativePlan({
       request,
       recipe: compiledRecipe,
@@ -48,6 +60,7 @@ export class CreativeIntelligenceEngine {
       capabilityRequirements,
       routing,
       executionPlan: input.executionPlan || null,
+      creativeSkills,
       warnings,
       assumptions: input.assumptions || [],
       metadata: { planner: "creative-intelligence" },

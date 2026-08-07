@@ -9,6 +9,15 @@ test("Workflow Studio runtime definition preserves workflow inputs", () => {
   assert.deepEqual(definition.nodes[0].inputs, { prompt: "hello" });
 });
 
+test("Workflow Studio definition attaches workflow-variants and Creative Review advisory", () => {
+  const definition = createWorkflowStudioDefinition({ id: "workflow-1", name: "Test", version: 2 }, { text1: { prompt: "hello" } });
+  const advisory = definition.metadata.creativeAdvisory;
+  assert.ok(advisory, "advisory metadata present");
+  assert.equal(advisory.workflowVariants.skillId, "workflow-variants");
+  assert.equal(advisory.review.name, "Creative Review");
+  assert.ok(Array.isArray(advisory.review.qualityGates));
+});
+
 test("Workflow Studio runtime falls back when disabled", async () => {
   const original = process.env.CREATIVE_OS_WORKFLOW_STUDIO;
   delete process.env.CREATIVE_OS_WORKFLOW_STUDIO;

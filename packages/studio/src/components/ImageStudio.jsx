@@ -8,7 +8,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createImageStudioRequest, executeImageStudioRequest } from "../lib/intelligence/ImageStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
-import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -1213,7 +1213,12 @@ export default function ImageStudio({
 
     try {
       const trimmedPrompt = prompt.trim();
-      const creative = enrichCreativeRequest({ studio: "image", userRequest: trimmedPrompt, activeCampaign });
+      const creative = enrichCreativeRequest({
+        studio: "image",
+        userRequest: trimmedPrompt,
+        activeCampaign,
+        skills: selectCreativeSkillsForStudio("image"),
+      });
       const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
 
       const results = await Promise.all(

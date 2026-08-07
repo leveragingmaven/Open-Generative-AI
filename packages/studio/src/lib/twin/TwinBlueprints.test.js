@@ -59,6 +59,11 @@ test("getBlueprintSkillIds copies blueprint skill ids", () => {
     "camera-pan-tilt",
     "camera-dolly-tracking",
     "camera-physical-movement",
+    "motion-direction",
+    "editing-intelligence",
+    "b-roll-planning",
+    "runtime-selection",
+    "creative-contracts",
   ]);
 });
 

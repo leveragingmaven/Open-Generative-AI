@@ -7,7 +7,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMarketingStudioRequest, executeMarketingStudioRequest } from "../lib/intelligence/MarketingStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
-import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -498,7 +498,12 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
     setIsGenerating(true);
     try {
-      const creative = enrichCreativeRequest({ studio: "marketing", userRequest: prompt.trim(), activeCampaign });
+      const creative = enrichCreativeRequest({
+        studio: "marketing",
+        userRequest: prompt.trim(),
+        activeCampaign,
+        skills: selectCreativeSkillsForStudio("marketing"),
+      });
       const enrichedPrompt = (creative.text || "").trim() || prompt.trim();
 
       const recipe = buildRecipe("marketing", { prompt: enrichedPrompt });

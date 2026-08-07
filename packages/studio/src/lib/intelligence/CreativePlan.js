@@ -6,6 +6,7 @@ export function createCreativePlan(input = {}) {
     capabilityRequirements: Array.isArray(input.capabilityRequirements) ? [...input.capabilityRequirements] : [],
     routing: input.routing || null,
     executionPlan: input.executionPlan || null,
+    creativeSkills: input.creativeSkills || null,
     warnings: Array.isArray(input.warnings) ? [...input.warnings] : [],
     assumptions: Array.isArray(input.assumptions) ? [...input.assumptions] : [],
     valid: input.valid !== false,

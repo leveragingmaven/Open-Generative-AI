@@ -11,6 +11,7 @@ import { normalizeExecutionError } from "./ExecutionError.js";
 import { createAssetFromExecution } from "./AssetFactory.js";
 import { InMemoryAssetRepository } from "./AssetRepository.js";
 import { AsyncExecutionCoordinator } from "./AsyncExecutionCoordinator.js";
+import { buildCreativePromptInstructions, creativeReviewMetadata } from "../creative-brief/index.js";
 
 function assertPlan(plan) {
   if (!plan?.request?.requestId) throw new Error("Execution requires a planned request");
@@ -32,19 +33,42 @@ export class CreativeExecutionEngine {
 
   createExecutionContext(plan, input = {}) {
     assertPlan(plan);
+    const creative = plan.creativeSkills;
+    const promptGuidance = buildCreativePromptInstructions(creative);
+    const review = creativeReviewMetadata(creative);
+    // Layer Creative Skill direction onto the compiled recipe input additively.
+    // The prompt is appended only, never replaced (so user intent and recipe
+    // instructions keep priority). The advisory review is attached to execution
+    // metadata only — it never blocks or regenerates.
+    const recipe = plan.recipe ? { ...plan.recipe } : null;
+    if (recipe && recipe.input && typeof recipe.input === "object") {
+      recipe.input = { ...recipe.input };
+      if (promptGuidance && typeof recipe.input.prompt === "string") {
+        const base = recipe.input.prompt.trim();
+        recipe.input.prompt = base ? `${base} | ${promptGuidance}` : promptGuidance;
+      }
+      recipe.input = {
+        ...recipe.input,
+        ...(promptGuidance ? { creative: { guidance: promptGuidance } } : {}),
+      };
+    }
+    const executionMetadata = {
+      ...(input.metadata || {}),
+      ...(review ? { creativeReview: review } : {}),
+    };
     return this.persistence.saveContext(createExecutionContext({
       requestId: plan.request.requestId,
       campaignId: plan.request.campaignId,
       planId: plan.executionPlan?.planId,
       assetRequestId: plan.request.metadata?.assetRequestId,
-      recipe: plan.recipe,
+      recipe,
       projectedMemory: plan.memoryProjection,
       capabilityRequirements: plan.capabilityRequirements,
       routing: plan.routing,
       correlationId: input.correlationId,
       idempotencyKey: input.idempotencyKey || plan.request.idempotencyKey,
       policy: input.policy,
-      executionMetadata: input.metadata,
+      executionMetadata,
     }));
   }
 

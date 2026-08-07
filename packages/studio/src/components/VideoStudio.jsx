@@ -7,7 +7,7 @@ import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
-import { enrichCreativeRequest } from "../lib/creative-brief/index.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
 import VideoRepurposePanel from "./repurpose/VideoRepurposePanel.jsx";
 import {
@@ -1062,7 +1062,12 @@ export default function VideoStudio({
     const currentModel = getCurrentModel();
     const isExtendMode = currentModel?.requiresRequestId;
     const trimmedPrompt = prompt.trim();
-    const creative = enrichCreativeRequest({ studio: "video", userRequest: trimmedPrompt, activeCampaign });
+    const creative = enrichCreativeRequest({
+      studio: "video",
+      userRequest: trimmedPrompt,
+      activeCampaign,
+      skills: selectCreativeSkillsForStudio("video"),
+    });
     const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
 
     if (v2vMode) {
