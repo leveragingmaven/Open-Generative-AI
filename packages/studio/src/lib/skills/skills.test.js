@@ -28,6 +28,22 @@ const EXPECTED_SKILL_IDS = [
   "emotional-pacing",
   "character-perspective",
   "story-resolution",
+  "creative-contracts",
+  "atelier-composition",
+  "motion-direction",
+  "runtime-selection",
+  "intake-and-onboarding",
+  "typography",
+  "data-visualization",
+  "talking-head-edits",
+  "character-composition",
+  "voice-performance",
+  "screen-demo",
+  "editing-intelligence",
+  "b-roll-planning",
+  "audio-architecture",
+  "creative-review",
+  "workflow-variants",
 ];
 
 const REQUIRED_FIELDS = [

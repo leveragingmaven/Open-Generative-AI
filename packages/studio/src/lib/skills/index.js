@@ -30,6 +30,22 @@ import narrativeFlow from "./narrative-flow.js";
 import emotionalPacing from "./emotional-pacing.js";
 import characterPerspective from "./character-perspective.js";
 import storyResolution from "./story-resolution.js";
+import creativeContracts from "./creative-contracts.js";
+import atelierComposition from "./atelier-composition.js";
+import motionDirection from "./motion-direction.js";
+import runtimeSelection from "./runtime-selection.js";
+import intakeAndOnboarding from "./intake-and-onboarding.js";
+import typography from "./typography.js";
+import dataVisualization from "./data-visualization.js";
+import talkingHeadEdits from "./talking-head-edits.js";
+import characterComposition from "./character-composition.js";
+import voicePerformance from "./voice-performance.js";
+import screenDemo from "./screen-demo.js";
+import editingIntelligence from "./editing-intelligence.js";
+import bRollPlanning from "./b-roll-planning.js";
+import audioArchitecture from "./audio-architecture.js";
+import creativeReview from "./creative-review.js";
+import workflowVariants from "./workflow-variants.js";
 
 export const SKILL_LIBRARY = Object.freeze({
   [productHeroPhotography.skillId]: productHeroPhotography,
@@ -57,6 +73,22 @@ export const SKILL_LIBRARY = Object.freeze({
   [emotionalPacing.skillId]: emotionalPacing,
   [characterPerspective.skillId]: characterPerspective,
   [storyResolution.skillId]: storyResolution,
+  [creativeContracts.skillId]: creativeContracts,
+  [atelierComposition.skillId]: atelierComposition,
+  [motionDirection.skillId]: motionDirection,
+  [runtimeSelection.skillId]: runtimeSelection,
+  [intakeAndOnboarding.skillId]: intakeAndOnboarding,
+  [typography.skillId]: typography,
+  [dataVisualization.skillId]: dataVisualization,
+  [talkingHeadEdits.skillId]: talkingHeadEdits,
+  [characterComposition.skillId]: characterComposition,
+  [voicePerformance.skillId]: voicePerformance,
+  [screenDemo.skillId]: screenDemo,
+  [editingIntelligence.skillId]: editingIntelligence,
+  [bRollPlanning.skillId]: bRollPlanning,
+  [audioArchitecture.skillId]: audioArchitecture,
+  [creativeReview.skillId]: creativeReview,
+  [workflowVariants.skillId]: workflowVariants,
 });
 
 // Version 1 public API: lookup only. Mirrors RecipeResolver.resolve.
