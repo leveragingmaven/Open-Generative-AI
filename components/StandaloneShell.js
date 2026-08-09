@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, NAVIGATION_CATEGORIES, EXPERIENCE_WORKSPACES } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -13,25 +13,6 @@ import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
 
 const STORAGE_KEY = 'muapi_key';
-
-function MenuIcon({ type }) {
-  const paths = {
-    campaign: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></>,
-    social: <><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" /></>,
-    email: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></>,
-    blog: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h8" /></>,
-    ads: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.5" fill="currentColor" /></>,
-    brand: <><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></>,
-    library: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
-    automation: <><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9M12 13v2" /></>,
-    knowledge: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    memory: <><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></>,
-    history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" /></>,
-    home: <><path d="M3 10.5L12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" /></>,
-    chevron: <path d="M6 9l6 6 6-6" />,
-  };
-  return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
-}
 
 // Renders the Active Campaign name in the Creative OS header when one is set.
 function CampaignHeaderLabel() {
@@ -60,26 +41,13 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     return filtered;
   }, [agencyMode, enabledTabIds]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
-  const isStudioHome = slug.length === 0;
+const isStudioHome = slug.length === 0;
   const isCreateWorkspace = !idFromParams && slug[0] === 'create';
   const isIntelligenceWorkspace = !idFromParams && slug[0] === 'intelligence';
   const effectiveVisibleTabIds = useMemo(() => {
     if (!isStudioHome || !agencyMode) return visibleTabIds;
     return new Set([...visibleTabIds, 'asset-library']);
   }, [agencyMode, isStudioHome, visibleTabIds]);
-  const navigationCategories = useMemo(() => (
-    NAVIGATION_CATEGORIES
-      .map((category) => ({
-        ...category,
-        tabIds: category.tabIds.filter((tabId) => effectiveVisibleTabIds.has(tabId)),
-      }))
-      .filter((category) => category.tabIds.length > 0)
-  ), [effectiveVisibleTabIds]);
-  const getVisibleNavigationCategory = useCallback((tabId) => (
-    navigationCategories.find((category) => category.tabIds.includes(tabId))
-  ), [navigationCategories]);
-
-  // Helper to extract workflow details precisely from either route structure
   const getWorkflowInfo = useCallback(() => {
     if (idFromParams) {
         return { id: idFromParams, tab: tabFromParams || null };
@@ -129,65 +97,13 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   const [twinTarget, setTwinTarget] = useState(null);
   const [repurposeTarget, setRepurposeTarget] = useState(null);
   const [motionTarget, setMotionTarget] = useState(null);
-  const [characterTarget, setCharacterTarget] = useState(null);
-  const [expandedWorkspaceId, setExpandedWorkspaceId] = useState(() => {
-    const routeTab = slug[0];
-    return EXPERIENCE_WORKSPACES.find((workspace) => workspace.tabIds.includes(routeTab))?.id || null;
-  });
+const [characterTarget, setCharacterTarget] = useState(null);
   const [hasMounted, setHasMounted] = useState(false);
-  const [showVadooBanner, setShowVadooBanner] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('vadoo_banner_dismissed') !== '1';
-    return true;
-  });
-
-  // Sidebar Collapsed & Mobile Drawer State
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('sidebar_collapsed') === 'true';
-    return false;
-  });
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [expandedCategoryId, setExpandedCategoryId] = useState(() => (
-    getVisibleNavigationCategory(getInitialTab())?.id || navigationCategories[0]?.id || null
-  ));
-  const activeCategory = getVisibleNavigationCategory(activeTab);
 
   useEffect(() => {
     if (!slug.includes('apps')) return;
     window.location.replace('/studio/mcp-cli');
   }, [slug]);
-
-  const toggleSidebar = useCallback(() => {
-    setIsSidebarCollapsed(prev => {
-      const next = !prev;
-      localStorage.setItem('sidebar_collapsed', next ? 'true' : 'false');
-      return next;
-    });
-  }, []);
-
-  const handleCategoryToggle = useCallback((categoryId) => {
-    const isCollapsedNavigation = isSidebarCollapsed && !isMobileOpen;
-
-    if (!isCollapsedNavigation) {
-      setExpandedCategoryId((currentId) => (
-        currentId === categoryId ? null : categoryId
-      ));
-      return;
-    }
-
-    setExpandedCategoryId(categoryId);
-    toggleSidebar();
-  }, [isMobileOpen, isSidebarCollapsed, toggleSidebar]);
-
-  useEffect(() => {
-    if (activeCategory?.id) {
-      setExpandedCategoryId(activeCategory.id);
-    }
-  }, [activeCategory?.id]);
-
-  useEffect(() => {
-    const workspace = EXPERIENCE_WORKSPACES.find((item) => item.tabIds.includes(activeTab));
-    if (workspace && !workspace.route) setExpandedWorkspaceId(workspace.id);
-  }, [activeTab]);
 
   useEffect(() => {
     if (!effectiveVisibleTabIds.has(activeTab)) {
@@ -240,24 +156,9 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     return () => window.removeEventListener('popstate', handlePopState);
   }, [visibleTabs]);
 
-  const handleTabChange = (tabId) => {
+const handleTabChange = (tabId) => {
     window.history.pushState(null, '', `/studio/${tabId}`);
     setActiveTab(tabId);
-  };
-
-  const handleTabClick = (e, tabId) => {
-    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      handleTabChange(tabId);
-      return true;
-    }
-    return false;
-  };
-
-  const handleNavigationItemClick = (event, tabId) => {
-    if (handleTabClick(event, tabId)) {
-      setIsMobileOpen(false);
-    }
   };
 
   // Command Bar navigation: reuse the in-shell tab pattern for tab destinations,
@@ -702,85 +603,8 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
     `}</style>
   );
 
-  // Creative OS shell: persistent dark chrome for every /studio/* route.
-  const sidebarItemBase =
-    'group relative flex items-center gap-3 rounded-[var(--ms-radius-button)] px-3.5 py-2.5 text-[14px] font-medium border border-transparent transition-all duration-[var(--ms-motion-hover)]';
-
-  const sidebarItemActive =
-    'bg-[rgba(212,168,88,0.13)] text-[var(--ms-color-gold-primary)] border-[var(--ms-color-border-emphasized)] shadow-[var(--ms-shadow-gold)] before:content-[""] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-[20px] before:w-[3px] before:rounded-r-full before:bg-[var(--ms-color-gold-primary)]';
-
-  const sidebarItemIdle =
-    'text-[var(--ms-color-text-secondary)] hover:text-[var(--ms-color-text-primary)] hover:bg-[rgba(212,168,88,0.06)] hover:border-[var(--ms-color-border-subtle)]';
-
-  const menuTab = (id) => visibleTabs.find((item) => item.id === id);
+// Creative OS shell: persistent dark chrome for every /studio/* route.
   const tabById = (id) => visibleTabs.find((item) => item.id === id);
-
-  const renderNavItem = (tab) => {
-    if (!tab) return null;
-    const isActive = activeWorkspaceTab === tab.id;
-    return (
-      <a
-        key={tab.id}
-        href={`/studio/${tab.id}`}
-        onClick={(event) => handleNavigationItemClick(event, tab.id)}
-        aria-current={isActive ? 'page' : undefined}
-        className={`${sidebarItemBase} ${isActive ? sidebarItemActive : sidebarItemIdle}`}
-      >
-        <span className={`shrink-0 ${isActive ? 'text-[#D4A858]' : 'text-white/45 group-hover:text-[#D4A858]'}`}>{tab.icon}</span>
-        <span className="truncate">{tab.label}</span>
-      </a>
-    );
-  };
-
-  const workspaceIcon = (workspaceId) => ({
-    dashboard: 'home',
-    create: 'campaign',
-    intelligence: 'knowledge',
-    campaigns: 'campaign',
-    'creative-library': 'library',
-    publishing: 'social',
-    workflow: 'automation',
-    system: 'automation',
-  }[workspaceId] || 'library');
-
-  const renderWorkspaceGroup = (workspace) => {
-    const tabs = workspace.tabIds.map(menuTab).filter(Boolean);
-    if (!tabs.length) return null;
-    const isWorkspaceLanding = (workspace.id === 'create' && isCreateWorkspace) || (workspace.id === 'intelligence' && isIntelligenceWorkspace);
-    const isActive = (workspace.tabIds.includes(activeWorkspaceTab) && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) || isWorkspaceLanding;
-    const expanded = expandedWorkspaceId === workspace.id;
-    return (
-      <div key={workspace.id}>
-        <div className={`${sidebarItemBase} w-full p-0 ${isActive ? sidebarItemActive : sidebarItemIdle}`}>
-          {workspace.route ? (
-            <a href={workspace.route} aria-current={isActive ? 'page' : undefined} className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-2.5">
-              <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
-              <span className="flex-1 truncate text-left">{workspace.label}</span>
-            </a>
-          ) : (
-            <button type="button" onClick={() => setExpandedWorkspaceId(expanded ? null : workspace.id)} className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-2.5">
-              <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
-              <span className="flex-1 truncate text-left">{workspace.label}</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setExpandedWorkspaceId(expanded ? null : workspace.id)}
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${workspace.label}`}
-            className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current transition-colors hover:bg-white/[0.05]"
-          >
-            <span className={`transition-transform duration-[var(--ms-motion-hover)] ${expanded ? 'rotate-180' : ''}`}><MenuIcon type="chevron" /></span>
-          </button>
-        </div>
-        {expanded && (
-          <div className="ml-5 mt-1.5 space-y-1 border-l border-[var(--ms-color-border-subtle)] pl-3">
-            {tabs.map((tab) => renderNavItem(tab))}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const creativeShell = (
     <div
@@ -790,71 +614,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {dragOverlay}
-
-      {/* Persistent MavenSync Creative OS sidebar */}
-      {isHeaderVisible && (
-        <>
-          {isMobileOpen && (
-            <div
-              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 md:hidden"
-              onClick={() => setIsMobileOpen(false)}
-            />
-          )}
-
-          <aside
-            className={`
-              fixed top-0 bottom-0 left-0 z-50 md:static md:z-auto
-              w-64 flex flex-col shrink-0 bg-[var(--ms-color-background-elevated)]/95 backdrop-blur-md border-r border-[var(--ms-color-border-subtle)] shadow-[inset_-1px_0_0_rgba(212,168,88,0.06)]
-              transition-transform duration-200 ease-in-out
-              ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-            `}
-          >
-            {/* Brand: MavenSync logo */}
-            <div className="flex-shrink-0 px-5 py-4 border-b border-[#D4A858]/[0.18] flex items-center">
-              <a href="/studio" className="flex items-center min-w-0 group" aria-label="MavenSync home">
-                <img
-                  src="/mavensync-logo.png"
-                  alt="MavenSync"
-                  className="h-8 w-auto object-contain drop-shadow-[0_0_14px_rgba(212,168,88,0.25)] group-hover:drop-shadow-[0_0_20px_rgba(212,168,88,0.5)] transition-[filter]"
-                />
-              </a>
-            </div>
-
-            {/* Workspace-first navigation. Specialized apps remain one level down. */}
-            <nav aria-label="MavenSync workspaces" className="scrollbar-none flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-3 py-4">
-              <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--ms-color-gold-muted)]">Workspaces</p>
-              <a href="/studio" aria-current={isStudioHome ? 'page' : undefined} className={`${sidebarItemBase} ${isStudioHome ? sidebarItemActive : sidebarItemIdle}`}>
-                <span className="shrink-0"><MenuIcon type="home" /></span>
-                <span>Dashboard</span>
-              </a>
-              {EXPERIENCE_WORKSPACES.filter((workspace) => workspace.id !== 'dashboard').map((workspace) => {
-                if (!workspace.route || workspace.tabIds.length > 1) return renderWorkspaceGroup(workspace);
-                const tab = workspace.tabIds.map(menuTab).find(Boolean);
-                if (!tab) return null;
-                const isActive = !isStudioHome && workspace.tabIds.includes(activeWorkspaceTab);
-                return (
-                  <a
-                    key={workspace.id}
-                    href={workspace.route}
-                    onClick={(event) => handleNavigationItemClick(event, tab.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`${sidebarItemBase} ${isActive ? sidebarItemActive : sidebarItemIdle}`}
-                  >
-                    <span className="shrink-0"><MenuIcon type={workspaceIcon(workspace.id)} /></span>
-                    <span className="truncate">{workspace.label}</span>
-                  </a>
-                );
-              })}
-            </nav>
-
-            <div className="flex-shrink-0 border-t border-[var(--ms-color-border-subtle)] px-5 py-4">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--ms-color-text-muted)]">Creative operating system</p>
-              <p className="mt-1 text-xs text-[var(--ms-color-text-secondary)]">MavenSync Experience</p>
-            </div>
-          </aside>
-        </>
-      )}
+{dragOverlay}
 
       {/* Main column */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -862,17 +622,19 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
         {isHeaderVisible && (
           <header className="flex-shrink-0 h-14 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
-              <button
-                onClick={() => setIsMobileOpen(!isMobileOpen)}
-                className="md:hidden p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors"
-                aria-label="Toggle Navigation Menu"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="12" x2="21" y2="12" />
-                  <line x1="3" y1="6" x2="21" y2="6" />
-                  <line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              </button>
+              {!isStudioHome && (
+                <a
+                  href="/studio"
+                  aria-label="Back to Dashboard"
+                  className="hidden md:flex shrink-0 items-center gap-2 px-3.5 py-2 rounded-full border border-white/10 bg-[#1B1B1B] text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 12H5" />
+                    <path d="M12 19l-7-7 7-7" />
+                  </svg>
+                  <span>Dashboard</span>
+                </a>
+              )}
               <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
                 <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard')))))}</p>
