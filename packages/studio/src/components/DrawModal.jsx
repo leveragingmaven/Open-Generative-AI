@@ -877,7 +877,7 @@ export default function DrawModal({
         const bgImg = await new Promise((resolve, reject) => {
           const img = new Image();
           img.onload = () => resolve(img);
-          img.onerror = reject;
+          img.onerror = () => reject(new Error("Background image failed to load"));
           img.src = bgImageUrl;
         });
         mCtx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);

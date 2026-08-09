@@ -8,6 +8,8 @@ import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/inte
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { audioModels, getAudioModelById } from "../models.js";
+import { MavenButton } from "./mavensync/MavenButton.jsx";
+import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 
 // ---------------------------------------------------------------------------
 // Upload button states
@@ -49,7 +51,7 @@ const VolumeMuteIcon = () => (
   </svg>
 );
 
-const MusicIcon = ({ className = "text-[#22d3ee]" }) => (
+const MusicIcon = ({ className = "text-[#F3BA4A]" }) => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M9 18V5l12-2v13" />
     <circle cx="6" cy="18" r="3" />
@@ -121,14 +123,14 @@ function AudioFileUploader({ label, value, onChange, apiKey }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-bold text-zinc-200 uppercase tracking-wider">
+        <label className="text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest">
           {label}
         </label>
         {uploadState === UPLOAD_STATE.READY && (
           <button
             type="button"
             onClick={clearFile}
-            className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-wider flex items-center gap-1.5"
+            className="text-xs font-semibold text-[#F87171] hover:text-[#F87171]/80 transition-colors uppercase tracking-wider flex items-center gap-1.5"
           >
             <TrashIcon /> Clear
           </button>
@@ -137,10 +139,10 @@ function AudioFileUploader({ label, value, onChange, apiKey }) {
 
       <div 
         onClick={() => uploadState === UPLOAD_STATE.IDLE && fileInputRef.current?.click()}
-        className={`relative border rounded p-4 transition-all duration-300 flex items-center gap-3.5 cursor-pointer ${
+        className={`relative border rounded-lg p-4 transition-all duration-300 flex items-center gap-3.5 cursor-pointer ${
           uploadState === UPLOAD_STATE.READY 
-            ? "border-primary/60 bg-primary/10 shadow-[0_0_15px_rgba(34,211,238,0.05)]" 
-            : "border-zinc-700 bg-zinc-900 hover:bg-zinc-850 hover:border-primary/50"
+            ? "border-[#F3BA4A]/60 bg-[#F3BA4A]/5 shadow-[0_0_15px_rgba(243,186,74,0.08)]" 
+            : "border-[#252B3B] bg-[#12151E] hover:bg-[#1A1E2B] hover:border-[#F3BA4A]/40"
         }`}
       >
         <input 
@@ -153,14 +155,14 @@ function AudioFileUploader({ label, value, onChange, apiKey }) {
 
         {uploadState === UPLOAD_STATE.IDLE && (
           <>
-            <div className="w-10 h-10 rounded bg-zinc-800 flex items-center justify-center text-zinc-200 border border-zinc-700/50">
+            <div className="w-10 h-10 rounded bg-[#1A1E2B] flex items-center justify-center text-[#94A3B8] border border-[#252B3B]">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
               </svg>
             </div>
             <div className="text-left">
-              <div className="text-xs font-bold text-white">Upload audio track</div>
-              <div className="text-[11px] text-zinc-300 font-medium mt-0.5">MP3, WAV, M4A up to 20MB</div>
+              <div className="text-xs font-semibold text-[#F8FAFC]">Upload audio track</div>
+              <div className="text-[11px] text-[#64748B] font-medium mt-0.5">MP3, WAV, M4A up to 20MB</div>
             </div>
           </>
         )}
@@ -168,12 +170,12 @@ function AudioFileUploader({ label, value, onChange, apiKey }) {
         {uploadState === UPLOAD_STATE.UPLOADING && (
           <div className="w-full flex items-center gap-4">
             <div className="flex-1">
-              <div className="flex justify-between text-xs text-white/95 mb-1.5 font-bold">
+              <div className="flex justify-between text-xs text-[#F8FAFC] mb-1.5 font-semibold">
                 <span>Uploading...</span>
                 <span>{progress}%</span>
               </div>
-              <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
+              <div className="h-1.5 bg-[#252B3B] rounded-full overflow-hidden">
+                <div className="h-full bg-[#F3BA4A] transition-all duration-300" style={{ width: `${progress}%` }} />
               </div>
             </div>
           </div>
@@ -181,12 +183,12 @@ function AudioFileUploader({ label, value, onChange, apiKey }) {
 
         {uploadState === UPLOAD_STATE.READY && (
           <>
-            <div className="w-10 h-10 rounded bg-primary/20 flex items-center justify-center text-primary border border-primary/30">
-              <MusicIcon className="text-primary" />
+            <div className="w-10 h-10 rounded bg-[#F3BA4A]/20 flex items-center justify-center text-[#F3BA4A] border border-[#F3BA4A]/30">
+              <MusicIcon className="text-[#F3BA4A]" />
             </div>
             <div className="text-left flex-1 min-w-0">
-              <div className="text-xs font-bold text-white truncate">{fileName}</div>
-              <div className="text-[11px] text-primary font-bold mt-0.5">Ready to generate</div>
+              <div className="text-xs font-bold text-[#F8FAFC] truncate">{fileName}</div>
+              <div className="text-[11px] text-[#F3BA4A] font-semibold mt-0.5">Ready to generate</div>
             </div>
           </>
         )}
@@ -211,7 +213,7 @@ function AudioListUploader({ label, value = [], onChange, apiKey, maxItems = 2 }
 
   return (
     <div className="space-y-4">
-      <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+      <label className="block text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest">
         {label} (Max {maxItems})
       </label>
       <div className="space-y-3">
@@ -357,7 +359,7 @@ function PremiumAudioPlayer({ url, title }) {
   };
 
   return (
-    <div className="w-full bg-zinc-900 border border-zinc-700/80 rounded p-6 shadow-3xl space-y-6 backdrop-blur-md">
+<div className="w-full bg-[#12151E] border border-[#252B3B] rounded-2xl p-6 space-y-6 backdrop-blur-md shadow-[0_12px_32px_-4px_rgba(0,0,0,0.6)]">
       <audio
         ref={audioRef}
         src={url}
@@ -368,7 +370,7 @@ function PremiumAudioPlayer({ url, title }) {
       />
 
       {/* Visualizer and Track Details */}
-      <div className="flex flex-col items-center justify-center py-6 relative rounded bg-black/60 overflow-hidden border border-zinc-800">
+      <div className="flex flex-col items-center justify-center py-6 relative rounded-xl bg-[#0A0C10] overflow-hidden border border-[#3A435A]">
         <div className="flex items-center gap-1.5 h-12 mb-4 justify-center">
           {visualizerHeights.map((h, i) => (
             <div
@@ -379,10 +381,10 @@ function PremiumAudioPlayer({ url, title }) {
           ))}
         </div>
         <div className="text-center px-4 max-w-full relative z-10">
-          <span className="text-xs font-black text-primary uppercase tracking-[0.2em] block mb-1">
+          <span className="text-xs font-semibold text-[#F3BA4A] uppercase tracking-[0.2em] block mb-1">
             Now Playing
           </span>
-          <p className="text-white font-bold text-base truncate max-w-xs">{title || "Generated Track"}</p>
+          <p className="text-[#F8FAFC] font-bold text-base truncate max-w-xs">{title || "Generated Track"}</p>
         </div>
       </div>
 
@@ -390,17 +392,17 @@ function PremiumAudioPlayer({ url, title }) {
       <div className="space-y-4">
         {/* Progress bar */}
         <div className="flex items-center gap-3">
-          <span className="text-xs font-bold text-zinc-200 w-10 text-right">
+          <span className="text-xs font-semibold text-[#94A3B8] w-10 text-right">
             {formatTime(currentTime)}
           </span>
           
           <div
             ref={progressBarRef}
             onClick={handleScrub}
-            className="flex-1 h-2 bg-zinc-700 hover:bg-zinc-650 rounded-full cursor-pointer relative group transition-colors"
+            className="flex-1 h-2 bg-[#252B3B] hover:bg-[#3A435A] rounded-full cursor-pointer relative group transition-colors"
           >
             <div 
-              className="absolute left-0 top-0 bottom-0 bg-primary rounded-full group-hover:bg-primary/95 transition-all"
+              className="absolute left-0 top-0 bottom-0 bg-[#F3BA4A] rounded-full group-hover:bg-[#F3BA4A]/90 transition-all"
               style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
             />
             <div 
@@ -409,7 +411,7 @@ function PremiumAudioPlayer({ url, title }) {
             />
           </div>
 
-          <span className="text-xs font-bold text-zinc-200 w-10 text-left">
+          <span className="text-xs font-semibold text-[#94A3B8] w-10 text-left">
             {formatTime(duration)}
           </span>
         </div>
@@ -420,7 +422,7 @@ function PremiumAudioPlayer({ url, title }) {
           <div className="flex items-center gap-2 group/volume w-24">
             <button
               onClick={toggleMute}
-              className="p-2 bg-zinc-800/80 border border-zinc-700 hover:bg-zinc-700 rounded text-zinc-200 hover:text-white transition-all"
+              className="p-2 bg-[#1A1E2B] border border-[#252B3B] hover:bg-[#252B3B] rounded-lg text-[#94A3B8] hover:text-[#F8FAFC] transition-all"
               title="Mute/Unmute"
               type="button"
             >
@@ -433,14 +435,14 @@ function PremiumAudioPlayer({ url, title }) {
               step="0.05"
               value={isMuted ? 0 : volume}
               onChange={handleVolumeChange}
-              className="w-16 h-1 bg-zinc-700 rounded appearance-none cursor-pointer accent-primary hover:bg-zinc-600 transition-all opacity-0 group-hover/volume:opacity-100"
+              className="w-16 h-1 bg-[#252B3B] rounded appearance-none cursor-pointer accent-[#F3BA4A] hover:bg-[#3A435A] transition-all opacity-0 group-hover/volume:opacity-100"
             />
           </div>
 
           {/* Main Play/Pause Button */}
           <button
             onClick={togglePlay}
-            className="w-12 h-12 bg-primary hover:bg-white text-black rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-glow"
+            className="w-12 h-12 bg-[#E82070] hover:bg-[#C01358] text-white rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(232,32,112,0.3)]"
             title={isPlaying ? "Pause" : "Play"}
             type="button"
           >
@@ -450,7 +452,7 @@ function PremiumAudioPlayer({ url, title }) {
           {/* Download Button */}
           <button
             onClick={downloadAudio}
-            className="px-4 py-2 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 rounded text-xs font-bold text-white flex items-center gap-2 hover:border-primary/45 transition-all"
+            className="px-4 py-2 bg-[#1A1E2B] hover:bg-[#252B3B] border border-[#252B3B] rounded-lg text-xs font-semibold text-[#F8FAFC] flex items-center gap-2 hover:border-[#E82070]/45 transition-all"
             title="Download Audio"
             type="button"
           >
@@ -699,22 +701,22 @@ export default function AudioStudio({
   };
 
   return (
-    <div className="w-full h-full flex bg-app-bg text-white overflow-hidden relative">
+    <div className="w-full h-full flex bg-[#0A0C10] text-[#F8FAFC] overflow-hidden relative">
       
       {/* ─── LEFT CONFIGURATION SIDEBAR ─── */}
-      <div ref={sidebarRef} className="w-full lg:w-[400px] border-r border-zinc-900 flex flex-col bg-zinc-950/40 backdrop-blur-lg flex-shrink-0 z-30">
+      <div ref={sidebarRef} className="w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] border-r border-[#252B3B] flex flex-col bg-[#0C0E14]/95 flex-shrink-0 z-30">
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-6 pb-24">
           
           {/* Model Selector */}
           <div className="space-y-2 relative">
-            <label className="text-xs font-bold text-zinc-300 uppercase tracking-wider block">
+            <label className="text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest block">
               Audio Model
             </label>
             <button
               ref={modelBtnRef}
               type="button"
               onClick={() => setOpenDropdown(!openDropdown)}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded px-4 py-3.5 text-sm text-left font-bold text-white flex items-center justify-between hover:bg-zinc-850 hover:border-primary/50 transition-all"
+              className="w-full bg-[#12151E] border border-[#3A435A] hover:border-[#F3BA4A]/50 rounded-xl px-4 py-3.5 text-sm text-left font-semibold text-[#F8FAFC] flex items-center justify-between transition-all"
             >
               <span>{selectedModel?.name ?? "Select Model"}</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${openDropdown ? 'rotate-180' : ''}`}>
@@ -723,7 +725,7 @@ export default function AudioStudio({
             </button>
 
             {openDropdown && (
-              <div className="absolute left-0 right-0 mt-2 z-50 bg-[#161618] border border-zinc-700 rounded shadow-3xl max-h-60 overflow-y-auto custom-scrollbar p-1.5">
+              <div className="absolute left-0 right-0 mt-2 z-50 bg-[#1A1E2B] border border-[#3A435A] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1.5">
                 {audioModels.map((model) => (
                   <button
                     key={model.id}
@@ -733,12 +735,12 @@ export default function AudioStudio({
                       setOpenDropdown(false);
                     }}
                     className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all flex flex-col gap-1.5 border ${
-                      model.id === selectedModelId ? "text-primary bg-primary/10 border-primary/20" : "text-zinc-200 border-transparent hover:bg-zinc-900 hover:text-white"
+                      model.id === selectedModelId ? "text-[#F3BA4A] bg-[#F3BA4A]/10 border-[#F3BA4A]/30" : "text-[#94A3B8] border-transparent hover:bg-[#252B3B] hover:text-[#F8FAFC]"
                     }`}
                   >
                     <span>{model.name}</span>
                     {model.description && (
-                      <span className="text-[10px] text-zinc-300 truncate max-w-[320px] font-normal">
+                      <span className="text-[10px] text-[#64748B] truncate max-w-[320px] font-normal">
                         {model.description}
                       </span>
                     )}
@@ -751,8 +753,8 @@ export default function AudioStudio({
           {/* Model Description */}
           {selectedModel?.description && (
             <div className="">
-              <span className="text-[10px] font-bold text-primary uppercase tracking-wider block mb-1.5">Description</span>
-              <p className="text-zinc-400 text-xs leading-relaxed font-semibold">{selectedModel.description}</p>
+              <span className="text-[10px] font-semibold text-[#F3BA4A] uppercase tracking-widest block mb-1.5">Description</span>
+              <p className="text-[#94A3B8] text-xs leading-relaxed font-semibold">{selectedModel.description}</p>
             </div>
           )}
 
@@ -789,13 +791,13 @@ export default function AudioStudio({
               // Boolean Toggles
               if (schema.type === "boolean") {
                 return (
-                  <div key={key} className="flex items-center justify-between bg-zinc-900 border border-zinc-700/80 rounded p-4 transition-all hover:border-zinc-600">
+                  <div key={key} className="flex items-center justify-between bg-[#12151E] border border-[#252B3B] rounded-lg p-4 transition-all hover:border-[#3A435A]">
                     <div className="flex-1 pr-4">
-                      <span className="block text-xs font-bold text-white tracking-tight">
+                      <span className="block text-xs font-semibold text-[#F8FAFC] tracking-tight">
                         {schema.title || key}
                       </span>
                       {schema.description && (
-                        <span className="block text-[11px] text-zinc-300 leading-normal mt-1">
+                        <span className="block text-[11px] text-[#94A3B8] leading-normal mt-1">
                           {schema.description}
                         </span>
                       )}
@@ -804,7 +806,7 @@ export default function AudioStudio({
                       type="button"
                       onClick={() => setParams(prev => ({ ...prev, [key]: !prev[key] }))}
                       className={`w-11 h-6 rounded-full p-1 transition-all duration-300 relative shrink-0 ${
-                        params[key] ? "bg-primary" : "bg-zinc-800"
+                        params[key] ? "bg-[#F3BA4A]" : "bg-[#252B3B]"
                       }`}
                     >
                       <div className={`w-4 h-4 rounded-full bg-black shadow-md transform transition-all duration-300 ${
@@ -819,7 +821,7 @@ export default function AudioStudio({
                 const isOpen = openParamDropdown === key;
                 return (
                   <div key={key} className="space-y-2 relative">
-                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest">
                       {schema.title || key}
                     </label>
                     <button
@@ -828,7 +830,7 @@ export default function AudioStudio({
                         setOpenDropdown(false);
                         setOpenParamDropdown(isOpen ? null : key);
                       }}
-                      className="w-full bg-zinc-900 border border-zinc-700 hover:border-zinc-600 rounded px-4 py-3.5 text-xs text-left font-bold text-white flex items-center justify-between transition-all cursor-pointer"
+                      className="w-full bg-[#12151E] border border-[#252B3B] hover:border-[#3A435A] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#F8FAFC] flex items-center justify-between transition-all cursor-pointer"
                     >
                       <span>{params[key] || "Select option"}</span>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
@@ -837,7 +839,7 @@ export default function AudioStudio({
                     </button>
 
                     {isOpen && (
-                      <div className="absolute left-0 right-0 mt-1 z-50 bg-[#161618] border border-zinc-700 rounded shadow-3xl max-h-60 overflow-y-auto custom-scrollbar p-1">
+                      <div className="absolute left-0 right-0 mt-1 z-50 bg-[#1A1E2B] border border-[#3A435A] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1">
                         {schema.enum.map((opt) => (
                           <button
                             key={opt}
@@ -848,8 +850,8 @@ export default function AudioStudio({
                             }}
                             className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all border ${
                               params[key] === opt
-                                ? "text-primary bg-primary/10 border-primary/20"
-                                : "text-zinc-200 border-transparent hover:bg-zinc-900 hover:text-white"
+                                ? "text-[#F3BA4A] bg-[#F3BA4A]/10 border-[#F3BA4A]/30"
+                                : "text-[#94A3B8] border-transparent hover:bg-[#252B3B] hover:text-[#F8FAFC]"
                             }`}
                           >
                             {opt}
@@ -858,7 +860,7 @@ export default function AudioStudio({
                       </div>
                     )}
                     {schema.description && (
-                      <span className="block text-[11px] text-zinc-300 leading-normal">
+                      <span className="block text-[11px] text-[#64748B] leading-normal">
                         {schema.description}
                       </span>
                     )}
@@ -872,13 +874,13 @@ export default function AudioStudio({
               if (isNumber && hasMinMax) {
                 const step = schema.step || (schema.type === "float" ? 0.05 : 1);
                 return (
-                  <div key={key} className="space-y-3 bg-zinc-900 border border-zinc-700/80 rounded p-4 transition-all hover:border-zinc-600">
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="text-white tracking-tight">{schema.title || key}</span>
-                      <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded border border-primary/20">{params[key] !== undefined ? params[key] : schema.default}</span>
+                  <div key={key} className="space-y-3 bg-[#12151E] border border-[#252B3B] rounded-lg p-4 transition-all hover:border-[#3A435A]">
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="text-[#F8FAFC] tracking-tight">{schema.title || key}</span>
+                      <span className="text-[#F3BA4A] font-mono bg-[#F3BA4A]/10 px-2 py-0.5 rounded border border-[#F3BA4A]/30">{params[key] !== undefined ? params[key] : schema.default}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-zinc-300 font-medium w-6 text-right">{schema.minValue}</span>
+                      <span className="text-[10px] text-[#64748B] font-medium w-6 text-right">{schema.minValue}</span>
                       <input
                         type="range"
                         min={schema.minValue}
@@ -886,12 +888,12 @@ export default function AudioStudio({
                         step={step}
                         value={params[key] !== undefined ? params[key] : (schema.default || 0)}
                         onChange={(e) => setParams(prev => ({ ...prev, [key]: parseFloat(e.target.value) }))}
-                        className="flex-1 h-1.5 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-primary hover:bg-zinc-700 transition-all"
+                        className="flex-1 h-1.5 bg-[#252B3B] rounded-full appearance-none cursor-pointer accent-[#F3BA4A] hover:bg-[#3A435A] transition-all"
                       />
-                      <span className="text-[10px] text-zinc-300 font-medium w-6 text-left">{schema.maxValue}</span>
+                      <span className="text-[10px] text-[#64748B] font-medium w-6 text-left">{schema.maxValue}</span>
                     </div>
                     {schema.description && (
-                      <span className="block text-[11px] text-zinc-300 leading-normal">
+                      <span className="block text-[11px] text-[#64748B] leading-normal">
                         {schema.description}
                       </span>
                     )}
@@ -903,13 +905,13 @@ export default function AudioStudio({
               if (key === "prompt") {
                 return (
                   <div key={key} className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                    <label className="block text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest">
                       {schema.title || "Lyrics / Prompt"}
                     </label>
                     <textarea
                       value={params[key] || ""}
                       onChange={(e) => setParams(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full bg-zinc-900 border border-zinc-700 focus:border-primary/85 rounded p-3 text-xs text-white placeholder:text-zinc-400 focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner"
+                      className="w-full bg-[#12151E] border border-[#252B3B] focus:border-[#F3BA4A]/70 rounded-lg p-3 text-xs text-[#F8FAFC] placeholder:text-[#64748B] focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner"
                       placeholder={schema.description || "Enter what you want generated..."}
                     />
                     {schema.examples && Array.isArray(schema.examples) && (
@@ -919,7 +921,7 @@ export default function AudioStudio({
                             key={idx}
                             type="button"
                             onClick={() => setParams(prev => ({ ...prev, [key]: ex }))}
-                            className="text-[11px] px-3 py-1 bg-zinc-800/80 border border-zinc-700 hover:bg-primary/20 hover:border-primary/45 hover:text-white rounded-full transition-all font-semibold text-zinc-100"
+                            className="text-[11px] px-3 py-1 bg-[#1A1E2B] border border-[#252B3B] hover:bg-[#F3BA4A]/10 hover:border-[#F3BA4A]/40 hover:text-[#F8FAFC] rounded-full transition-all font-semibold text-[#94A3B8]"
                           >
                             "{ex.slice(0, 35)}..."
                           </button>
@@ -933,7 +935,7 @@ export default function AudioStudio({
               // Standard Text / Input fields
               return (
                 <div key={key} className="space-y-2">
-                  <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                  <label className="block text-[11px] font-semibold text-[#F3BA4A] uppercase tracking-widest">
                     {schema.title || key}
                   </label>
                   <input
@@ -944,10 +946,10 @@ export default function AudioStudio({
                       const val = isNumber ? (e.target.value === "" ? "" : parseFloat(e.target.value)) : e.target.value;
                       setParams(prev => ({ ...prev, [key]: val }));
                     }}
-                    className="w-full bg-zinc-900 border border-zinc-700 hover:border-zinc-600 focus:border-primary/80 rounded px-4 py-3.5 text-xs text-white placeholder:text-zinc-400 focus:outline-none transition-all shadow-inner"
+                    className="w-full bg-[#12151E] border border-[#252B3B] hover:border-[#3A435A] focus:border-[#F3BA4A]/70 rounded-lg px-4 py-3.5 text-xs text-[#F8FAFC] placeholder:text-[#64748B] focus:outline-none transition-all shadow-inner"
                   />
                   {schema.description && (
-                    <span className="block text-[11px] text-zinc-300 leading-normal">
+                    <span className="block text-[11px] text-[#64748B] leading-normal">
                       {schema.description}
                     </span>
                   )}
@@ -959,27 +961,22 @@ export default function AudioStudio({
         </div>
 
         {/* Dynamic Cost & Generate Section */}
-        <div className="p-4 border-t border-zinc-900 bg-zinc-950/80 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[400px] z-40">
-          <button
+        <div className="p-4 py-3 border-t border-[#252B3B] bg-[#0A0C10]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end">
+          <MavenButton
+            variant="primaryPink"
+            size="lg"
             type="button"
             onClick={handleGenerate}
-            disabled={isGenerating || !selectedModel}
-            className="w-full py-4 bg-primary text-black text-base font-bold rounded hover:bg-white transition-all transform hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:grayscale shadow-glow flex items-center justify-center gap-3"
+            disabled={!selectedModel}
+            isLoading={isGenerating}
+            leftIcon={!isGenerating ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M5 3l14 9-14 9V3z" />
+              </svg>
+            ) : undefined}
           >
-            {isGenerating ? (
-              <>
-                <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                <span>Generating Audio...</span>
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <path d="M5 3l14 9-14 9V3z" />
-                </svg>
-                <span>Generate Track</span>
-              </>
-            )}
-          </button>
+            {isGenerating ? "Generating Audio..." : "Generate Track"}
+          </MavenButton>
         </div>
       </div>
       {/* ─── RIGHT CONTENT AREA ─── */}
@@ -992,8 +989,8 @@ export default function AudioStudio({
             
             {/* 1. Error Display */}
             {generateError && (
-              <div className="w-full max-w-md p-6 bg-red-500/10 border border-red-500/20 rounded flex flex-col items-center gap-4 animate-shake">
-                <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center text-red-500 border border-red-500/30 shadow-lg">
+              <div className="w-full max-w-md p-6 bg-[#F87171]/10 border border-[#F87171]/25 rounded-xl flex flex-col items-center gap-4 animate-shake">
+                <div className="w-12 h-12 bg-[#F87171]/20 rounded-full flex items-center justify-center text-[#F87171] border border-[#F87171]/30 shadow-lg">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="8" x2="12" y2="12" />
@@ -1001,10 +998,10 @@ export default function AudioStudio({
                   </svg>
                 </div>
                 <div className="text-center">
-                  <span className="text-xs font-black text-red-500 uppercase tracking-widest block mb-1">
+                  <span className="text-xs font-semibold text-[#F87171] uppercase tracking-widest block mb-1">
                     Generation Error
                   </span>
-                  <p className="text-white font-medium text-sm leading-relaxed">
+                  <p className="text-[#F8FAFC] font-medium text-sm leading-relaxed">
                     {generateError}
                   </p>
                 </div>
@@ -1015,16 +1012,16 @@ export default function AudioStudio({
             {isGenerating && !generateError && (
               <div className="flex flex-col items-center gap-6 animate-fade-in">
                 <div className="relative">
-                  <div className="w-24 h-24 border-[3px] border-zinc-800 border-t-primary rounded-full animate-spin shadow-glow" />
-                  <div className="absolute inset-0 flex items-center justify-center text-primary">
-                    <MusicIcon className="animate-pulse text-primary" />
+                  <div className="w-24 h-24 border-[3px] border-[#252B3B] border-t-[#F3BA4A] rounded-full animate-spin shadow-[0_0_20px_rgba(243,186,74,0.15)]" />
+                  <div className="absolute inset-0 flex items-center justify-center text-[#F3BA4A]">
+                    <MusicIcon className="animate-pulse text-[#F3BA4A]" />
                   </div>
                 </div>
                 <div className="text-center space-y-2">
-                  <div className="text-xs font-black text-primary uppercase tracking-[0.3em] animate-pulse">
+                  <div className="text-xs font-semibold text-[#F3BA4A] uppercase tracking-[0.3em] animate-pulse">
                     Generating Soundtrack
                   </div>
-                  <div className="text-sm text-zinc-200 font-bold">
+                  <div className="text-sm text-[#94A3B8] font-semibold">
                     Rendering audio waveforms and vocals...
                   </div>
                 </div>
@@ -1033,39 +1030,43 @@ export default function AudioStudio({
 
             {/* 3. Empty State (no audio, not loading, no error) */}
             {view === "input" && !isGenerating && !generateError && (
-              <div className="flex flex-col items-center gap-6 max-w-md text-center p-8 bg-zinc-900/40 border border-zinc-800 rounded backdrop-blur-sm relative group animate-fade-in-up">
-                {/* Glow behind the icon */}
-                <div className="absolute inset-0 bg-primary/5 blur-3xl rounded-full opacity-25 group-hover:opacity-40 transition-opacity duration-1000 pointer-events-none" />
-                <div className="w-20 h-20 bg-zinc-900 border border-zinc-705 rounded flex items-center justify-center shadow-inner relative z-10 transition-transform duration-500 group-hover:scale-105">
-                  <MusicIcon className="text-primary w-8 h-8 filter drop-shadow-[0_0_8px_rgba(34,211,238,0.3)]" />
+              <div className="flex flex-col items-center gap-3.5 text-center animate-fade-in-up">
+                <div className="w-14 h-14 rounded-xl bg-[#1A1E2B] border border-[#F3BA4A]/25 flex items-center justify-center shadow-[0_0_20px_rgba(243,186,74,0.12)]">
+                  <MusicIcon className="text-[#F3BA4A] w-7 h-7" />
                 </div>
-                <div className="relative z-10">
-                  <h3 className="text-white font-black text-xl mb-3 tracking-tight">Audio Studio</h3>
-                  <p className="text-sm text-zinc-200 font-medium leading-relaxed px-4">
-                    Choose an AI music model, voice cloner, or sound generator. Modify variables on the left and craft your next high-fidelity track.
-                  </p>
-                </div>
+                <h3 className="text-[#F8FAFC] font-semibold text-lg tracking-tight">Audio Studio</h3>
+                <p className="max-w-xs text-sm text-[#94A3B8] leading-relaxed">
+                  Craft your next high-fidelity track with an AI music model, voice clone, or sound generator.
+                </p>
               </div>
             )}
 
             {/* 4. Active Result Player Display */}
             {view === "result" && activeResultUrl && !isGenerating && !generateError && (
-              <div className="w-full max-w-2xl animate-fade-in-up space-y-4">
+              <div className="w-full max-w-3xl animate-fade-in-up space-y-4">
                 <div className="flex items-center justify-between px-1">
-                  <button
-                    onClick={handleNew}
-                    className="text-xs font-bold text-zinc-200 hover:text-primary flex items-center gap-2 transition-all bg-zinc-905 border border-zinc-700 hover:border-primary/30 px-4 py-2 rounded-full"
+                  <MavenButton
+                    variant="outline"
+                    size="sm"
                     type="button"
+                    onClick={handleNew}
+                    leftIcon={
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="19" y1="12" x2="5" y2="12" />
+                        <polyline points="12 19 5 12 12 5" />
+                      </svg>
+                    }
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <line x1="19" y1="12" x2="5" y2="12" />
-                      <polyline points="12 19 5 12 12 5" />
-                    </svg>
-                    <span>New Generation</span>
-                  </button>
-                  <span className="text-[11px] font-bold text-green-400 px-3.5 py-1.5 bg-green-500/10 border border-green-500/20 rounded-full flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" /> Success
-                  </span>
+                    New Generation
+                  </MavenButton>
+                  <MavenBadge
+                    variant="success"
+                    size="sm"
+                    className="uppercase"
+                    icon={<div className="w-1.5 h-1.5 bg-[#34D399] rounded-full animate-pulse" />}
+                  >
+                    Success
+                  </MavenBadge>
                 </div>
                 <PremiumAudioPlayer url={activeResultUrl} title={activeResultTitle} />
               </div>
@@ -1075,8 +1076,8 @@ export default function AudioStudio({
 
           {/* ─── BOTTOM HISTORY FOOTER ─── */}
           {history.length > 0 && (
-            <div className="border-t border-zinc-900 pt-6 w-full animate-fade-in-up">
-              <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-4 px-1">
+            <div className="border-t border-[#252B3B] pt-6 w-full animate-fade-in-up">
+              <h4 className="text-[11px] font-semibold text-[#94A3B8] uppercase tracking-widest mb-4 px-1">
                 Generation History ({history.length})
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -1084,25 +1085,25 @@ export default function AudioStudio({
                   <div
                     key={entry.id || idx}
                     onClick={() => handleSelectHistory(entry, idx)}
-                    className={`p-3.5 bg-zinc-900 border rounded cursor-pointer transition-all flex flex-col justify-between h-28 border-zinc-700/80 hover:bg-zinc-850 hover:border-zinc-500 ${
+                    className={`p-3.5 bg-[#12151E] border rounded-lg cursor-pointer transition-all flex flex-col justify-between h-28 hover:bg-[#1A1E2B] ${
                       activeResultUrl === entry.url && view === "result"
-                        ? "border-primary bg-primary/5 shadow-glow"
-                        : ""
+                        ? "border-[#F3BA4A] bg-[#F3BA4A]/5 shadow-[0_0_20px_rgba(243,186,74,0.10)]"
+                        : "border-[#252B3B] hover:border-[#3A435A]"
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <div className={`w-8 h-8 rounded flex items-center justify-center flex-shrink-0 ${
-                        activeResultUrl === entry.url && view === "result" ? "bg-primary/20 text-primary" : "bg-zinc-800 text-zinc-200"
+                        activeResultUrl === entry.url && view === "result" ? "bg-[#F3BA4A]/20 text-[#F3BA4A]" : "bg-[#1A1E2B] text-[#94A3B8]"
                       }`}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                         </svg>
                       </div>
-                      <span className="text-[10px] font-bold text-primary uppercase tracking-wider truncate">
+                      <span className="text-[10px] font-semibold text-[#F3BA4A] uppercase tracking-wider truncate">
                         {entry.model ? entry.model.split('-').slice(0, 2).join(' ') : 'Audio'}
                       </span>
                     </div>
-                    <p className="text-[11px] font-semibold text-white line-clamp-2 leading-tight">
+                    <p className="text-[11px] font-semibold text-[#F8FAFC] line-clamp-2 leading-tight">
                       {entry.title || entry.prompt || "Untitled Audio"}
                     </p>
                   </div>
