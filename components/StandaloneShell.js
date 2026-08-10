@@ -311,12 +311,13 @@ const handleTabChange = (tabId) => {
     }
   };
 
-  // Auto-hide header when inside a specific workflow view or design agent
+  // Auto-hide header when inside a specific workflow view (fullscreen). The
+  // Design Agent no longer hides the shell header — it reuses the normal
+  // Creator OS header like every other workspace.
   useEffect(() => {
     const isEditingWorkflow = (activeTab === 'workflows' || !!idFromParams) && urlWorkflowId;
-    const isDesignAgent = activeTab === 'design-agent';
     
-    if (isEditingWorkflow || isDesignAgent) {
+    if (isEditingWorkflow) {
       setIsHeaderVisible(false);
     } else {
       setIsHeaderVisible(true);

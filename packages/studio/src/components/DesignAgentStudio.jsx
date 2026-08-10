@@ -1,14 +1,40 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { CreativeCanvas } from 'design-agent';
 
 import { getUserBalance } from '../muapi';
 import { useMavenSyncIntegration } from '../lib/mavensync/useMavenSyncIntegration.js';
+import { TABS } from '../studioNavigation.js';
+
+// Home-state shortcut groups resolved from the existing Creator OS navigation
+// registry (TABS). ids reference real destinations; label/icon/route come from
+// TABS so there is no second hardcoded route registry maintained here.
+const HOME_SHORTCUT_GROUPS = [
+  { label: 'Intelligence', ids: ['ai-twin', 'agents'] },
+  { label: 'Create', ids: ['image', 'video', 'marketing', 'audio'] },
+  { label: 'Build', ids: ['workflows'] },
+  { label: 'Manage', ids: ['asset-library', 'publishing'] },
+];
+
+function resolveHomeShortcuts() {
+  return HOME_SHORTCUT_GROUPS
+    .map((group) => ({
+      label: group.label,
+      items: group.ids
+        .map((id) => {
+          const tab = TABS.find((t) => t.id === id);
+          return tab ? { id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` } : null;
+        })
+        .filter(Boolean),
+    }))
+    .filter((group) => group.items.length > 0);
+}
 
 export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHeader }) {
   const [userData, setUserData] = useState(null);
   const integration = useMavenSyncIntegration();
+  const homeShortcuts = useMemo(resolveHomeShortcuts, []);
 
   useEffect(() => {
     sessionStorage.setItem("fromDesignAgent", "true");
@@ -50,13 +76,14 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
 
   return (
     <div className="h-full w-full bg-black overflow-hidden design-agent-studio">
-      <CreativeCanvas 
+      <CreativeCanvas
         user={userData}
         isAuthorized={!!userData}
         creditConversionRate={200}
         theme="dark"
         onToggleHeader={onToggleHeader}
         isHeaderVisible={isHeaderVisible}
+        homeShortcuts={homeShortcuts}
       />
     </div>
   );

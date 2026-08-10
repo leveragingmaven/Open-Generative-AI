@@ -238,6 +238,15 @@ body {
   outline-offset: 3px;
 }
 
+/* MavenSync Assistant HOME composer textarea: focus shows only the typing
+   cursor — no gold focus outline/ring. Scoped to the Assistant HOME so the
+   gold keyboard focus affordance is preserved for every other control. */
+.ms-assistant-home textarea:focus,
+.ms-assistant-home textarea:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
 .ms-creative-studio :is(button, a) {
   transition-duration: var(--ms-motion-hover);
   transition-timing-function: var(--ms-ease-standard);
