@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import AgentChatClient from "./AgentChatClient";
+import { getServerMuApiKey } from "@/src/lib/agencyMode";
 
 /**
  * Server component — fetches agentDetails from the /api/agents proxy
@@ -70,7 +71,8 @@ async function fetchUserData(apiKey) {
 export default async function AgentPage({ params }) {
   const { agent_id } = await params;
   const cookieStore = await cookies();
-  const apiKey = cookieStore.get("muapi_key")?.value;
+  // Prefer the server-side key (agency mode / no client cookie), then the cookie.
+  const apiKey = getServerMuApiKey() || cookieStore.get("muapi_key")?.value;
 
   console.log(`[AgentPage] Loading page for agent: ${agent_id}, hasKey: ${!!apiKey}`);
 

@@ -7,6 +7,7 @@ import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { readPublishingDrafts, readPublishingHistory } from "../../lib/publishing/publishingHistory.js";
 import { SKILL_LIBRARY } from "../../lib/skills/index.js";
 import { listTwins } from "../../lib/twin/TwinStore.js";
+import { TABS, WORKSPACE_MENU_GROUPS, AI_WORKSPACE_IDS } from "../../studioNavigation.js";
 import {
   PrimaryButton,
   SecondaryButton,
@@ -95,9 +96,27 @@ const QUICK_CREATE = [
   { title: "Video", detail: "Create motion", icon: "video", href: "/studio/video" },
   { title: "Marketing", detail: "Build campaigns", icon: "marketing", href: "/studio/marketing" },
   { title: "Audio", detail: "Voice and sound", icon: "audio", href: "/studio/audio" },
-  { title: "Workflow", detail: "Connect steps", icon: "workflow", href: "/studio/workflows" },
-  { title: "Library", detail: "Review assets", icon: "library", href: "/studio/asset-library" },
 ];
+
+const TAB_BY_ID = Object.fromEntries(TABS.map((tab) => [tab.id, tab]));
+
+// AI Workspaces surfaced directly on the Dashboard (AI Twin, AI Assistant, Agents, Workflow).
+const AI_WORKSPACES = AI_WORKSPACE_IDS
+  .map((id) => TAB_BY_ID[id])
+  .filter(Boolean)
+  .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` }));
+
+// Less-prominent creative tools re-exposed on the Dashboard (drawn from the Tools group).
+// Knowledge Center, Memory, and MCP/CLI/Routing stay reachable via the Workspaces dropdown but
+// are not production surfaces, so they are excluded from the dashboard cards.
+const CREATIVE_TOOLS_EXCLUDED = new Set(["knowledge-center", "memory", "mcp-cli", "routing"]);
+const CREATIVE_TOOLS = WORKSPACE_MENU_GROUPS
+  .find((group) => group.id === "tools")
+  ?.tabIds
+  .filter((id) => !CREATIVE_TOOLS_EXCLUDED.has(id))
+  .map((id) => TAB_BY_ID[id])
+  .filter(Boolean)
+  .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })) || [];
 
 function MetricTile({ icon, label, value, detail, href }) {
   return (
@@ -117,11 +136,22 @@ function MetricTile({ icon, label, value, detail, href }) {
 function QuickCreateCard({ item }) {
   return (
     <a href={item.href} className="group flex min-h-14 items-center gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2.5 transition-[border-color,background-color,transform] duration-[var(--ms-motion-card)] hover:-translate-y-px hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)]">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(232,32,112,0.1)] text-[var(--ms-color-pink-primary)]"><Icon type={item.icon} size={16} /></span>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(232,32,112,0.1)] text-[var(--ms-color-pink-primary)] [&>svg]:w-4 [&>svg]:h-4">{item.iconElement || <Icon type={item.icon} size={16} />}</span>
       <span className="min-w-0">
         <span className="block truncate text-xs font-semibold">{item.title}</span>
-        <span className="mt-0.5 block truncate text-[9px] text-[var(--ms-color-text-muted)]">{item.detail}</span>
+        {item.detail && <span className="mt-0.5 block truncate text-[9px] text-[var(--ms-color-text-muted)]">{item.detail}</span>}
       </span>
+    </a>
+  );
+}
+
+// Compact launcher used by the AI Workspaces and Creative Tools dashboard sections.
+function WorkspaceToolCard({ item }) {
+  return (
+    <a href={item.route} className="group flex min-h-14 items-center gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2.5 transition-[border-color,background-color,transform] duration-[var(--ms-motion-card)] hover:-translate-y-px hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--ms-color-border-subtle)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)] [&>svg]:w-4 [&>svg]:h-4">{item.icon}</span>
+      <span className="block truncate text-xs font-semibold">{item.label}</span>
+      <span className="ml-auto text-[var(--ms-color-gold-muted)] transition-transform duration-[var(--ms-motion-hover)] group-hover:translate-x-0.5">→</span>
     </a>
   );
 }
@@ -218,10 +248,24 @@ export default function MavenSyncDashboard() {
       </section>
 
       <WorkspaceSection title="Quick Create" description="Launch a studio without leaving your flow.">
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
           {QUICK_CREATE.map((item) => <QuickCreateCard key={item.href} item={item} />)}
         </div>
       </WorkspaceSection>
+
+      <WorkspaceSection title="AI Workspaces" description="Your intelligence, identity, team, and automation — in one place.">
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          {AI_WORKSPACES.map((item) => <WorkspaceToolCard key={item.id} item={item} />)}
+        </div>
+      </WorkspaceSection>
+
+      {CREATIVE_TOOLS.length > 0 && (
+        <WorkspaceSection title="Creative Tools" description="Specialized production surfaces and existing creative tools.">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {CREATIVE_TOOLS.map((item) => <WorkspaceToolCard key={item.id} item={item} />)}
+          </div>
+        </WorkspaceSection>
+      )}
 
       <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.6fr)]">
         <div className="grid min-w-0 gap-4 lg:grid-cols-5">

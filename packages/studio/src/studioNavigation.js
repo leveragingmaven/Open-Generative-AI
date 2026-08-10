@@ -302,6 +302,41 @@ export const NAVIGATION_CATEGORIES = [
 
 export const EXPLORE_APPS_TAB = TABS.find((tab) => tab.id === 'apps');
 
+// Workspace Menu — grouped destination registry for the header Workspaces picker
+// and Dashboard AI Workspaces / Creative Tools sections. Each group references
+// existing TABS ids so icons, labels, and routes all resolve from TABS above
+// (single source of truth, no hand-maintained duplicate route list).
+export const WORKSPACE_MENU_GROUPS = [
+  {
+    id: 'create',
+    label: 'Create',
+    tabIds: ['image', 'video', 'marketing', 'audio'],
+  },
+  {
+    id: 'ai',
+    label: 'AI',
+    tabIds: ['ai-twin', 'design-agent', 'agents'],
+  },
+  {
+    id: 'build',
+    label: 'Build & Automate',
+    tabIds: ['workflows', 'mcp-cli'],
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    tabIds: ['lipsync', 'ai-influencer', 'asset-library', 'character', 'cinema', 'vibe-motion', 'body-swap', 'clipping', 'knowledge-center', 'memory'],
+  },
+  {
+    id: 'publish',
+    label: 'Publish',
+    tabIds: ['publishing'],
+  },
+];
+
+// AI Workspaces surfaced directly on the Dashboard.
+export const AI_WORKSPACE_IDS = ['ai-twin', 'design-agent', 'agents', 'workflows'];
+
 // Experience Layer workspace architecture. Tab ids and direct routes remain
 // unchanged; this registry changes discovery hierarchy only.
 export const EXPERIENCE_WORKSPACES = [

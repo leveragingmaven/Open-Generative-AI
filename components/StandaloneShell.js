@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -19,6 +19,104 @@ function CampaignHeaderLabel() {
   const { activeCampaign } = useActiveCampaign();
   if (!activeCampaign) return null;
   return <p className="truncate text-[11px] font-medium text-[#F0D9A8] mt-0.5">{activeCampaign.name}</p>;
+}
+
+const TAB_BY_ID = Object.fromEntries(TABS.map((tab) => [tab.id, tab]));
+
+// Workspaces picker — grouped destination menu built from WORKSPACE_MENU_GROUPS
+// (which references TABS ids). Icons, labels, and routes all resolve from TABS;
+// there is no second hand-maintained route list.
+function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeTabId = null }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  const groups = useMemo(() => (
+    WORKSPACE_MENU_GROUPS
+      .map((group) => ({
+        ...group,
+        items: group.tabIds
+          .map((id) => TAB_BY_ID[id])
+          .filter(Boolean)
+          .filter((tab) => !enabledTabIds || enabledTabIds.has(tab.id))
+          .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })),
+      }))
+      .filter((group) => group.items.length)
+  ), [enabledTabIds]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const select = (item) => {
+    setOpen(false);
+    onNavigate(item.route);
+  };
+
+  return (
+    <div ref={containerRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-full border border-white/10 bg-[#1B1B1B] px-3.5 py-2 text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18M9 21V9" />
+        </svg>
+        <span className="hidden md:inline">Workspaces</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-2 z-[400] max-h-[70vh] w-[320px] sm:w-[560px] overflow-y-auto rounded-xl border border-[#2A2A2A] bg-[#141414]/95 backdrop-blur-md shadow-2xl shadow-black/60 p-2"
+        >
+          {groups.map((group) => (
+            <div key={group.id} className="pb-1 mb-1 last:mb-0 last:pb-0">
+              <p className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-[0.22em] text-[#D4A858]/70">{group.label}</p>
+              <div className="grid grid-cols-2 gap-1">
+                {group.items.map((item) => {
+                  const active = item.id === activeTabId;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      aria-current={active ? "true" : undefined}
+                      onClick={() => select(item)}
+                      className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${active
+                        ? "bg-[#D4A858]/[0.12] text-white border border-[#D4A858]/30"
+                        : "text-[#C7C7C7] hover:bg-white/[0.05] hover:text-white border border-transparent"}`}
+                    >
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-black/20 [&>svg]:w-4 [&>svg]:h-4 ${active ? "border-[#D4A858]/50 text-[#D4A858]" : "border-[#3A3A3A] text-[#D4A858]/80"}`}>{item.icon}</span>
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StandaloneShell({ agencyMode = false, allowedTabIds = null }) {
@@ -200,7 +298,14 @@ const handleTabChange = (tabId) => {
     }
     const tabId = route.replace(/^\/studio\//, '');
     if (visibleTabs.find((tab) => tab.id === tabId)) {
-      handleTabChange(tabId);
+      // Inside a studio, switch tabs in-shell (keeps studio state and no remount).
+      if (isStudioHome) {
+        // Leaving the dashboard must re-route through Next so `slug` updates and
+        // `isStudioHome` flips — matching the dashboard Quick Create `<a href>` contract.
+        router.push(route);
+      } else {
+        handleTabChange(tabId);
+      }
     } else {
       router.push(route);
     }
@@ -620,7 +725,7 @@ const handleTabChange = (tabId) => {
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Informational workspace header */}
         {isHeaderVisible && (
-          <header className="flex-shrink-0 h-14 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-5">
+          <header className="relative z-50 flex-shrink-0 h-14 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
               {!isStudioHome && (
                 <a
@@ -635,7 +740,7 @@ const handleTabChange = (tabId) => {
                   <span>Dashboard</span>
                 </a>
               )}
-              <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
+<div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
                 <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard')))))}</p>
                 <CampaignHeaderLabel />
@@ -647,6 +752,7 @@ const handleTabChange = (tabId) => {
             </div>
 
             <div className="flex-shrink-0 flex items-center gap-3">
+              <WorkspacesMenu onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} activeTabId={activeTab} />
               {!agencyMode && (
                 <div className="hidden md:flex items-center gap-2 rounded-full border border-[#D4A858]/30 bg-[#D4A858]/[0.08] px-4 py-2 shadow-[0_0_16px_rgba(212,168,88,0.12)]" title="Balance">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#D4A858] animate-pulse" />

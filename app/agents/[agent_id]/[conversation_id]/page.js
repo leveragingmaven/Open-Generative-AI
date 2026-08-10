@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import AgentChatClient from "../AgentChatClient";
+import { getServerMuApiKey } from "@/src/lib/agencyMode";
 
 /**
  * Server component — fetches both agentDetails and initialHistory
@@ -91,7 +92,7 @@ async function fetchUserData(apiKey) {
 export default async function AgentConversationPage({ params }) {
   const { agent_id, conversation_id } = await params;
   const cookieStore = await cookies();
-  const apiKey = cookieStore.get("muapi_key")?.value;
+  const apiKey = getServerMuApiKey() || cookieStore.get("muapi_key")?.value;
 
   console.log(`[ConvPage] Loading for agent: ${agent_id}, conv: ${conversation_id}, hasKey: ${!!apiKey}`);
 
