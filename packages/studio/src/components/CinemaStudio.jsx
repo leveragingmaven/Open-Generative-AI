@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { generateImage, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { saveCreativeAsset } from "../lib/intelligence/CreativeLibrary.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import {
   PromptAspectRatioIcon,
@@ -643,6 +644,32 @@ export default function CinemaStudio({
             prompt: basePrompt,
             type: "cinema",
           });
+        }
+
+        // Persist as a canonical Creative asset in the shared Creative Library
+        // without touching Cinema's internal history or this result surface.
+        try {
+          saveCreativeAsset({
+            title: basePrompt || "Cinema scene",
+            model: uploadedImage ? "nano-banana-pro-edit" : "nano-banana-pro",
+            prompt: basePrompt,
+            negativePrompt: "blurry, low quality, distortion, bad composition",
+            aspectRatio: settings.aspect_ratio,
+            camera: settings.camera,
+            lens: settings.lens,
+            focalLength: settings.focal,
+            aperture: settings.aperture,
+            referenceImages: uploadedImage ? [uploadedImage] : [],
+            generatedFiles: [res.url],
+            createdFromStudio: "cinema",
+            metadata: {
+              source: "cinema",
+              resolution,
+              workspace: "cinema",
+            },
+          });
+        } catch (saveErr) {
+          console.warn("Could not save Cinema image to Creative Library:", saveErr);
         }
       } else {
         throw new Error("No data returned");

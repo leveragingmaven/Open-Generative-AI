@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { runClipping, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { saveCreativeAsset } from "../lib/intelligence/CreativeLibrary.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PROMPT_MEDIA_PREVIEW_CLASS,
@@ -259,12 +260,13 @@ export default function ClippingStudio({
 
   const handlePromptInput = (e) => {
     const val = e.target.value;
+    // The field is a video-URL entry point only. ai_clipping does not accept a
+    // text prompt, so input is kept as a URL draft and only committed to the
+    // source once it reads as a valid http(s) URL.
+    setPrompt(val);
     if (val.trim().match(/^https?:\/\/[^\s]+$/i)) {
       setVideoUrl(val.trim());
-      setPrompt("");
-      return;
     }
-    setPrompt(val);
   };
 
   // ── Video File Handlers ──
@@ -331,16 +333,10 @@ export default function ClippingStudio({
         timestamp: new Date().toISOString(),
       };
 
-      // Mock coordinates if API succeeded but modal coordinates are empty in coordinate-only mode
-      if (returnCoordinatesOnly && newResult.coordinates.length === 0) {
-        newResult.coordinates = Array.from({ length: numHighlights }).map((_, idx) => ({
-          label: `Highlight #${idx + 1}`,
-          start_time: idx * 15,
-          end_time: (idx + 1) * 15,
-          start: idx * 15,
-          end: (idx + 1) * 15,
-          score: 0.95 - (idx * 0.05)
-        }));
+      // Honest empty state: real coordinates only. No synthetic times, scores,
+      // or labels are fabricated when the provider returns none.
+      if (returnCoordinatesOnly) {
+        newResult.coordinates = Array.isArray(outputCoordinates) ? outputCoordinates : [];
       }
 
       setResult(newResult);
@@ -348,6 +344,33 @@ export default function ClippingStudio({
 
       // Append to history
       setHistory((prev) => [newResult, ...prev].slice(0, 30));
+
+      // Save only REAL generated clip files to the shared Creative Library.
+      // Coordinate-only mode produces no video files, so it is never persisted.
+      if (!returnCoordinatesOnly && clips.length > 0) {
+        try {
+          saveCreativeAsset({
+            title: `AI Clipping — ${clips.length} clip${clips.length === 1 ? "" : "s"}`,
+            provider: "muapi",
+            model: "ai-clipping",
+            requestId: res.id || null,
+            aspectRatio: aspectRatio,
+            sourceVideo: videoUrl,
+            generatedFiles: clips,
+            createdFromStudio: "clipping",
+            subtype: "video",
+            metadata: {
+              source: "clipping",
+              workspace: "clipping",
+              capability: "ai_clipping",
+              numHighlights,
+              returnCoordinatesOnly,
+            },
+          });
+        } catch (saveErr) {
+          console.warn("Could not save AI Clipping clips to Creative Library:", saveErr);
+        }
+      }
 
       if (onGenerationComplete) {
         onGenerationComplete({
@@ -816,7 +839,7 @@ export default function ClippingStudio({
               <PromptTextarea
                 value={prompt}
                 onChange={handlePromptInput}
-                placeholder="Describe prompt / highlights to extract"
+                placeholder="Paste a video URL… (or upload a video above)"
               />
             </div>
           </div>
@@ -934,7 +957,7 @@ export default function ClippingStudio({
             {/* Generate button */}
             <PromptAction
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || !videoUrl}
             >
               {isGenerating ? (
                 <>
