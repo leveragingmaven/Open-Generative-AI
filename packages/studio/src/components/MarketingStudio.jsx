@@ -27,7 +27,7 @@ import { MavenChat } from "./mavensync/MavenChat.jsx";
 import { MavenCanvas } from "./mavensync/MavenCanvas.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 import { MavenPanel } from "./mavensync/MavenPanel.jsx";
-import MarketingMotionPanel from "./motion/MarketingMotionPanel.jsx";
+import MarketingMotionWorkspace from "./motion/MarketingMotionWorkspace.jsx";
 
 const SCROLLBAR_STYLE = `
   .custom-scrollbar-thin::-webkit-scrollbar {
@@ -771,7 +771,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
       </div>
 
       {view === "motion" ? (
-        <MarketingMotionPanel
+        <MarketingMotionWorkspace
           apiKey={apiKey}
           motionTarget={motionTarget}
           onExit={() => setView("ads")}

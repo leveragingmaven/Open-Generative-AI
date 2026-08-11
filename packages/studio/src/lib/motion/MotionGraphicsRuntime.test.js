@@ -8,10 +8,19 @@ function fakeProviderRegistry(response, { shouldThrow = false, providerId = "mua
     id: providerId,
     async execute(request) {
       if (shouldThrow) throw Object.assign(new Error("Provider exploded"), { code: "provider_failure" });
-      if (request.operation !== "motion_graphics") throw new Error(`Unexpected operation: ${request.operation}`);
       assert.ok(request.params.prompt, "payload must include a composed prompt");
-      assert.ok(request.params.aspect_ratio, "payload must include an aspect ratio");
-      assert.ok(request.params.duration_seconds, "payload must include a duration");
+      if (request.operation === "video_generation") {
+        assert.ok(request.params.aspect_ratio, "payload must include an aspect ratio");
+        assert.ok(request.params.duration, "payload must include a duration");
+      } else if (request.operation === "image_to_video") {
+        assert.ok(request.params.aspect_ratio, "payload must include an aspect ratio");
+        assert.ok(request.params.duration, "payload must include a duration");
+      } else if (request.operation === "motion_graphics") {
+        assert.ok(request.params.aspect_ratio, "payload must include an aspect ratio");
+        assert.ok(request.params.duration_seconds, "payload must include a duration");
+      } else {
+        throw new Error(`Unexpected operation: ${request.operation}`);
+      }
       return response;
     },
   };
@@ -222,6 +231,6 @@ test("provider executor composes a template-aware prompt from inputs", async () 
   assert.match(captured.prompt, /1.2M, 2.4M/);
   assert.match(captured.prompt, /#E82070/);
   assert.equal(captured.aspect_ratio, "16:9");
-  assert.equal(captured.duration_seconds, 8);
+  assert.equal(captured.duration, 8);
   assert.equal(run.normalized.video, "https://cdn.test/promo.mp4");
 });

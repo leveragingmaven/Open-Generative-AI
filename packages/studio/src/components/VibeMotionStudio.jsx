@@ -1,8 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { runMotionGraphics, runMotionGraphicsEdit } from "../lib/providers/ProviderRegistry.js";
+import { runMotionGraphics, runMotionGraphicsEdit, generateI2V, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import {
+  getI2VModelById,
+  getDurationsForI2VModel,
+  getAspectRatiosForI2VModel,
+} from "../models.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createVibeMotionStudioRequest, executeVibeMotionStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
@@ -68,6 +73,32 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
   const [openDropdown, setOpenDropdown] = useState(null); // "ar" | "dur" | "source"
   const controlsRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // ── Optional source image (image-to-motion) ───────────────────────────────
+  // Presence of a source image routes generation to the existing image_to_video
+  // (generateI2V) capability. No image keeps the text-only runMotionGraphics path.
+  const I2V_DEFAULT_MODEL = "kling-v2.1-pro-i2v";
+  const imageInputRef = useRef(null);
+  const [sourceImage, setSourceImage] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageSourceModel = I2V_DEFAULT_MODEL;
+
+  const handleSourceImageSelect = useCallback(
+    async (file) => {
+      if (!file) return;
+      setUploadingImage(true);
+      try {
+        const url = await uploadFile(apiKey, file, () => {});
+        if (!url) throw new Error("Upload returned no URL");
+        setSourceImage(url);
+      } catch (err) {
+        setGenerateError(`Image upload failed: ${err?.message || "unknown error"}`);
+      } finally {
+        setUploadingImage(false);
+      }
+    },
+    [apiKey]
+  );
 
   // ── Generation state ──────────────────────────────────────────────────────
   const [generating, setGenerating] = useState(false);
@@ -138,6 +169,23 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
           onRequestId: (id) => { pendingRequestId.current = id; },
         };
         result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), editMode: true, params: editParams, references: editSourceId ? [editSourceId] : [] }), { legacyExecute: () => runMotionGraphicsEdit(apiKey, editParams) });
+} else if (sourceImage) {
+        // Image → Motion: reuse the existing image_to_video (generateI2V) capability.
+        // The motion prompt is used as the motion instruction; aspect model [16:9,9:16,1:1]
+        // matches Vibe Motion exactly. Duration is clamped to the model's supported values.
+        const i2vDurations = getDurationsForI2VModel(imageSourceModel) || [5, 10];
+        const clampedDuration = i2vDurations.includes(duration)
+          ? duration
+          : i2vDurations.reduce((acc, d) => (Math.abs(d - duration) < Math.abs(acc - duration) ? d : acc), i2vDurations[0]);
+        const i2vParams = {
+          model: imageSourceModel,
+          prompt: prompt.trim(),
+          image_url: sourceImage,
+          aspect_ratio: aspectRatio,
+          duration: clampedDuration,
+          onRequestId: (id) => { pendingRequestId.current = id; },
+        };
+        result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), operation: "image_to_video", params: i2vParams, references: [sourceImage] }), { legacyExecute: () => generateI2V(apiKey, i2vParams) });
       } else {
         const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
         const generateParams = {
@@ -537,6 +585,50 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
           <PromptFooter>
             <PromptControls ref={controlsRef}>
 
+              {/* ── Source Image (Image → Motion). Not shown in edit/remix mode. ── */}
+              {!editMode && (
+                <div className="relative">
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleSourceImageSelect(f); e.target.value = ""; }}
+                  />
+                  {sourceImage ? (
+                    <div
+                      className="prompt-control cursor-pointer relative group"
+                      title="Change source image"
+                      onClick={() => { imageInputRef.current?.click(); }}
+                    >
+                      <div className="w-5 h-5 rounded overflow-hidden border border-white/15 flex items-center justify-center">
+                        <img src={sourceImage} alt="source" className="w-full h-full object-cover" />
+                      </div>
+                      <button
+                        type="button"
+                        title="Remove source image"
+                        className="group-hover:opacity-100 opacity-0 absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-black/80 border border-white/30 flex items-center justify-center"
+                        onClick={(e) => { e.stopPropagation(); setSourceImage(null); }}
+                      >
+                        <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { imageInputRef.current?.click(); }}
+                      disabled={uploadingImage}
+                      className={promptControlClassName({ active: false })}
+                      title="Upload a source image to animate (Image → Motion)"
+                    >
+                      {uploadingImage ? <span className="w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" /> :
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>}
+                      <span className={PROMPT_CONTROL_LABEL_CLASS}>Image</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* ── Aspect Ratio dropdown ── */}
               <div className="relative">
                 <button
@@ -670,3 +762,9 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
     </div>
   );
 }
+
+// Shared reusable alias so the same Vibe Motion capability/runtime can be
+// embedded (e.g. inside Marketing Studio → Motion Graphics → Vibe Motion mode)
+// without duplicating logic. The standalone workspace keeps using this same
+// component; both entry points execute the identical runMotionGraphics runtime.
+export { VibeMotionStudio as VibeMotionContent };

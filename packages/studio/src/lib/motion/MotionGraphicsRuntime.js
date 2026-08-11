@@ -17,15 +17,21 @@ import { CreativeIntelligenceEngine } from "../intelligence/CreativeIntelligence
 import { CreativeExecutionEngine } from "../intelligence/CreativeExecutionEngine.js";
 import { InMemoryExecutionPersistence } from "../intelligence/ExecutionPersistence.js";
 import { buildMotionJob, buildMotionRequest } from "./MotionJobBuilder.js";
-import { MOTION_RECIPE_ID, MOTION_SKILL_ID } from "./MotionConstants.js";
+import { MOTION_RECIPE_ID, MOTION_SKILL_ID, MOTION_OPERATION } from "./MotionConstants.js";
+import { getWorkflowTemplate } from "./templates.js";
 import {
   buildMotionPrompt,
   buildMotionPayload,
   buildMotionEditPayload,
+  buildI2VMotionPayload,
+  buildMotionT2VPayload,
+  getMotionAssetExecution,
   executeMotionThroughRegistry,
   executeMotionEditThroughRegistry,
   normalizeMotionResponse,
   validateMotionResult,
+  MOTION_IMAGE_TO_VIDEO_OPERATION,
+  MOTION_VIDEO_GENERATION_OPERATION,
 } from "./MotionProvider.js";
 import { createMotionRunRecord, saveMotionRun } from "./MotionHistory.js";
 import { normalizeExecutionError } from "../intelligence/ExecutionError.js";
@@ -42,6 +48,19 @@ export function createMotionProviderExecutor({ providerRegistry, providerId = "m
       const metadata = context?.executionMetadata || job?.metadata?.executionMetadata || {};
       const inputs = metadata.inputs || {};
       const editMode = Boolean(metadata.editMode ?? inputs.sourceRequestId ?? inputs.sourceRequestId);
+
+      // Asset-aware routing. Asset-capable templates with a real source asset use
+      // the existing image_to_video capability (generateI2V). Text/data templates
+      // (and asset-capable templates without a supplied asset) use the existing
+      // text-to-video capability (video_generation -> generateVideo). The old
+      // /motion-graphics endpoint is never used for Motion Graphics execution.
+      const route = editMode ? null : getMotionAssetExecution({ templateId: inputs.templateId, logo: inputs.logo, images: inputs.images });
+      if (route && !route.valid) {
+        throw new Error(route.error || "Motion graphics execution requires a source asset.");
+      }
+
+      const i2v = Boolean(route && route.operation === MOTION_IMAGE_TO_VIDEO_OPERATION);
+      const t2v = Boolean(route && route.operation === MOTION_VIDEO_GENERATION_OPERATION);
       const payload = editMode
         ? buildMotionEditPayload({
             requestId: inputs.sourceRequestId || inputs.requestId,
@@ -49,10 +68,26 @@ export function createMotionProviderExecutor({ providerRegistry, providerId = "m
             aspectRatio: inputs.aspectRatio,
             durationSeconds: inputs.durationSeconds,
           })
-        : buildMotionPayload(inputs, {
-            aspectRatio: inputs.aspectRatio,
-            durationSeconds: inputs.durationSeconds,
-          });
+        : i2v
+          ? buildI2VMotionPayload({
+              template: getWorkflowTemplate(inputs.templateId),
+              inputs,
+              prompt: metadata.refinement,
+              modelId: route.modelId,
+              images: route.images,
+            })
+          : t2v
+            ? buildMotionT2VPayload({
+                template: getWorkflowTemplate(inputs.templateId),
+                inputs,
+                prompt: metadata.refinement,
+                modelId: route.modelId,
+              })
+            : buildMotionPayload(inputs, {
+                aspectRatio: inputs.aspectRatio,
+                durationSeconds: inputs.durationSeconds,
+              });
+      const operation = i2v ? MOTION_IMAGE_TO_VIDEO_OPERATION : t2v ? MOTION_VIDEO_GENERATION_OPERATION : MOTION_OPERATION;
       const raw = editMode
         ? await executeMotionEditThroughRegistry(providerRegistry, {
             apiKey: metadata.apiKey,
@@ -62,6 +97,7 @@ export function createMotionProviderExecutor({ providerRegistry, providerId = "m
         : await executeMotionThroughRegistry(providerRegistry, {
             apiKey: metadata.apiKey,
             payload,
+            operation,
             providerId: routing?.providerId || metadata.providerId || providerId,
           });
       const normalized = normalizeMotionResponse(raw);
@@ -143,6 +179,7 @@ export function createMotionGraphicsRuntime({
             },
             editMode: job.editMode,
             prompt,
+            refinement: job.prompt,
             twinId: job.twinId,
             agentId: job.agentId,
             workspace: job.workspace,

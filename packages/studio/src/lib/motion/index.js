@@ -29,10 +29,18 @@ export {
   buildMotionPrompt,
   buildMotionPayload,
   buildMotionEditPayload,
+  buildI2VMotionPayload,
+  buildMotionT2VPayload,
+  getMotionAssetExecution,
   normalizeMotionResponse,
   validateMotionResult,
   executeMotionThroughRegistry,
   executeMotionEditThroughRegistry,
+  MOTION_IMAGE_TO_VIDEO_OPERATION,
+  MOTION_VIDEO_GENERATION_OPERATION,
+  MOTION_T2V_MODEL,
+  MOTION_SINGLE_ASSET_I2V_MODEL,
+  MOTION_MULTI_ASSET_I2V_MODEL,
 } from "./MotionProvider.js";
 export {
   createMotionGraphicsRuntime,

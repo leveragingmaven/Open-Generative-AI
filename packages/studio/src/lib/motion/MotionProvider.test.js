@@ -4,10 +4,14 @@ import {
   buildMotionPrompt,
   buildMotionPayload,
   buildMotionEditPayload,
+  buildMotionT2VPayload,
+  getMotionAssetExecution,
   normalizeMotionResponse,
   validateMotionResult,
   executeMotionThroughRegistry,
   executeMotionEditThroughRegistry,
+  MOTION_VIDEO_GENERATION_OPERATION,
+  MOTION_T2V_MODEL,
 } from "./MotionProvider.js";
 import { getWorkflowTemplate } from "./templates.js";
 
@@ -123,4 +127,50 @@ test("executeMotionEditThroughRegistry routes motion_graphics_edit through the r
   await executeMotionEditThroughRegistry(registry, { apiKey: "key", payload: { request_id: "src", edit_prompt: "x" } });
   assert.equal(captured.operation, "motion_graphics_edit");
   assert.equal(captured.params.edit_prompt, "x");
+});
+
+test("text/data templates route to the text-to-video operation", () => {
+  for (const templateId of ["animated-quote", "countdown-timer", "sales-dashboard", "social-announcement", "lower-third", "statistics-animation", "call-to-action"]) {
+    const route = getMotionAssetExecution({ templateId });
+    assert.equal(route.valid, true, templateId);
+    assert.equal(route.operation, MOTION_VIDEO_GENERATION_OPERATION, templateId);
+    assert.equal(route.modelId, MOTION_T2V_MODEL, templateId);
+  }
+});
+
+test("Logo Reveal without logo and Promo Intro without asset route to text-to-video", () => {
+  const logo = getMotionAssetExecution({ templateId: "logo-reveal" });
+  assert.equal(logo.operation, MOTION_VIDEO_GENERATION_OPERATION);
+  const promo = getMotionAssetExecution({ templateId: "promo-intro" });
+  assert.equal(promo.operation, MOTION_VIDEO_GENERATION_OPERATION);
+});
+
+test("asset-capable templates with a supplied asset route to image-to-video", () => {
+  const logo = getMotionAssetExecution({ templateId: "logo-reveal", logo: "https://cdn.test/logo.png" });
+  assert.equal(logo.valid, true);
+  assert.equal(logo.operation, "image_to_video");
+  assert.equal(logo.modelId, "kling-v2.1-pro-i2v");
+  const promo = getMotionAssetExecution({ templateId: "promo-intro", images: ["https://cdn.test/promo.png"] });
+  assert.equal(promo.operation, "image_to_video");
+});
+
+test("Product Spotlight requires a product image", () => {
+  const blocked = getMotionAssetExecution({ templateId: "product-spotlight" });
+  assert.equal(blocked.valid, false);
+  assert.equal(blocked.operation, null);
+  const ok = getMotionAssetExecution({ templateId: "product-spotlight", images: ["https://cdn.test/product.png"] });
+  assert.equal(ok.valid, true);
+  assert.equal(ok.operation, "image_to_video");
+});
+
+test("buildMotionT2VPayload builds the generateVideo payload", () => {
+  const payload = buildMotionT2VPayload({
+    template: getWorkflowTemplate("animated-quote"),
+    inputs: { text: "Stay hungry", attribution: "— Steve Jobs", aspectRatio: "9:16", durationSeconds: 10 },
+    prompt: "neon",
+  });
+  assert.equal(payload.model, MOTION_T2V_MODEL);
+  assert.match(payload.prompt, /Stay hungry/);
+  assert.equal(payload.aspect_ratio, "9:16");
+  assert.equal(payload.duration, 10);
 });

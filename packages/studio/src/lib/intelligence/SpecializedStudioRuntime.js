@@ -14,17 +14,21 @@ export const createRecastStudioRequest = (input = {}) => createMediaStudioReques
 
 export const executeRecastStudioRequest = (request, options) => executeMediaStudioRequest(request, options);
 
-export const createVibeMotionStudioRequest = (input = {}) => createMediaStudioRequest({
-  studioId: "vibe_motion",
-  recipeId: "vibeMotion",
-  operation: input.editMode ? "video_editing" : "video_generation",
-  capability: input.editMode ? "video_editing" : "video_generation",
-  prompt: input.prompt,
-  inputs: input.params,
-  references: input.references || [],
-  output: { modality: "video", aspectRatio: input.params?.aspect_ratio, durationSeconds: input.params?.duration_seconds },
-  apiKey: input.apiKey,
-});
+export const createVibeMotionStudioRequest = (input = {}) => {
+  const operation = input.operation || (input.editMode ? "video_editing" : "video_generation");
+  const capability = input.capability || operation;
+  return createMediaStudioRequest({
+    studioId: "vibe_motion",
+    recipeId: "vibeMotion",
+    operation,
+    capability,
+    prompt: input.prompt,
+    inputs: input.params,
+    references: input.references || [],
+    output: { modality: "video", aspectRatio: input.params?.aspect_ratio, durationSeconds: input.params?.duration_seconds },
+    apiKey: input.apiKey,
+  });
+};
 
 export const executeVibeMotionStudioRequest = (request, options) => executeMediaStudioRequest(request, options);
 

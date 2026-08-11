@@ -8,6 +8,10 @@ import {
   MOTION_ASPECT_RATIOS,
 } from "../../lib/motion/MotionJobBuilder.js";
 import { MOTION_SKILL_ID } from "../../lib/motion/MotionConstants.js";
+import {
+  getMotionAssetExecution,
+  getMotionReferenceLimit,
+} from "../../lib/motion/MotionProvider.js";
 import { createMotionGraphicsRuntime } from "../../lib/motion/MotionGraphicsRuntime.js";
 import {
   listWorkflowTemplates,
@@ -131,11 +135,17 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
   const handleImagesUpload = useCallback(
     async (files) => {
       if (!files?.length) return;
+      const limit = getMotionReferenceLimit({ templateId, hasLogo: Boolean(logoUrl) });
+      const allowed = limit == null ? files.length : Math.min(files.length, limit);
       setUploading(true);
       try {
-        for (const file of Array.from(files).slice(0, 6)) {
+        const list = Array.from(files);
+        if (limit != null && list.length > limit) {
+          setError(`This template supports up to ${limit} reference image${limit === 1 ? "" : "s"} with the selected motion model.`);
+        }
+        for (const file of list.slice(0, allowed)) {
           const url = await uploadFile(apiKey, file, () => {});
-          if (url) setImageUrls((prev) => [...prev, url].slice(0, 6));
+          if (url) setImageUrls((prev) => [...prev, url].slice(0, limit ?? 6));
         }
         clearResult();
       } catch (err) {
@@ -144,7 +154,7 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
         setUploading(false);
       }
     },
-    [apiKey, clearResult]
+    [apiKey, clearResult, templateId, logoUrl]
   );
 
   const handleRun = useCallback(async () => {
@@ -152,6 +162,17 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
     const selectedTemplate = getWorkflowTemplate(templateId);
     if (!selectedTemplate) {
       setError("Pick a workflow template first.");
+      return;
+    }
+    // Asset-aware validation BEFORE any provider call. Product Spotlight requires
+    // a real product image — never silently fall back to text-only generation.
+    const route = getMotionAssetExecution({ templateId, logo: logoUrl, images: imageUrls });
+    if (!route.valid) {
+      setError(route.error || "This template requires a source asset.");
+      return;
+    }
+    if (route.truncated) {
+      setError(route.error || "Some references exceed the motion model's supported image count and were not sent.");
       return;
     }
     setError(null);
@@ -339,11 +360,15 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => handleLogoUpload(e.target.files?.[0])}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleLogoUpload(f);
+                  e.target.value = "";
+                }}
               />
               <button
                 type="button"
-                disabled={uploading || !apiKey}
+                disabled={uploading}
                 onClick={() => logoInputRef.current?.click()}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
               >
@@ -358,11 +383,15 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
                 accept="image/*"
                 multiple
                 className="hidden"
-                onChange={(e) => handleImagesUpload(e.target.files)}
+                onChange={(e) => {
+                  const f = e.target.files;
+                  if (f?.length) handleImagesUpload(f);
+                  e.target.value = "";
+                }}
               />
               <button
                 type="button"
-                disabled={uploading || !apiKey}
+                disabled={uploading}
                 onClick={() => imagesInputRef.current?.click()}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
               >
@@ -388,14 +417,12 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
           <button
             type="button"
             onClick={handleRun}
-            disabled={running || uploading || !apiKey}
+            disabled={running || uploading}
             className="w-full py-3 rounded-xl bg-primary text-black font-bold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
           >
             {running
               ? `Rendering… ${Math.floor(elapsed)}s elapsed`
-              : apiKey
-                ? `Render ${template?.title || "motion graphic"}`
-                : "Add an API key to run"}
+              : `Render ${template?.title || "motion graphic"}`}
           </button>
         </div>
 
