@@ -29,7 +29,16 @@ import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
 
-export default function CharacterPerformancePanel({ apiKey, recastTarget = null, onExit }) {
+// A media URL is only "playable video" when it actually looks like a video file
+// or a video endpoint — never for empty values, so a generatedFiles entry alone
+// is never accepted as proof of a video.
+function isPlayableVideoUrl(url) {
+  if (!url) return false;
+  const value = String(url);
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(value) || /video\//i.test(value);
+}
+
+export default function CharacterPerformancePanel({ apiKey, recastTarget = null, onExit, onIdentityChange = null }) {
   const { activeCampaign } = useActiveCampaign();
 
   // Identity source — the AI Influencer integration. Preset influencers, AI Twin
@@ -40,6 +49,13 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
   const [tempImageUrl, setTempImageUrl] = useState(null);
   const [twins, setTwins] = useState([]);
   const [libraryVideos, setLibraryVideos] = useState([]);
+
+  // Shared identity source across Character Skills: report the selected identity
+  // up to Character Studio so sibling skills (Character Animation) can reuse it
+  // without asking for a re-upload. Purely additive — no visual change.
+  useEffect(() => {
+    onIdentityChange?.({ identityTab, selectedIdentity, tempImageUrl });
+  }, [identityTab, selectedIdentity, tempImageUrl, onIdentityChange]);
 
   // Driving video (the performance to transfer).
   const [videoUrl, setVideoUrl] = useState(null);
@@ -98,18 +114,28 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
     }
     try {
       const videos = (readCreativeLibrary() || [])
-        .filter((asset) => {
-          const type = asset.metadata?.assetType || (asset.generatedFiles?.length ? "video" : null);
-          return type === "video";
-        })
         .map((asset) => ({
           id: asset.id,
           name: asset.title || asset.metadata?.subtype || asset.id,
-          url: asset.generatedFiles?.[0],
+          url: asset.generatedFiles?.[0] || asset.metadata?.videoUrl || null,
           subtype: asset.metadata?.subtype || null,
+          recipe: asset.recipe || asset.metadata?.recipeId || asset.metadata?.recipe || null,
         }))
-        .filter((entry) => entry.url);
-      setLibraryVideos(videos);
+        // Only genuinely playable video assets qualify — a generatedFiles entry
+        // alone does not prove a media file (legacy motion-graphics records may
+        // carry a still image as their only "file").
+        .filter((entry) => isPlayableVideoUrl(entry.url));
+      // Duplicate URLs (the same rendered video stored under more than one
+      // Creative Asset) must not appear twice; different generations that share
+      // a title are distinct assets and are kept.
+      const seenUrls = new Set();
+      const deduped = [];
+      for (const entry of videos) {
+        if (seenUrls.has(entry.url)) continue;
+        seenUrls.add(entry.url);
+        deduped.push(entry);
+      }
+      setLibraryVideos(deduped);
     } catch {
       setLibraryVideos([]);
     }
@@ -375,7 +401,7 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
               />
               <button
                 type="button"
-                disabled={uploadingIdentity || !apiKey}
+                disabled={uploadingIdentity}
                 onClick={() => tempImageInputRef.current?.click()}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
               >
@@ -409,7 +435,7 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
             />
             <button
               type="button"
-              disabled={uploadingVideo || !apiKey}
+              disabled={uploadingVideo}
               onClick={() => videoInputRef.current?.click()}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
             >
@@ -440,7 +466,10 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
                       }`}
                     >
                       <p className="text-[10px] font-medium text-white truncate">{entry.name}</p>
-                      <p className="text-[9px] text-white/35">{entry.subtype || "video"}</p>
+                      <p className="text-[9px] text-white/35">
+                        {entry.subtype || "video"}
+                        {entry.recipe && entry.recipe !== entry.subtype ? ` · ${entry.recipe}` : ""}
+                      </p>
                     </button>
                   );
                 })}
@@ -537,16 +566,14 @@ export default function CharacterPerformancePanel({ apiKey, recastTarget = null,
           <button
             type="button"
             onClick={handleRun}
-            disabled={running || uploadingVideo || uploadingIdentity || !apiKey}
+            disabled={running || uploadingVideo || uploadingIdentity}
             className="w-full py-3 rounded-xl bg-primary text-black font-bold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
           >
             {running
               ? `Transferring… ${Math.floor(elapsed)}s elapsed`
-              : apiKey
-                ? selectedModel
-                  ? `Transfer performance with ${selectedModel.name}`
-                  : "Transfer performance"
-                : "Add an API key to run"}
+              : selectedModel
+                ? `Transfer performance with ${selectedModel.name}`
+                : "Transfer performance"}
           </button>
         </div>
 

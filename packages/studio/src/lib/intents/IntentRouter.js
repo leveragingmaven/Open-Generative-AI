@@ -16,6 +16,13 @@
 //   target      — { studio, tabId, route, recipeId, skillIds, twinBlueprintId? }
 
 import { RECIPE_LIBRARY } from "../intelligence/config.js";
+import { CHARACTER_ANIMATION_SKILL_ID } from "../character/CharacterAnimationConstants.js";
+import {
+  TALKING_AVATAR_RECIPE_ID,
+  TALKING_AVATAR_SKILL_ID,
+  CHARACTER_LIPSYNC_RECIPE_ID,
+  CHARACTER_LIPSYNC_SKILL_ID,
+} from "../character/CharacterLipSyncConstants.js";
 import { TWIN_BLUEPRINTS, getBlueprint } from "../twin/TwinBlueprints.js";
 import { listTwins } from "../twin/TwinStore.js";
 
@@ -153,15 +160,11 @@ const BASE_INTENTS = [
     },
   },
   {
-    id: "talking-avatar",
-    name: "Create a talking avatar",
-    description: "Create or recast a character and animate it to speak.",
+    id: "performance-transfer",
+    name: "Transfer a performance",
+    description: "Transfer a driving performance (motion, gesture, expression) onto a character identity.",
     category: "Character",
     phrases: [
-      "create a talking avatar",
-      "make a talking avatar",
-      "talking avatar",
-      "create an avatar",
       "recast this character",
       "recast my character",
       "recast character",
@@ -169,15 +172,6 @@ const BASE_INTENTS = [
       "transfer this performance",
       "performance transfer",
       "recast",
-      "animate my influencer",
-      "animate influencer",
-      "influencer animation",
-      "make my spokesperson talk",
-      "make my spokesperson speak",
-      "spokesperson video",
-      "talking spokesperson",
-      "character animation",
-      "animate my character",
     ],
     target: {
       studio: "Character Studio",
@@ -185,6 +179,80 @@ const BASE_INTENTS = [
       route: "/studio/character",
       recipeId: "performanceTransfer",
       skillIds: ["recast"],
+    },
+  },
+  {
+    id: "talking-avatar",
+    name: "Create a talking avatar",
+    description: "Turn a character identity and an audio track into a talking video.",
+    category: "Character",
+    phrases: [
+      "create a talking avatar",
+      "make a talking avatar",
+      "talking avatar",
+      "create an avatar",
+      "animate my influencer",
+      "animate influencer",
+      "influencer animation",
+      "make my spokesperson talk",
+      "make my spokesperson speak",
+      "spokesperson video",
+      "talking spokesperson",
+    ],
+    target: {
+      studio: "Character Studio",
+      tabId: "character",
+      route: "/studio/character",
+      recipeId: TALKING_AVATAR_RECIPE_ID,
+      skillIds: [TALKING_AVATAR_SKILL_ID],
+    },
+  },
+  {
+    id: "character-lip-sync",
+    name: "Lip sync a video",
+    description: "Re-sync a source video's lip movement to a driving audio track.",
+    category: "Character",
+    phrases: [
+      "lip sync",
+      "lip-sync",
+      "sync lips",
+      "synchronize lips",
+      "lip sync my video",
+      "lip sync this video",
+      "make my video lips match",
+      "match lips to audio",
+      "lipsync",
+    ],
+    target: {
+      studio: "Character Studio",
+      tabId: "character",
+      route: "/studio/character",
+      recipeId: CHARACTER_LIPSYNC_RECIPE_ID,
+      skillIds: [CHARACTER_LIPSYNC_SKILL_ID],
+    },
+  },
+  {
+    id: "character-animation",
+    name: "Animate a character",
+    description: "Animate a character identity with natural-language motion — no driving video required.",
+    category: "Character",
+    phrases: [
+      "character animation",
+      "animate my character",
+      "animate character",
+      "animate a character",
+      "make my character move",
+      "make my character animated",
+      "animate my character image",
+      "character motion",
+      "animate my influencer image",
+    ],
+    target: {
+      studio: "Character Studio",
+      tabId: "character",
+      route: "/studio/character",
+      recipeId: "characterAnimation",
+      skillIds: [CHARACTER_ANIMATION_SKILL_ID],
     },
   },
   {

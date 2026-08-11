@@ -89,6 +89,30 @@ export const PRODUCTION_DEPLOYMENTS = Object.freeze([
     license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false, characterOrientation: true },
     limits: { maxDrivingSeconds: 30, maxReferenceImages: 1 },
   },
+  {
+    id: "muapi-video-generation",
+    providerId: "muapi",
+    logicalModel: "muapi-i2v-catalog",
+    operation: "image_to_video",
+    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    inputs: ["image", "text"], outputs: ["video"], priority: 10, confidence: 0.8,
+    featureState: "enabled", availability: "available", health: "healthy",
+    quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "video", unitCost: null },
+    license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false },
+    limits: {},
+  },
+  {
+    id: "muapi-lip-sync",
+    providerId: "muapi",
+    logicalModel: "muapi-lipsync-catalog",
+    operation: "lip_sync",
+    capabilities: [CAPABILITIES.LIP_SYNC, CAPABILITIES.COMMERCIAL_LICENSE],
+    inputs: ["image", "video", "audio"], outputs: ["video"], priority: 10, confidence: 0.8,
+    featureState: "enabled", availability: "available", health: "healthy",
+    quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "video", unitCost: null },
+    license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false },
+    limits: {},
+  },
 ]);
 
 export function registerProductionCapabilities({ capabilities = capabilityRegistry, deployments = providerCapabilityRegistry } = {}) {

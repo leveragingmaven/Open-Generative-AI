@@ -243,7 +243,7 @@ function WorkflowCommandCenter({ activeMainTab, setActiveMainTab, workflows, loa
   );
 }
 
-export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggleHeader }) {
+export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggleHeader, active = true }) {
   const params = useParams();
   const router = useRouter();
   const integration = useMavenSyncIntegration();
@@ -271,6 +271,7 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
 
   const [workflows, setWorkflows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const loadedKeyRef = useRef(null);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
   const [activeSubTab, setActiveSubTab] = useState("playground"); // 'playground' | 'builder'
   const [activeMainTab, setActiveMainTab] = useState("templates"); // 'templates' | 'my-workflows' | 'published'
@@ -562,6 +563,11 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
   }, [urlWorkflowId, activeSubTab]);
 
   useEffect(() => {
+    if (!active) return;
+
+    const loadKey = `${activeMainTab}:${apiKey || ""}`;
+    if (loadedKeyRef.current === loadKey) return;
+
     async function loadWorkflows() {
       try {
         setLoading(true);
@@ -573,16 +579,19 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
         } else if (activeMainTab === "published") {
           data = await getPublishedWorkflows(apiKey);
         }
+        if (loadedKeyRef.current === loadKey) return;
         setWorkflows(data);
+        loadedKeyRef.current = loadKey;
       } catch (err) {
         console.error("Failed to load workflows:", err);
+        if (loadedKeyRef.current === loadKey) return;
         setError("Failed to load workflows list.");
       } finally {
         setLoading(false);
       }
     }
     loadWorkflows();
-  }, [apiKey, activeMainTab]);
+  }, [active, apiKey, activeMainTab]);
 
   const handleRun = async (e) => {
     e.preventDefault();

@@ -263,7 +263,7 @@ export const NAVIGATION_CATEGORIES = [
   {
     id: 'video',
     label: 'Video',
-    tabIds: ['video', 'clipping', 'vibe-motion', 'lipsync', 'body-swap', 'character', 'marketing'],
+    tabIds: ['video', 'clipping', 'vibe-motion', 'lipsync', 'character', 'marketing'],
     icon: (
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="2" y="4" width="15" height="16" rx="2"/>
@@ -325,7 +325,7 @@ export const WORKSPACE_MENU_GROUPS = [
   {
     id: 'tools',
     label: 'Tools',
-    tabIds: ['lipsync', 'ai-influencer', 'asset-library', 'character', 'cinema', 'vibe-motion', 'body-swap', 'clipping', 'knowledge-center', 'memory'],
+    tabIds: ['lipsync', 'ai-influencer', 'asset-library', 'character', 'cinema', 'vibe-motion', 'clipping', 'knowledge-center', 'memory'],
   },
   {
     id: 'publish',
@@ -347,7 +347,7 @@ export const EXPERIENCE_WORKSPACES = [
     route: '/studio/create',
     tabIds: [
       'image', 'video', 'marketing', 'audio', 'lipsync', 'ai-influencer',
-      'character', 'vibe-motion', 'body-swap', 'cinema', 'clipping', 'design-agent',
+      'character', 'vibe-motion', 'cinema', 'clipping', 'design-agent',
     ],
   },
   {

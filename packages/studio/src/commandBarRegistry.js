@@ -117,13 +117,6 @@ export const COMMAND_SECTIONS = [
         route: '/studio/vibe-motion',
       },
       {
-        id: 'body-swap',
-        label: 'Body Swap',
-        tabId: 'body-swap',
-        keywords: ['body swap', 'recast', 'character', 'transform'],
-        route: '/studio/body-swap',
-      },
-      {
         id: 'cinema',
         label: 'Cinema Studio',
         tabId: 'cinema',
@@ -265,8 +258,38 @@ export function searchCommandDestinations(query, enabledTabIds = null) {
         skillIds: target.skillIds,
         intent: resolved.matchedPhrase || null,
       };
-    } else if (resolved.intent.id === 'talking-avatar') {
+    } else if (resolved.intent.id === 'performance-transfer') {
       // Deep-link into Character Studio Performance Transfer; context is filled
+      // by the studio from the identity source / active campaign. The Command
+      // Bar resolves intent and routes context only — never a provider.
+      params = {
+        view: 'character',
+        recipeId: target.recipeId,
+        skillIds: target.skillIds,
+        intent: resolved.matchedPhrase || null,
+      };
+    } else if (resolved.intent.id === 'talking-avatar') {
+      // Deep-link into Character Studio Talking Avatar; context is filled by the
+      // studio from the identity source / active campaign. The Command Bar
+      // resolves intent and routes context only — never a provider.
+      params = {
+        view: 'character',
+        recipeId: target.recipeId,
+        skillIds: target.skillIds,
+        intent: resolved.matchedPhrase || null,
+      };
+    } else if (resolved.intent.id === 'character-lip-sync') {
+      // Deep-link into Character Studio Lip Sync; context is filled by the
+      // studio from the identity source / active campaign. The Command Bar
+      // resolves intent and routes context only — never a provider.
+      params = {
+        view: 'character',
+        recipeId: target.recipeId,
+        skillIds: target.skillIds,
+        intent: resolved.matchedPhrase || null,
+      };
+    } else if (resolved.intent.id === 'character-animation') {
+      // Deep-link into Character Studio Character Animation; context is filled
       // by the studio from the identity source / active campaign. The Command
       // Bar resolves intent and routes context only — never a provider.
       params = {

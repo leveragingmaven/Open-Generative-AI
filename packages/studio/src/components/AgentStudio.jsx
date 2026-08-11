@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   getTemplateAgents,
@@ -117,7 +117,7 @@ function ConversationCard({ conv, onClick }) {
 // ─── Main Component ──────────────────────────────────────────────────────────
 const TABS = ["templates", "my-agents", "my-chats"];
 
-export default function AgentStudio({ apiKey }) {
+export default function AgentStudio({ apiKey, active = true }) {
   const router = useRouter();
 
   const [activeMainTab, setActiveMainTab] = useState("templates");
@@ -125,6 +125,7 @@ export default function AgentStudio({ apiKey }) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const loadedKeyRef = useRef(null);
 
   // Navigate to the standalone /agents page — AiAgent handles its own routing there
   const handleSelectAgent = useCallback(
@@ -155,6 +156,11 @@ export default function AgentStudio({ apiKey }) {
   );
 
   useEffect(() => {
+    if (!active) return;
+
+    const loadKey = `${activeMainTab}:${apiKey || ""}`;
+    if (loadedKeyRef.current === loadKey) return;
+
     let cancelled = false;
 
     async function load() {
@@ -165,13 +171,22 @@ export default function AgentStudio({ apiKey }) {
       try {
         if (activeMainTab === "templates") {
           const data = await getTemplateAgents(apiKey);
-          if (!cancelled) setAgents(data);
+          if (!cancelled) {
+            setAgents(data);
+            loadedKeyRef.current = loadKey;
+          }
         } else if (activeMainTab === "my-agents") {
           const data = await getUserAgents(apiKey);
-          if (!cancelled) setAgents(data);
+          if (!cancelled) {
+            setAgents(data);
+            loadedKeyRef.current = loadKey;
+          }
         } else if (activeMainTab === "my-chats") {
           const data = await getUserConversations(apiKey);
-          if (!cancelled) setConversations(data);
+          if (!cancelled) {
+            setConversations(data);
+            loadedKeyRef.current = loadKey;
+          }
         }
       } catch (err) {
         console.error("AgentStudio load error:", err);
@@ -183,7 +198,7 @@ export default function AgentStudio({ apiKey }) {
 
     load();
     return () => { cancelled = true; };
-  }, [apiKey, activeMainTab]);
+  }, [active, apiKey, activeMainTab]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (

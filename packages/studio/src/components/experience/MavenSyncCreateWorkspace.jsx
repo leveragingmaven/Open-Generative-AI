@@ -98,13 +98,6 @@ const PRODUCTION_STUDIOS = [
     route: "/studio/vibe-motion",
   },
   {
-    id: "body-swap",
-    name: "Body Swap",
-    description: "Transfer a performance with the existing identity, video, and model controls.",
-    icon: "body",
-    route: "/studio/body-swap",
-  },
-  {
     id: "clipping",
     name: "AI Clipping",
     description: "Create short clips from longer media with the existing clipping workflow.",
@@ -170,7 +163,7 @@ export default function MavenSyncCreateWorkspace() {
             <p className="mt-2 max-w-2xl text-xs leading-5 text-[var(--ms-color-text-secondary)]">The Create Workspace organizes discovery only. Studio controls, model selectors, camera systems, presets, recipes, templates, and execution flows remain unchanged.</p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[330px]">
-            <div className="rounded-xl border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><p className="text-xl font-semibold">12</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Creative studios</p></div>
+            <div className="rounded-xl border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><p className="text-xl font-semibold">11</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Creative studios</p></div>
             <div className="rounded-xl border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><p className="text-xl font-semibold">4</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Primary studios</p></div>
             <div className="col-span-2 rounded-xl border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 sm:col-span-1"><p className="text-xl font-semibold">1</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Workflow workspace</p></div>
           </div>

@@ -57,12 +57,17 @@ test("multiple phrases map to the same intent", () => {
     ["make an animated chart", "motion-graphics"],
     ["build a countdown", "motion-graphics"],
     ["create a talking avatar", "talking-avatar"],
-    ["recast this character", "talking-avatar"],
+    ["recast this character", "performance-transfer"],
     ["animate my influencer", "talking-avatar"],
-    ["recast this video", "talking-avatar"],
-    ["transfer this performance", "talking-avatar"],
+    ["recast this video", "performance-transfer"],
+    ["transfer this performance", "performance-transfer"],
     ["make my spokesperson talk", "talking-avatar"],
-    ["animate my character", "talking-avatar"],
+    ["lip sync", "character-lip-sync"],
+    ["lip-sync this video", "character-lip-sync"],
+    ["sync lips to audio", "character-lip-sync"],
+    ["animate my character", "character-animation"],
+    ["character animation", "character-animation"],
+    ["make my character move", "character-animation"],
     ["generate campaign", "campaign-plan"],
     ["launch product", "campaign-plan"],
     ["build funnel", "campaign-plan"],
@@ -107,8 +112,26 @@ test("intent targets carry studio, tab, and recipe", () => {
   const avatar = resolveIntent("create a talking avatar").intent.target;
   assert.equal(avatar.studio, "Character Studio");
   assert.equal(avatar.tabId, "character");
-  assert.equal(avatar.recipeId, "performanceTransfer");
-  assert.deepEqual(avatar.skillIds, ["recast"]);
+  assert.equal(avatar.recipeId, "talkingAvatar");
+  assert.deepEqual(avatar.skillIds, ["talking-avatar"]);
+
+  const performance = resolveIntent("recast this character").intent.target;
+  assert.equal(performance.studio, "Character Studio");
+  assert.equal(performance.tabId, "character");
+  assert.equal(performance.recipeId, "performanceTransfer");
+  assert.deepEqual(performance.skillIds, ["recast"]);
+
+  const lipSync = resolveIntent("lip sync").intent.target;
+  assert.equal(lipSync.studio, "Character Studio");
+  assert.equal(lipSync.tabId, "character");
+  assert.equal(lipSync.recipeId, "characterLipSync");
+  assert.deepEqual(lipSync.skillIds, ["character-lip-sync"]);
+
+  const animation = resolveIntent("animate my character").intent.target;
+  assert.equal(animation.studio, "Character Studio");
+  assert.equal(animation.tabId, "character");
+  assert.equal(animation.recipeId, "characterAnimation");
+  assert.deepEqual(animation.skillIds, ["character-animation"]);
 
   const campaign = resolveIntent("generate campaign").intent.target;
   assert.equal(campaign.tabId, "campaigns");

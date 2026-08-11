@@ -71,10 +71,10 @@ test("motion intent commands deep-link to Marketing Studio Motion Graphics", () 
   assert.equal(item.params.intent, "animate my logo");
 });
 
-test("talking-avatar intent commands deep-link to Character Studio Performance Transfer", () => {
+test("performance-transfer intent commands deep-link to Character Studio Performance Transfer", () => {
   const sections = searchCommandDestinations("recast this video");
   const item = sections.find((s) => s.id === "intents").items[0];
-  assert.equal(item.id, "intent-talking-avatar");
+  assert.equal(item.id, "intent-performance-transfer");
   assert.equal(item.route, "/studio/character");
   assert.equal(item.tabId, "character");
   assert.equal(item.recipeId, "performanceTransfer");
@@ -82,6 +82,45 @@ test("talking-avatar intent commands deep-link to Character Studio Performance T
   assert.deepEqual(item.params.skillIds, ["recast"]);
   assert.equal(item.params.view, "character");
   assert.equal(item.params.intent, "recast this video");
+});
+
+test("talking-avatar intent commands deep-link to Character Studio Talking Avatar", () => {
+  const sections = searchCommandDestinations("create a talking avatar");
+  const item = sections.find((s) => s.id === "intents").items[0];
+  assert.equal(item.id, "intent-talking-avatar");
+  assert.equal(item.route, "/studio/character");
+  assert.equal(item.tabId, "character");
+  assert.equal(item.recipeId, "talkingAvatar");
+  assert.equal(item.studio, "Character Studio");
+  assert.deepEqual(item.params.skillIds, ["talking-avatar"]);
+  assert.equal(item.params.view, "character");
+  assert.equal(item.params.intent, "create a talking avatar");
+});
+
+test("character-lip-sync intent commands deep-link to Character Studio Lip Sync", () => {
+  const sections = searchCommandDestinations("lip sync this video");
+  const item = sections.find((s) => s.id === "intents").items[0];
+  assert.equal(item.id, "intent-character-lip-sync");
+  assert.equal(item.route, "/studio/character");
+  assert.equal(item.tabId, "character");
+  assert.equal(item.recipeId, "characterLipSync");
+  assert.equal(item.studio, "Character Studio");
+  assert.deepEqual(item.params.skillIds, ["character-lip-sync"]);
+  assert.equal(item.params.view, "character");
+  assert.equal(item.params.intent, "lip sync this video");
+});
+
+test("character-animation intent commands deep-link to Character Studio Character Animation", () => {
+  const sections = searchCommandDestinations("animate my character");
+  const item = sections.find((s) => s.id === "intents").items[0];
+  assert.equal(item.id, "intent-character-animation");
+  assert.equal(item.route, "/studio/character");
+  assert.equal(item.tabId, "character");
+  assert.equal(item.recipeId, "characterAnimation");
+  assert.equal(item.studio, "Character Studio");
+  assert.deepEqual(item.params.skillIds, ["character-animation"]);
+  assert.equal(item.params.view, "character");
+  assert.equal(item.params.intent, "animate my character");
 });
 
 test("intent commands respect enabledTabIds", () => {

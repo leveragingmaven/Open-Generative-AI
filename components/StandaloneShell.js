@@ -518,12 +518,12 @@ const handleTabChange = (tabId) => {
       )}
       {visibleTabIds.has('workflows') && (
         <div className={activeWorkspaceTab === 'workflows' ? "h-full w-full" : "hidden"}>
-          <WorkflowStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+          <WorkflowStudio apiKey={studioApiKey} active={activeWorkspaceTab === 'workflows'} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
         </div>
       )}
       {visibleTabIds.has('agents') && (
         <div className={activeWorkspaceTab === 'agents' ? "h-full w-full" : "hidden"}>
-          <AgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+          <AgentStudio apiKey={studioApiKey} active={activeWorkspaceTab === 'agents'} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
         </div>
       )}
       {visibleTabIds.has('design-agent') && (

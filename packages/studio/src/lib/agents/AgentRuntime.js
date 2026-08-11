@@ -150,7 +150,7 @@ export function motionGuidanceLines(initiation) {
 }
 
 // Shared performance-transfer handoff for agents and the AI Twin. Detection
-// reuses the canonical Intent Router (talking-avatar). The job skeleton is
+// reuses the canonical Intent Router (talking-avatar / performance-transfer). The job skeleton is
 // built by the single shared buildRecastJob. Neither the agent nor the twin
 // executes recast — they surface the ready job and route to Character Studio →
 // Performance Transfer, which runs the full Creative OS pipeline. Character
@@ -160,7 +160,8 @@ export function detectRecastRequest(userMessage = {}) {
   const text = String(userMessage?.content || userMessage || "").trim();
   if (!text) return null;
   const resolved = resolveIntent(text);
-  if (!resolved || resolved.intent?.id !== "talking-avatar") return null;
+  if (!resolved) return null;
+  if (resolved.intent?.id !== "talking-avatar" && resolved.intent?.id !== "performance-transfer") return null;
   return {
     matchedPhrase: resolved.matchedPhrase || resolved.intent?.name || null,
     prompt: text,

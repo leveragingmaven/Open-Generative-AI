@@ -296,11 +296,15 @@ export default function VideoRepurposePanel({ apiKey, repurposeTarget = null, on
                 type="file"
                 accept="video/mp4,video/webm,video/quicktime,video/m4v"
                 className="hidden"
-                onChange={(e) => handleFileSelected(e.target.files?.[0])}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFileSelected(f);
+                  e.target.value = "";
+                }}
               />
               <button
                 type="button"
-                disabled={uploading || !apiKey}
+                disabled={uploading}
                 onClick={() => fileInputRef.current?.click()}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-black hover:opacity-90 disabled:opacity-40 transition-opacity"
               >
@@ -464,14 +468,12 @@ export default function VideoRepurposePanel({ apiKey, repurposeTarget = null, on
           <button
             type="button"
             onClick={handleRun}
-            disabled={running || uploading || !apiKey}
+            disabled={running || uploading}
             className="w-full py-3 rounded-xl bg-primary text-black font-bold text-sm hover:opacity-90 disabled:opacity-40 transition-opacity"
           >
             {running
               ? `Repurposing… ${Math.floor(elapsed)}s elapsed`
-              : apiKey
-                ? "Repurpose video"
-                : "Add an API key to run"}
+              : "Repurpose video"}
           </button>
         </div>
 

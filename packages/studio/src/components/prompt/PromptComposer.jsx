@@ -5,8 +5,10 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import CampaignChip from "../CampaignChip.jsx";
 
 const DEFAULT_POSITION_CLASS =
@@ -166,22 +168,93 @@ export const PromptPopover = forwardRef(function PromptPopover(
     children,
     className = "",
     positionClassName = DEFAULT_POPOVER_POSITION_CLASS,
+    style,
     ...props
   },
   ref,
 ) {
+  const anchorRef = useRef(null);
+  const popoverRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = popoverRef.current;
+    if (!anchor || !popover) return;
+
+    const GAP = 12;
+    const MARGIN = 8;
+    let lastTop = null;
+    let lastLeft = null;
+
+    const update = () => {
+      const anchorRect = anchor.getBoundingClientRect();
+      const { width, height } = popover.getBoundingClientRect();
+      const viewportWidth =
+        window.innerWidth || document.documentElement.clientWidth;
+      const viewportHeight =
+        window.innerHeight || document.documentElement.clientHeight;
+
+      let top = anchorRect.top - GAP - height;
+      if (top < MARGIN) top = anchorRect.bottom + GAP;
+      if (
+        top + height > viewportHeight - MARGIN &&
+        anchorRect.top - GAP - height >= MARGIN
+      ) {
+        top = anchorRect.top - GAP - height;
+      }
+      const left = Math.max(
+        MARGIN,
+        Math.min(anchorRect.left, viewportWidth - width - MARGIN),
+      );
+
+      if (top !== lastTop || left !== lastLeft) {
+        popover.style.top = `${top}px`;
+        popover.style.left = `${left}px`;
+        lastTop = top;
+        lastLeft = left;
+      }
+    };
+
+    update();
+
+    window.addEventListener("resize", update);
+    document.addEventListener("scroll", update, true);
+
+    const stopPropagation = (event) => event.stopPropagation();
+    popover.addEventListener("mousedown", stopPropagation);
+    popover.addEventListener("click", stopPropagation);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      document.removeEventListener("scroll", update, true);
+      popover.removeEventListener("mousedown", stopPropagation);
+      popover.removeEventListener("click", stopPropagation);
+    };
+  });
+
   return (
-    <div
-      {...props}
-      ref={ref}
-      className={joinClasses(
-        positionClassName,
-        DEFAULT_POPOVER_CLASS,
-        className,
+    <>
+      <div
+        aria-hidden="true"
+        ref={anchorRef}
+        className="absolute inset-0 pointer-events-none"
+      />
+      {createPortal(
+        <div
+          {...props}
+          ref={(node) => {
+            popoverRef.current = node;
+            if (typeof ref === "function") ref(node);
+            else if (ref) ref.current = node;
+          }}
+          style={{ position: "fixed", zIndex: 50, ...style }}
+          className={joinClasses(DEFAULT_POPOVER_CLASS, className)}
+        >
+          {children}
+        </div>,
+        document.body,
       )}
-    >
-      {children}
-    </div>
+    </>
   );
 });
 
