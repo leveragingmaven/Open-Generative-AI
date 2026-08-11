@@ -209,6 +209,19 @@ const [characterTarget, setCharacterTarget] = useState(null);
     }
   }, [activeTab, effectiveVisibleTabIds, visibleTabs]);
 
+  // URL/slug is authoritative for workspace navigation. activeTab is only
+  // initialized once (getInitialTab); plain <a href> client-side navigation
+  // (Create Workspace cards, dashboard links) changes slug without remounting
+  // this page, so it must be re-synced here. A valid enabled studio never
+  // silently falls back to Image because of stale activeTab state.
+  useEffect(() => {
+    if (isStudioHome || isCreateWorkspace || isIntelligenceWorkspace) return;
+    const firstSegment = slug[0];
+    if (firstSegment && effectiveVisibleTabIds.has(firstSegment) && activeTab !== firstSegment) {
+      setActiveTab(firstSegment);
+    }
+  }, [slug, isStudioHome, isCreateWorkspace, isIntelligenceWorkspace, effectiveVisibleTabIds]);
+
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState(null);
