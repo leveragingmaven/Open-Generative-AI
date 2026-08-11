@@ -9,6 +9,7 @@ import {
   getAspectRatiosForI2VModel,
 } from "../models.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { saveCreativeAsset } from "../lib/intelligence/CreativeLibrary.js";
 import { createVibeMotionStudioRequest, executeVibeMotionStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
@@ -200,6 +201,12 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
       const videoUrl = result?.output?.video || result?.url || result?.outputs?.[0];
       const requestId = result?.id || result?.request_id || pendingRequestId.current;
 
+      // Honest empty-result guard: a provider that returns no usable video URL
+      // must fail, not create a history entry, fire success, or save an asset.
+      if (!videoUrl) {
+        throw new Error("Provider returned no video");
+      }
+
       const entry = {
         id: requestId || Date.now().toString(),
         requestId,
@@ -216,6 +223,40 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
 
       const next = [entry, ...history].slice(0, 30);
       saveHistory(next);
+
+      // Save the REAL video to the shared Creative Library via the canonical
+      // Creative Asset path. Only runs once a real URL is confirmed above.
+      try {
+        const operation = editMode
+          ? "video_editing"
+          : sourceImage
+            ? "image_to_video"
+            : "motion_graphics";
+        const model = sourceImage ? "kling-v2.1-pro-i2v" : null;
+        saveCreativeAsset({
+          title: prompt.trim() || "Vibe Motion",
+          provider: "muapi",
+          ...(model ? { model } : {}),
+          requestId: requestId || null,
+          aspectRatio,
+          prompt: prompt.trim(),
+          referenceImages: sourceImage ? [sourceImage] : [],
+          generatedFiles: [videoUrl],
+          createdFromStudio: "vibe_motion",
+          subtype: "video",
+          metadata: {
+            operation,
+            mode: editMode ? "edit" : "generate",
+            duration,
+            source: "vibe_motion",
+            workspace: "vibe_motion",
+            ...(sourceImage ? { hasSourceImage: true } : {}),
+          },
+        });
+      } catch (saveErr) {
+        console.warn("Could not save Vibe Motion video to Creative Library:", saveErr);
+      }
+
       onGenerationComplete?.({ url: videoUrl, type: "video" });
     } catch (err) {
       // Detect the backend's "animation code not saved" limitation
@@ -304,9 +345,15 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
               </div>
               <div className="flex flex-col items-center gap-1">
                 <span className="text-white/80 font-semibold text-sm">
-                  {editMode ? "Remixing motion graphics…" : "Generating motion graphics…"}
+                  {editMode
+                    ? "Remixing motion graphic…"
+                    : sourceImage
+                      ? "Animating image with Kling…"
+                      : "Generating motion graphic…"}
                 </span>
-                <span className="text-white/30 text-xs">React/Remotion rendering on Modal</span>
+                <span className="text-white/30 text-xs">
+                  {sourceImage ? "image_to_video · kling-v2.1-pro-i2v" : "React/Remotion rendering on Modal"}
+                </span>
               </div>
               <div className="flex items-center gap-2 text-white/30 text-xs bg-white/[0.03] px-4 py-1.5 rounded-full border border-white/[0.05]">
                 <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
