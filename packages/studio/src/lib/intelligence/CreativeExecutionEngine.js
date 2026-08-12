@@ -65,6 +65,7 @@ export class CreativeExecutionEngine {
       assetRequestId: plan.request.metadata?.assetRequestId,
       recipe,
       projectedMemory: plan.memoryProjection,
+      knowledgeContext: plan.knowledgeContext || plan.request?.knowledgeContext,
       capabilityRequirements: plan.capabilityRequirements,
       routing: plan.routing,
       correlationId: input.correlationId,

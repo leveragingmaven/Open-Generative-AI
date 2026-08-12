@@ -10,6 +10,7 @@ export function createExecutionContext(input = {}) {
     assetRequestId: input.assetRequestId || null,
     recipe: input.recipe || null,
     projectedMemory: input.projectedMemory || null,
+    knowledgeContext: input.knowledgeContext || null,
     capabilityRequirements: Array.isArray(input.capabilityRequirements) ? [...input.capabilityRequirements] : [],
     routing: input.routing || null,
     executionMetadata: input.executionMetadata && typeof input.executionMetadata === "object" ? { ...input.executionMetadata } : {},

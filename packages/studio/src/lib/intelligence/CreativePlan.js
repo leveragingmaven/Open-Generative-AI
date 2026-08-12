@@ -3,6 +3,7 @@ export function createCreativePlan(input = {}) {
     request: input.request || null,
     recipe: input.recipe || null,
     memoryProjection: input.memoryProjection || null,
+    knowledgeContext: input.knowledgeContext || null,
     capabilityRequirements: Array.isArray(input.capabilityRequirements) ? [...input.capabilityRequirements] : [],
     routing: input.routing || null,
     executionPlan: input.executionPlan || null,

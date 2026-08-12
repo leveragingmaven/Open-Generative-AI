@@ -4,6 +4,7 @@ import { createCreativeRequest } from "./CreativeRequest.js";
 import { creativeMemoryEngine } from "./CreativeMemoryEngine.js";
 import { RecipeResolver } from "./RecipeResolver.js";
 import { deriveCreativeSkillGuidance, selectCreativeSkillsForStudio } from "../creative-brief/index.js";
+import { knowledgeContextRouter } from "./KnowledgeContextRouter.js";
 
 function normalizeRequirements(recipe, input = {}) {
   const requirements = input.capabilityRequirements || recipe.capabilityRequirements || [];
@@ -11,15 +12,23 @@ function normalizeRequirements(recipe, input = {}) {
 }
 
 export class CreativeIntelligenceEngine {
-  constructor({ memory = creativeMemoryEngine, recipes = new RecipeResolver(), router = capabilityRouter } = {}) {
+  constructor({ memory = creativeMemoryEngine, recipes = new RecipeResolver(), router = capabilityRouter, knowledgeRouter = knowledgeContextRouter } = {}) {
     this.memory = memory;
     this.recipes = recipes;
     this.router = router;
+    this.knowledgeRouter = knowledgeRouter;
   }
 
   plan(input = {}) {
     const request = createCreativeRequest(input);
     if (!request.recipeId) throw new Error("Creative request requires recipeId");
+
+    request.knowledgeContext = this.knowledgeRouter.select(input.knowledgePack, {
+      request,
+      knowledgeDomains: input.knowledgeDomains,
+      offerId: input.offerId,
+      selectedOfferId: input.selectedOfferId,
+    });
 
     const compiledRecipe = this.recipes.compile(request.recipeId, request.inputs);
     const memoryProjection = this.memory.projectMemory({
@@ -57,6 +66,7 @@ export class CreativeIntelligenceEngine {
       request,
       recipe: compiledRecipe,
       memoryProjection,
+      knowledgeContext: request.knowledgeContext,
       capabilityRequirements,
       routing,
       executionPlan: input.executionPlan || null,
