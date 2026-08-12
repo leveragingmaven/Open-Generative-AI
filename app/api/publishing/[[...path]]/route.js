@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey } from '@/src/lib/agencyMode';
 import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
+import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
+import { isAgencyModeEnabled } from '@/src/lib/agencyMode';
 
 const ROUTES = {
     'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', upstream: '/social/accounts' },
@@ -228,6 +230,8 @@ async function handleCancelScheduledPost(request, pathSegments) {
 async function handlePublishingRequest(request, { params }) {
     const auth = requireCreatorIdentity(request);
     if (auth.response) return auth.response;
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    if (rateLimit) return rateLimit;
     const slug = await params;
     const key = routeKey(slug.path || []);
     const definition = routeDefinition(key);

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
 import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
+import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
 
 function getApiKey(request) {
     const serverKey = getServerMuApiKey();
@@ -45,6 +46,8 @@ async function forwardJson(response) {
 export async function GET(request, { params }) {
     const auth = requireCreatorIdentity(request);
     if (auth.response) return auth.response;
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    if (rateLimit) return rateLimit;
     const slug = await params;
     const pathSegments = slug.path || [];
     const { search } = new URL(request.url);
@@ -67,6 +70,8 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
     const auth = requireCreatorIdentity(request);
     if (auth.response) return auth.response;
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    if (rateLimit) return rateLimit;
     const slug = await params;
     const pathSegments = slug.path || [];
     const { search } = new URL(request.url);
@@ -90,6 +95,8 @@ export async function POST(request, { params }) {
 export async function DELETE(request, { params }) {
     const auth = requireCreatorIdentity(request);
     if (auth.response) return auth.response;
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    if (rateLimit) return rateLimit;
     const slug = await params;
     const pathSegments = slug.path || [];
     const { search } = new URL(request.url);
@@ -111,6 +118,8 @@ export async function DELETE(request, { params }) {
 export async function PUT(request, { params }) {
     const auth = requireCreatorIdentity(request);
     if (auth.response) return auth.response;
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    if (rateLimit) return rateLimit;
     const slug = await params;
     const pathSegments = slug.path || [];
     const { search } = new URL(request.url);

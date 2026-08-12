@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCreatorIdentity } from "@/src/lib/creatorOsAuth";
+import { requireCreatorOsRateLimit } from "@/src/lib/creatorOsRateLimit";
+import { isAgencyModeEnabled } from "@/src/lib/agencyMode";
 
 function upstreamBase() {
   return (process.env.OPENAI_COMPATIBLE_BASE_URL || process.env.OPENAI_BASE_URL || "").replace(/\/+$/, "");
@@ -28,6 +30,8 @@ export async function PUT(request, { params }) {
 async function proxy(request, params, method) {
   const auth = requireCreatorIdentity(request);
   if (auth.response) return auth.response;
+  const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+  if (rateLimit) return rateLimit;
   const base = upstreamBase();
   if (!base) return NextResponse.json({ error: "OpenAI-compatible endpoint is not configured.", code: "missing_openai_endpoint" }, { status: 503 });
   const resolved = await params;
