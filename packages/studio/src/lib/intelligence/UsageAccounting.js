@@ -105,6 +105,7 @@ export const developmentUsageAccounting = new InMemoryUsageAccounting();
 export const usageAccounting = developmentUsageAccounting;
 
 export class UsageAccountingPort {
+  async getAllowance() { throw new Error("Usage accounting persistence adapter is required"); }
   async authorize() { throw new Error("Usage accounting persistence adapter is required"); }
   async recordUsage() { throw new Error("Usage accounting persistence adapter is required"); }
   async updateUsage() { throw new Error("Usage accounting persistence adapter is required"); }
@@ -128,6 +129,10 @@ export class PersistentUsageAccounting extends UsageAccountingPort {
       throw error;
     }
     return "default";
+  }
+
+  async getAllowance(accountId) {
+    return this.repository.getAllowance(this.accountId(accountId));
   }
 
   async authorize({ accountId, estimatedCredits = null, usage } = {}) {
