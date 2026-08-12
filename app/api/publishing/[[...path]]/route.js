@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey } from '@/src/lib/agencyMode';
+import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 
 const ROUTES = {
     'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', upstream: '/social/accounts' },
@@ -225,6 +226,8 @@ async function handleCancelScheduledPost(request, pathSegments) {
 }
 
 async function handlePublishingRequest(request, { params }) {
+    const auth = requireCreatorIdentity(request);
+    if (auth.response) return auth.response;
     const slug = await params;
     const key = routeKey(slug.path || []);
     const definition = routeDefinition(key);

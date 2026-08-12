@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
+import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 
 function cleanHeaders(request) {
     const headers = new Headers(request.headers);
@@ -54,6 +55,8 @@ async function toNextResponse(response) {
 }
 
 async function proxyMuApiRequest(request, { params }) {
+    const auth = requireCreatorIdentity(request);
+    if (auth.response) return auth.response;
     const slug = await params;
     const targetUrl = buildTargetUrl(request, slug.path);
     const headers = cleanHeaders(request);
