@@ -90,7 +90,7 @@ function StatusBadge({ status }) {
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export default function AiTwinStudio({ apiKey }) {
+export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTwinId = null, onExit = null }) {
   const integration = useMavenSyncIntegration();
   const { activeCampaign, activeCampaignId } = useActiveCampaign();
 
@@ -180,6 +180,22 @@ export default function AiTwinStudio({ apiKey }) {
     setStep(fresh.candidates?.length ? "review" : "generate");
   }, []);
 
+  // Allow the simplified Workspace to deep-link into the existing wizard for
+  // "Create My AI Twin" (autoCreate) or "Edit My Twin" (initialEditTwinId).
+  // Runs once on mount when entering this surface from the Workspace.
+  const autoOpen = useRef(false);
+  useEffect(() => {
+    if (autoOpen.current) return;
+    autoOpen.current = true;
+    if (autoCreate) {
+      startNewTwin();
+    } else if (initialEditTwinId) {
+      const target = getTwin(initialEditTwinId);
+      if (target) editTwin(target);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const goToStep = useCallback((nextStep) => {
     setStep(nextStep);
     setErrorMsg("");
@@ -214,10 +230,8 @@ export default function AiTwinStudio({ apiKey }) {
   const handleFilesSelected = useCallback(
     async (fileList) => {
       if (!fileList || !fileList.length) return;
-      if (!apiKey) {
-        setErrorMsg("An API key is required to upload reference images.");
-        return;
-      }
+      // Agency Mode intentionally passes apiKey=null; the server proxy
+      // authenticates uploads, so no browser API key is required.
       const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
       if (!files.length) {
         setErrorMsg("Please choose image files (JPG, PNG, WebP).");
@@ -493,6 +507,15 @@ export default function AiTwinStudio({ apiKey }) {
           {/* Hero */}
           <div className="mb-8 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div>
+              {onExit && (
+                <button
+                  onClick={onExit}
+                  className="mb-3 inline-flex items-center gap-1.5 text-sm text-white/45 transition hover:text-[#D4A858]"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="rotate-180"><polyline points="15 18 9 12 15 6" /></svg>
+                  Back to My Twin
+                </button>
+              )}
               <h1 className="text-3xl font-bold tracking-tight">
                 AI Twin Studio
                 <span className="ml-3 align-middle"><StatusBadge status="published" /></span>
