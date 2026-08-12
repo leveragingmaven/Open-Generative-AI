@@ -1,8 +1,10 @@
 import { capabilityRegistry } from "./CapabilityRegistry.js";
 import { providerCapabilityRegistry } from "./ProviderCapabilityRegistry.js";
 import { CAPABILITIES } from "./CapabilityTypes.js";
+import { PROVIDER_CONFIG } from "./config.js";
 
 export const PRODUCTION_CAPABILITIES = Object.freeze([
+  { id: CAPABILITIES.TEXT_GENERATION, name: "Text and LLM Generation", operation: "text_generation", inputModalities: ["text"], outputModalities: ["text"] },
   { id: CAPABILITIES.IMAGE_GENERATION, name: "Image Generation", operation: "image_generation", inputModalities: ["text"], outputModalities: ["image"] },
   { id: CAPABILITIES.IMAGE_EDITING, name: "Image Editing", operation: "image_editing", inputModalities: ["image", "text"], outputModalities: ["image"] },
   { id: CAPABILITIES.IMAGE_UPSCALING, name: "Image Upscaling", operation: "image_upscaling", inputModalities: ["image"], outputModalities: ["image"] },
@@ -29,6 +31,17 @@ export const PRODUCTION_CAPABILITIES = Object.freeze([
 ]);
 
 export const PRODUCTION_DEPLOYMENTS = Object.freeze([
+  {
+    id: "openai-compatible-text",
+    providerId: "openai",
+    logicalModel: PROVIDER_CONFIG.openai.model,
+    operation: "text_generation",
+    capabilities: [CAPABILITIES.TEXT_GENERATION, CAPABILITIES.PROMPT_ENHANCEMENT],
+    inputs: ["text"], outputs: ["text"], priority: 10, confidence: 0.8,
+    featureState: "enabled", availability: "available", health: "healthy",
+    quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "token", unitCost: null },
+    license: { commercial: true }, supports: { streaming: true }, limits: {},
+  },
   {
     id: "muapi-image-generation",
     providerId: "muapi",

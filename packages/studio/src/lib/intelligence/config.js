@@ -7,6 +7,7 @@ import {
 
 export const PROVIDER_CONFIG = Object.freeze({
   muapi: Object.freeze({ id: "muapi", name: "MuAPI", enabled: true }),
+  openai: Object.freeze({ id: "openai", name: "OpenAI-compatible", enabled: true, model: null }),
 });
 
 export const PROMPT_LIBRARY = Object.freeze({

@@ -23,6 +23,8 @@ export class CapabilityRouter {
     return {
       deploymentId: selected.deployment.id,
       providerId: selected.deployment.providerId,
+      logicalModel: selected.deployment.logicalModel,
+      operation: selected.deployment.operation,
       score: selected.score,
       reasons: selected.reasons,
       fallbackDeployments: ranked.slice(1).map((item) => item.deployment.id),

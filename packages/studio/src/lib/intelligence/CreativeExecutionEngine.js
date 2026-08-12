@@ -127,7 +127,17 @@ export class CreativeExecutionEngine {
     const started = this.start(jobId, input);
     const startedAt = Date.now();
     try {
-      const raw = await this.providerExecutor.execute({ job: started, context: input.context, routing: input.routing });
+      const context = input.context || this.persistence.getContext?.(started.metadata?.executionContextId);
+      const raw = await this.providerExecutor.execute({
+        job: started,
+        context,
+        routing: input.routing || context?.routing,
+        operation: input.operation || context?.routing?.operation || context?.recipe?.operation,
+        inputs: input.inputs || context?.recipe?.input || {},
+        payload: input.payload,
+        apiKey: input.apiKey,
+        executionMetadata: { ...(context?.executionMetadata || {}), ...(input.executionMetadata || {}) },
+      });
       return this.complete(jobId, createExecutionResult({
         success: true,
         status: raw?.status,

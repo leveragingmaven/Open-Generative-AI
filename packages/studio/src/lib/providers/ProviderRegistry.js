@@ -2,12 +2,14 @@ import { muApiProvider } from "./MuApiProvider.js";
 import { PROVIDER_IDS } from "./providerTypes.js";
 import { muApiDesignAgentProvider } from "./design/index.js";
 import { MuApiWorkflowProvider } from "./workflow/index.js";
+import { openAICompatibleProvider } from "./OpenAICompatibleProvider.js";
 
 class ProviderRegistry {
   constructor() {
     this.providers = new Map();
     this.activeProviderId = PROVIDER_IDS.MUAPI;
     this.register(muApiProvider);
+    this.register(openAICompatibleProvider);
   }
 
   register(provider) {

@@ -12,8 +12,8 @@ export class MuApiProvider extends CreativeProvider {
   }
 
   execute(request = {}) {
-    const operation = request.operation || request.capability?.operation || request.recipe?.operation;
-    const apiKey = request.apiKey || request.executionMetadata?.apiKey;
+    const operation = request.operation || request.routing?.operation || request.capability?.operation || request.recipe?.operation;
+    const apiKey = request.apiKey !== undefined ? request.apiKey : request.executionMetadata?.apiKey;
     const params = request.params || request.payload || request.inputs || {};
     const methods = {
       image_generation: "generateImage",
