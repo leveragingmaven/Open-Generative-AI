@@ -213,14 +213,15 @@ const [characterTarget, setCharacterTarget] = useState(null);
   // initialized once (getInitialTab); plain <a href> client-side navigation
   // (Create Workspace cards, dashboard links) changes slug without remounting
   // this page, so it must be re-synced here. A valid enabled studio never
-  // silently falls back to Image because of stale activeTab state.
+  // silently falls back to another workspace because of stale activeTab state.
+  // Pseudo-workspaces (home '', 'create', 'intelligence') are excluded by the
+  // effectiveVisibleTabIds check below, so no extra guard is needed here.
   useEffect(() => {
-    if (isStudioHome || isCreateWorkspace || isIntelligenceWorkspace) return;
     const firstSegment = slug[0];
     if (firstSegment && effectiveVisibleTabIds.has(firstSegment) && activeTab !== firstSegment) {
       setActiveTab(firstSegment);
     }
-  }, [slug, isStudioHome, isCreateWorkspace, isIntelligenceWorkspace, effectiveVisibleTabIds]);
+  }, [slug, effectiveVisibleTabIds, activeTab]);
 
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState(false);
@@ -268,7 +269,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
   }, [visibleTabs]);
 
 const handleTabChange = (tabId) => {
-    window.history.pushState(null, '', `/studio/${tabId}`);
+    router.push(`/studio/${tabId}`);
     setActiveTab(tabId);
   };
 
