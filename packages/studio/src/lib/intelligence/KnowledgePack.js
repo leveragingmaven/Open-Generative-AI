@@ -31,12 +31,58 @@ export function createKnowledgePack(input = {}) {
 
 export function updateKnowledgePack(current, incoming) {
   const next = createKnowledgePack(incoming);
-  return newerVersion(next, current) ? next : (current ? createKnowledgePack(current) : next);
+  return newerVersion(next, current) ? next : (current || next);
 }
 
 export class InMemoryKnowledgePackStore {
-  constructor(initialPack = null) { this.pack = initialPack ? createKnowledgePack(initialPack) : null; }
-  get() { return this.pack; }
-  replace(pack) { this.pack = updateKnowledgePack(this.pack, pack); return this.pack; }
+  // Development/test fallback only. Production packs must use a server-backed
+  // repository through PersistentKnowledgePackStore.
+  constructor(initialPack = null) {
+    this.packs = new Map();
+    if (initialPack) this.replace("default", initialPack);
+  }
+  get(accountId = "default") { return this.packs.get(accountId) || null; }
+  replace(accountId, pack) {
+    if (typeof accountId === "object") { pack = accountId; accountId = "default"; }
+    const current = this.get(accountId);
+    const next = updateKnowledgePack(current, pack);
+    this.packs.set(accountId, next);
+    return next;
+  }
 }
 
+export class KnowledgePackStorePort {
+  async getCurrentPack() { throw new Error("Knowledge Pack persistence adapter is required"); }
+  async replacePack() { throw new Error("Knowledge Pack persistence adapter is required"); }
+}
+
+export class PersistentKnowledgePackStore extends KnowledgePackStorePort {
+  constructor({ repository, requireAccountId = true } = {}) {
+    super();
+    if (!repository) throw new Error("Persistent Knowledge Pack store requires a repository");
+    this.repository = repository;
+    this.requireAccountId = requireAccountId;
+  }
+
+  accountId(accountId) {
+    if (accountId) return accountId;
+    if (this.requireAccountId) {
+      const error = new Error("Account/user identity is required for persistent Knowledge Packs");
+      error.code = "account_id_required";
+      throw error;
+    }
+    return "default";
+  }
+
+  async getCurrentPack(accountId) {
+    return this.repository.getCurrentPack(this.accountId(accountId));
+  }
+
+  async replacePack(accountId, pack) {
+    const scopedAccountId = this.accountId(accountId);
+    const current = await this.repository.getCurrentPack(scopedAccountId);
+    const next = updateKnowledgePack(current, pack);
+    if (next === current) return current;
+    return this.repository.replacePack(scopedAccountId, next);
+  }
+}

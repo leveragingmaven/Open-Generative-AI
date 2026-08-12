@@ -9,6 +9,7 @@ export function createUsageRecord(input = {}) {
     id: input.id || `usage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     requestId: input.requestId || null,
     jobId: input.jobId || null,
+    accountId: input.accountId || null,
     timestamp: input.timestamp || now(),
     capability: input.capability || null,
     operation: input.operation || null,
@@ -98,4 +99,66 @@ export class InMemoryUsageAccounting {
   listUsage() { return Array.from(this.records.values()); }
 }
 
-export const usageAccounting = new InMemoryUsageAccounting();
+// Development/test fallback only. It is process-local and is not safe for
+// production accounts or concurrent spending decisions.
+export const developmentUsageAccounting = new InMemoryUsageAccounting();
+export const usageAccounting = developmentUsageAccounting;
+
+export class UsageAccountingPort {
+  async authorize() { throw new Error("Usage accounting persistence adapter is required"); }
+  async recordUsage() { throw new Error("Usage accounting persistence adapter is required"); }
+  async updateUsage() { throw new Error("Usage accounting persistence adapter is required"); }
+  async deductCredits() { throw new Error("Usage accounting persistence adapter is required"); }
+  async listUsage() { throw new Error("Usage accounting persistence adapter is required"); }
+}
+
+export class PersistentUsageAccounting extends UsageAccountingPort {
+  constructor({ repository, requireAccountId = true } = {}) {
+    super();
+    if (!repository) throw new Error("Persistent usage accounting requires a repository");
+    this.repository = repository;
+    this.requireAccountId = requireAccountId;
+  }
+
+  accountId(accountId) {
+    if (accountId) return accountId;
+    if (this.requireAccountId) {
+      const error = new Error("Account/user identity is required for persistent usage accounting");
+      error.code = "account_id_required";
+      throw error;
+    }
+    return "default";
+  }
+
+  async authorize({ accountId, estimatedCredits = null, usage } = {}) {
+    const scopedAccountId = this.accountId(accountId || usage?.accountId);
+    if (typeof this.repository.authorizeAndReserve !== "function") {
+      const error = new Error("Usage repository must provide atomic authorizeAndReserve");
+      error.code = "atomic_authorization_required";
+      throw error;
+    }
+    return this.repository.authorizeAndReserve({ accountId: scopedAccountId, estimatedCredits, usage });
+  }
+
+  async recordUsage(record) {
+    const scoped = { ...record, accountId: this.accountId(record?.accountId) };
+    return this.repository.recordUsage(scoped);
+  }
+
+  async updateUsage(id, changes = {}) {
+    return this.repository.updateUsage(id, changes);
+  }
+
+  async deductCredits({ accountId, credits = 0, usageId, authorization } = {}) {
+    return this.repository.deductCredits({ accountId: this.accountId(accountId), credits, usageId, authorization });
+  }
+
+  async releaseAuthorization({ accountId, authorization, usageId } = {}) {
+    if (!authorization?.reservationId || typeof this.repository.releaseReservation !== "function") return null;
+    return this.repository.releaseReservation({ accountId: this.accountId(accountId), reservationId: authorization.reservationId, usageId });
+  }
+
+  async listUsage(accountId) {
+    return this.repository.listUsage({ accountId: this.accountId(accountId) });
+  }
+}

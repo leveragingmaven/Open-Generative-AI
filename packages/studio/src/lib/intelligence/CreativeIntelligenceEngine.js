@@ -25,6 +25,7 @@ export class CreativeIntelligenceEngine {
 
     request.knowledgeContext = this.knowledgeRouter.select(input.knowledgePack, {
       request,
+      accountId: request.accountId,
       knowledgeDomains: input.knowledgeDomains,
       offerId: input.offerId,
       selectedOfferId: input.selectedOfferId,

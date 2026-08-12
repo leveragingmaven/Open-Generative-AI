@@ -60,6 +60,7 @@ export class CreativeExecutionEngine {
     };
     return this.persistence.saveContext(createExecutionContext({
       requestId: plan.request.requestId,
+      accountId: plan.request.accountId,
       campaignId: plan.request.campaignId,
       planId: plan.executionPlan?.planId,
       assetRequestId: plan.request.metadata?.assetRequestId,
@@ -133,24 +134,28 @@ export class CreativeExecutionEngine {
     const routing = input.routing || context?.routing;
     const inputs = input.inputs || context?.recipe?.input || {};
     const apiKey = input.apiKey !== undefined ? input.apiKey : input.executionMetadata?.apiKey ?? context?.executionMetadata?.apiKey;
+    const accountId = input.accountId || context?.accountId || context?.executionMetadata?.accountId || null;
     const mode = credentialMode(apiKey);
     const estimatedCost = routing?.cost || null;
     const estimatedCredits = estimatedCost?.creditAmount ?? estimatedCost?.credits ?? null;
-    const usage = this.accounting?.recordUsage?.(createUsageRecord({
-      requestId: context?.requestId,
-      jobId,
-      capability: context?.capabilityRequirements?.find((item) => item.kind !== "preferred")?.id || context?.capabilityRequirements?.[0]?.id,
-      operation: input.operation || routing?.operation || context?.recipe?.operation,
-      provider: routing?.providerId,
-      model: routing?.logicalModel || inputs.model,
-      deployment: routing?.deploymentId,
-      credentialMode: mode,
-      estimatedCost,
-    })) || null;
+    let usage = null;
+    let authorization = null;
     try {
+      usage = await this.accounting?.recordUsage?.(createUsageRecord({
+        requestId: context?.requestId,
+        jobId,
+        accountId,
+        capability: context?.capabilityRequirements?.find((item) => item.kind !== "preferred")?.id || context?.capabilityRequirements?.[0]?.id,
+        operation: input.operation || routing?.operation || context?.recipe?.operation,
+        provider: routing?.providerId,
+        model: routing?.logicalModel || inputs.model,
+        deployment: routing?.deploymentId,
+        credentialMode: mode,
+        estimatedCost,
+      })) || null;
       if (mode === "agency-funded" && this.accounting?.authorize) {
-        const authorization = this.accounting.authorize({
-          accountId: input.accountId || context?.executionMetadata?.accountId,
+        authorization = await this.accounting.authorize({
+          accountId,
           estimatedCredits,
           usage,
         });
@@ -160,7 +165,7 @@ export class CreativeExecutionEngine {
             allowance: authorization.allowance,
             requiredCredits: authorization.requiredCredits,
           });
-          this.accounting?.updateUsage?.(usage?.id, { status: "rejected", error: { code: error.code, message: error.message } });
+          await this.accounting?.updateUsage?.(usage?.id, { status: "rejected", error: { code: error.code, message: error.message } });
           this.fail(jobId, normalizeExecutionError(error));
           return this.persistence.getJob(jobId);
         }
@@ -178,7 +183,7 @@ export class CreativeExecutionEngine {
       const actualCost = raw?.providerMetadata?.cost || raw?.cost || null;
       const providerUsage = raw?.providerMetadata?.usage || raw?.usage || null;
       const creditAmount = mode === "byok" ? 0 : raw?.providerMetadata?.creditAmount ?? raw?.creditAmount ?? estimatedCredits ?? 0;
-      this.accounting?.updateUsage?.(usage?.id, {
+      await this.accounting?.updateUsage?.(usage?.id, {
         status: "succeeded",
         actualCost,
         providerUsage,
@@ -186,7 +191,7 @@ export class CreativeExecutionEngine {
         chargeStatus: mode === "byok" || !creditAmount ? "not-charged" : "pending",
       });
       if (mode === "agency-funded" && creditAmount) {
-        this.accounting?.deductCredits?.({ accountId: input.accountId || context?.executionMetadata?.accountId, credits: creditAmount, usageId: usage?.id });
+        await this.accounting?.deductCredits?.({ accountId, credits: creditAmount, usageId: usage?.id, authorization });
       }
       return this.complete(jobId, createExecutionResult({
         success: true,
@@ -200,12 +205,13 @@ export class CreativeExecutionEngine {
       }));
     } catch (error) {
       const normalized = normalizeExecutionError(error);
-      this.accounting?.updateUsage?.(usage?.id, {
+      await this.accounting?.updateUsage?.(usage?.id, {
         status: "failed",
         creditAmountCharged: 0,
         chargeStatus: "not-charged",
         error: normalized,
       });
+      await this.accounting?.releaseAuthorization?.({ accountId, authorization, usageId: usage?.id });
       this.fail(jobId, normalized);
       return this.persistence.getJob(jobId);
     }

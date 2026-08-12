@@ -5,6 +5,7 @@ export function createExecutionContext(input = {}) {
   return {
     id: input.id || `context-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     requestId: input.requestId || null,
+    accountId: input.accountId || null,
     campaignId: input.campaignId || null,
     planId: input.planId || null,
     assetRequestId: input.assetRequestId || null,

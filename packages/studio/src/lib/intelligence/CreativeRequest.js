@@ -6,6 +6,7 @@ export function createCreativeRequest(input = {}) {
     organizationId: input.organizationId || null,
     workspaceId: input.workspaceId || null,
     userId: input.userId || null,
+    accountId: input.accountId || null,
     campaignId: input.campaignId || null,
     studioId: input.studioId || null,
     recipeId: input.recipeId || null,
