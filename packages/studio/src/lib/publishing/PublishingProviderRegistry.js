@@ -1,7 +1,7 @@
 import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { PUBLISHING_PROVIDER_IDS } from "./publishingTypes.js";
 
-class PublishingProviderRegistry {
+export class PublishingProviderRegistry {
   constructor() {
     this.providers = new Map();
     this.activeProviderId = PUBLISHING_PROVIDER_IDS.MUAPI;
@@ -22,6 +22,14 @@ class PublishingProviderRegistry {
 
   getActiveProvider() {
     return this.get(this.activeProviderId);
+  }
+
+  resolveForDraft(draft = {}, options = {}) {
+    return this.get(options.providerId || draft.provider || this.activeProviderId);
+  }
+
+  list() {
+    return Array.from(this.providers.values());
   }
 }
 

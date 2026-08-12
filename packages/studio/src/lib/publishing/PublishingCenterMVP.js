@@ -1,4 +1,4 @@
-import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
+import { publishingProviderRegistry } from "./PublishingProviderRegistry.js";
 import { deletePublishingDraft, readPublishingDrafts, readPublishingHistory, replacePublishingDrafts, savePublishingDraft, savePublishingJob } from "./publishingHistory.js";
 import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
 import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
@@ -8,7 +8,15 @@ import { localAssetManager } from "../intelligence/AssetManager.js";
 export class PublishingCenterMVP {
   constructor(options = {}) {
     this.storage = options.storage || localStorage;
-    this.publishingProvider = options.publishingProvider || muApiPublishingProvider;
+    this.publishingProviderRegistry = options.publishingProviderRegistry || publishingProviderRegistry;
+    this.publishingProvider = options.publishingProvider || this.publishingProviderRegistry.getActiveProvider();
+  }
+
+  providerForDraft(draft = {}, options = {}) {
+    if (options.publishingProvider) return options.publishingProvider;
+    if (draft.provider === this.publishingProvider.id) return this.publishingProvider;
+    if (options.providerId || draft.provider) return this.publishingProviderRegistry.resolveForDraft(draft, options);
+    return this.publishingProvider;
   }
 
   /**
@@ -28,7 +36,8 @@ export class PublishingCenterMVP {
    */
   createDraftFromAsset(asset, options = {}) {
     const campaignInfo = assetCampaignInfo(asset);
-    const draft = this.publishingProvider.createDraft({
+    const provider = options.publishingProvider || (options.providerId ? this.publishingProviderRegistry.get(options.providerId) : this.publishingProvider);
+    const draft = provider.createDraft({
       assetIds: [asset.id],
       assets: [asset],
       caption: asset.description || asset.title || "",
@@ -55,7 +64,7 @@ export class PublishingCenterMVP {
       throw new Error("Draft not found");
     }
 
-    const updatedDraft = this.publishingProvider.updateDraft({
+    const updatedDraft = this.providerForDraft(draft, options).updateDraft({
       ...draft,
       platforms,
       accountIds: options.accountIds || draft.accountIds,
@@ -78,7 +87,7 @@ export class PublishingCenterMVP {
       throw new Error("Draft not found");
     }
 
-    const updatedDraft = this.publishingProvider.updateDraft({
+    const updatedDraft = this.providerForDraft(draft).updateDraft({
       ...draft,
       ...updates,
       id: draft.id,
@@ -102,7 +111,8 @@ export class PublishingCenterMVP {
       throw new Error("Draft not found");
     }
 
-    const scheduledDraft = this.publishingProvider.updateDraft({
+    const provider = this.providerForDraft(draft);
+    const scheduledDraft = provider.updateDraft({
       ...draft,
       scheduledAt,
       timezone,
@@ -111,7 +121,7 @@ export class PublishingCenterMVP {
     // Save using the publishing history abstraction
     savePublishingDraft(scheduledDraft, this.storage);
     
-    return await this.publishingProvider.schedulePost(scheduledDraft, { storage: this.storage });
+    return await provider.schedulePost(scheduledDraft, { storage: this.storage });
   }
 
   /**
@@ -125,7 +135,7 @@ export class PublishingCenterMVP {
       throw new Error("Draft not found");
     }
 
-    const result = await this.publishingProvider.publishNow(draft, { storage: this.storage });
+    const result = await this.providerForDraft(draft).publishNow(draft, { storage: this.storage });
     
     // Save the job using the publishing history abstraction
     savePublishingJob(result, this.storage);
@@ -169,7 +179,9 @@ export class PublishingCenterMVP {
    * Delete a draft
    */
   deleteDraft(draftId) {
-    const result = this.publishingProvider.deleteDraft(draftId, {
+    const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
+    if (!draft) throw new Error("Draft not found");
+    const result = this.providerForDraft(draft).deleteDraft(draftId, {
       storage: this.storage,
       readDrafts: () => readPublishingDrafts(this.storage),
       writeDrafts: (drafts) => {
