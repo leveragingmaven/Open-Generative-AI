@@ -56,6 +56,7 @@ export { CreativeExecutionEngine, creativeExecutionEngine } from "./CreativeExec
 export { createExecutionResult } from "./ExecutionResult.js";
 export { EXECUTION_ERROR_KIND, normalizeExecutionError } from "./ExecutionError.js";
 export { ProviderExecutionPort, ProviderRegistryExecutionAdapter } from "./ProviderExecution.js";
+export { InMemoryUsageAccounting, createUsageRecord, credentialMode, usageAccounting } from "./UsageAccounting.js";
 export { ASSET_RELATIONSHIP_TYPES, createAssetRelationship } from "./AssetLineage.js";
 export { createAssetVersion } from "./AssetVersion.js";
 export { createAssetMetadata } from "./AssetMetadata.js";

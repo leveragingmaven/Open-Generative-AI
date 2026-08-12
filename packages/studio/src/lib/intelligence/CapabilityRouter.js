@@ -25,6 +25,7 @@ export class CapabilityRouter {
       providerId: selected.deployment.providerId,
       logicalModel: selected.deployment.logicalModel,
       operation: selected.deployment.operation,
+      cost: selected.deployment.cost ? { ...selected.deployment.cost } : null,
       score: selected.score,
       reasons: selected.reasons,
       fallbackDeployments: ranked.slice(1).map((item) => item.deployment.id),

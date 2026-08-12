@@ -12,6 +12,7 @@ import { createAssetFromExecution } from "./AssetFactory.js";
 import { InMemoryAssetRepository } from "./AssetRepository.js";
 import { AsyncExecutionCoordinator } from "./AsyncExecutionCoordinator.js";
 import { buildCreativePromptInstructions, creativeReviewMetadata } from "../creative-brief/index.js";
+import { createUsageRecord, credentialMode, usageAccounting } from "./UsageAccounting.js";
 
 function assertPlan(plan) {
   if (!plan?.request?.requestId) throw new Error("Execution requires a planned request");
@@ -20,7 +21,7 @@ function assertPlan(plan) {
 }
 
 export class CreativeExecutionEngine {
-  constructor({ persistence = new InMemoryExecutionPersistence(), idempotency = new InMemoryIdempotencyStore(), retryPolicy = new RetryPolicy(), cancellation = null, events = new ExecutionEventSink(), providerExecutor = null, assetRepository = new InMemoryAssetRepository(), asyncCoordinator = null } = {}) {
+  constructor({ persistence = new InMemoryExecutionPersistence(), idempotency = new InMemoryIdempotencyStore(), retryPolicy = new RetryPolicy(), cancellation = null, events = new ExecutionEventSink(), providerExecutor = null, assetRepository = new InMemoryAssetRepository(), asyncCoordinator = null, accounting = usageAccounting } = {}) {
     this.persistence = persistence;
     this.idempotency = idempotency;
     this.retryPolicy = retryPolicy;
@@ -29,6 +30,7 @@ export class CreativeExecutionEngine {
     this.providerExecutor = providerExecutor;
     this.assetRepository = assetRepository;
     this.asyncCoordinator = asyncCoordinator;
+    this.accounting = accounting;
   }
 
   createExecutionContext(plan, input = {}) {
@@ -126,18 +128,65 @@ export class CreativeExecutionEngine {
     if (!job) return null;
     const started = this.start(jobId, input);
     const startedAt = Date.now();
+    const context = input.context || this.persistence.getContext?.(started.metadata?.executionContextId);
+    const routing = input.routing || context?.routing;
+    const inputs = input.inputs || context?.recipe?.input || {};
+    const apiKey = input.apiKey !== undefined ? input.apiKey : input.executionMetadata?.apiKey ?? context?.executionMetadata?.apiKey;
+    const mode = credentialMode(apiKey);
+    const estimatedCost = routing?.cost || null;
+    const estimatedCredits = estimatedCost?.creditAmount ?? estimatedCost?.credits ?? null;
+    const usage = this.accounting?.recordUsage?.(createUsageRecord({
+      requestId: context?.requestId,
+      jobId,
+      capability: context?.capabilityRequirements?.find((item) => item.kind !== "preferred")?.id || context?.capabilityRequirements?.[0]?.id,
+      operation: input.operation || routing?.operation || context?.recipe?.operation,
+      provider: routing?.providerId,
+      model: routing?.logicalModel || inputs.model,
+      deployment: routing?.deploymentId,
+      credentialMode: mode,
+      estimatedCost,
+    })) || null;
     try {
-      const context = input.context || this.persistence.getContext?.(started.metadata?.executionContextId);
+      if (mode === "agency-funded" && this.accounting?.authorize) {
+        const authorization = this.accounting.authorize({
+          accountId: input.accountId || context?.executionMetadata?.accountId,
+          estimatedCredits,
+          usage,
+        });
+        if (!authorization.authorized) {
+          const error = Object.assign(new Error(authorization.message), {
+            code: authorization.code,
+            allowance: authorization.allowance,
+            requiredCredits: authorization.requiredCredits,
+          });
+          this.accounting?.updateUsage?.(usage?.id, { status: "rejected", error: { code: error.code, message: error.message } });
+          this.fail(jobId, normalizeExecutionError(error));
+          return this.persistence.getJob(jobId);
+        }
+      }
       const raw = await this.providerExecutor.execute({
         job: started,
         context,
-        routing: input.routing || context?.routing,
+        routing,
         operation: input.operation || context?.routing?.operation || context?.recipe?.operation,
-        inputs: input.inputs || context?.recipe?.input || {},
+        inputs,
         payload: input.payload,
         apiKey: input.apiKey,
         executionMetadata: { ...(context?.executionMetadata || {}), ...(input.executionMetadata || {}) },
       });
+      const actualCost = raw?.providerMetadata?.cost || raw?.cost || null;
+      const providerUsage = raw?.providerMetadata?.usage || raw?.usage || null;
+      const creditAmount = mode === "byok" ? 0 : raw?.providerMetadata?.creditAmount ?? raw?.creditAmount ?? estimatedCredits ?? 0;
+      this.accounting?.updateUsage?.(usage?.id, {
+        status: "succeeded",
+        actualCost,
+        providerUsage,
+        creditAmountCharged: 0,
+        chargeStatus: mode === "byok" || !creditAmount ? "not-charged" : "pending",
+      });
+      if (mode === "agency-funded" && creditAmount) {
+        this.accounting?.deductCredits?.({ accountId: input.accountId || context?.executionMetadata?.accountId, credits: creditAmount, usageId: usage?.id });
+      }
       return this.complete(jobId, createExecutionResult({
         success: true,
         status: raw?.status,
@@ -150,6 +199,12 @@ export class CreativeExecutionEngine {
       }));
     } catch (error) {
       const normalized = normalizeExecutionError(error);
+      this.accounting?.updateUsage?.(usage?.id, {
+        status: "failed",
+        creditAmountCharged: 0,
+        chargeStatus: "not-charged",
+        error: normalized,
+      });
       this.fail(jobId, normalized);
       return this.persistence.getJob(jobId);
     }
