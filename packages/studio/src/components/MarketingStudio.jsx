@@ -233,7 +233,7 @@ function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview
       const loaded =
         el.tagName === "IMG"
           ? el.complete && el.naturalWidth > 0
-          : el.readyState >= 1;
+          : el.readyState >= 2;
       if (!loaded) setAttempt((a) => a + 1);
     }, PRESET_MEDIA_STALL_MS);
     return () => clearTimeout(timer);
@@ -285,7 +285,7 @@ function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview
           loop
           muted
           playsInline
-          preload="metadata"
+          preload="auto"
           onError={() => setFailed(true)}
           className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500"
         />

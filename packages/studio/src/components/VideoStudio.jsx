@@ -1674,7 +1674,7 @@ const composerPreviews = (
   );
 
   const composerGenerationControls = (
-    <div ref={dropdownRef} className="flex items-center flex-nowrap gap-1 min-w-0">
+    <div ref={dropdownRef} className="flex items-center flex-wrap gap-1 min-w-0">
               {/* Model btn */}
               <div className="relative min-w-0 shrink">
                 <button
@@ -1952,7 +1952,7 @@ composerControls={composerGenerationControls}
           mediaActions={composerMediaActions}
           allowEmptySubmit
           messagesClassName="max-h-[40%] min-h-0"
-          composerClassName="flex-1 min-h-0 overflow-y-auto"
+          composerClassName="shrink-0"
         />
       </div>
 

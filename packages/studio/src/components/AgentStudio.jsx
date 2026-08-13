@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getTemplateAgents } from "../muapi.js";
+import { getPublishedAgents, getTemplateAgents } from "../muapi.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { SKILL_LIBRARY } from "../lib/skills/index.js";
@@ -260,26 +260,41 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
     refresh();
   }, [refresh]);
 
-  // Load the remote MuAPI agent template catalog (Featured templates). The proxy
-  // /api/agents/templates/agents returns the MuAPI template set. Each remote
-  // template is adapted into a local agent-profile-compatible object so it can
-  // be used by the current in-shell Create/agent runtime. Shown first in Featured.
+  // Load both existing MuAPI catalog feeds that made up the original gallery.
+  // Each remote item is adapted into a local agent-profile-compatible object so
+  // it can be used by the current in-shell Create/agent runtime. A failure of
+  // one read must not hide the other remote catalog or the local additions.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const data = await getTemplateAgents(apiKey);
-        if (cancelled || !Array.isArray(data)) return;
-        setRemoteTemplates(
-          data
-            .filter((t) => t && (t.name || t.title))
-            .map((t) => adaptRemoteTemplate(t))
-        );
-      } catch (err) {
-        // Remote catalog is best-effort; fall back to local templates only.
-        if (!cancelled && process.env.NODE_ENV !== "production") {
-          console.warn("AgentStudio: failed to load remote templates", err);
-        }
+      const results = await Promise.allSettled([
+        getTemplateAgents(apiKey),
+        getPublishedAgents(apiKey),
+      ]);
+      if (cancelled) return;
+
+      const remote = results.flatMap((result) =>
+        result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []
+      );
+      const seen = new Set();
+      setRemoteTemplates(
+        remote
+          .filter((t) => t && (t.name || t.title))
+          .map((t) => adaptRemoteTemplate(t))
+          .filter((agent) => {
+            const key = agent.remoteId || agent.name;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+      );
+
+      if (process.env.NODE_ENV !== "production") {
+        results.forEach((result) => {
+          if (result.status === "rejected") {
+            console.warn("AgentStudio: remote catalog read failed", result.reason);
+          }
+        });
       }
     })();
     return () => { cancelled = true; };

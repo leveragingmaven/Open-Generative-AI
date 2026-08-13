@@ -353,15 +353,22 @@ const handleTabChange = (tabId) => {
     }
   }, [activeTab, urlWorkflowId, idFromParams]);
 
-  // Global builder CSS cleanup when switching away from Workflows or Design Agent tabs
+  // Global builder CSS cleanup when switching away from Workflows or Design Agent tabs.
+  // The embedded Design Agent uses this marker for its own mount cleanup; a full
+  // shell reload while changing tabs races the URL/state synchronization and can
+  // send the user back to the Design Agent. Workflow builder still needs its
+  // existing reload when leaving the builder.
   useEffect(() => {
     const fromBuilder = sessionStorage.getItem("fromWorkflowBuilder");
     const fromDesignAgent = sessionStorage.getItem("fromDesignAgent");
-    
-    if ((fromBuilder && activeTab !== 'workflows') || (fromDesignAgent && activeTab !== 'design-agent')) {
+
+    if (fromBuilder && activeTab !== 'workflows') {
       sessionStorage.removeItem("fromWorkflowBuilder");
-      sessionStorage.removeItem("fromDesignAgent");
       window.location.reload();
+    }
+
+    if (fromDesignAgent && activeTab !== 'design-agent') {
+      sessionStorage.removeItem("fromDesignAgent");
     }
   }, [activeTab]);
 
