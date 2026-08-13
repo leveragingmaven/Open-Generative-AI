@@ -39,12 +39,10 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = 
           ...(group.workspaceIds || [])
             .map((id) => EXPERIENCE_WORKSPACE_BY_ID[id])
             .filter(Boolean)
-            .filter((workspace) => !enabledTabIds || !workspace.tabIds?.length || workspace.tabIds.some((id) => enabledTabIds.has(id)))
             .map((workspace) => ({ id: workspace.id, label: workspace.label, route: workspace.route, icon: TAB_BY_ID[workspace.tabIds?.[0]]?.icon })),
           ...(group.tabIds || [])
             .map((id) => TAB_BY_ID[id])
             .filter(Boolean)
-            .filter((tab) => !enabledTabIds || enabledTabIds.has(tab.id))
             .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })),
         ],
       }))
@@ -138,14 +136,10 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
       ? new Set((allowedTabIds && allowedTabIds.length > 0 ? allowedTabIds : ['image', 'marketing']))
       : null
   ), [agencyMode, allowedTabIds]);
-  const visibleTabs = useMemo(() => {
-    const filtered = TABS.filter((tab) => tab.id !== 'apps' && (!agencyMode || enabledTabIds.has(tab.id)));
-    if (!agencyMode && !filtered.some((tab) => tab.id === 'mcp-cli')) {
-      const systemTab = TABS.find((tab) => tab.id === 'mcp-cli') || { id: 'mcp-cli', label: 'System' };
-      filtered.push(systemTab);
-    }
-    return filtered;
-  }, [agencyMode, enabledTabIds]);
+  // The route registry is authoritative for destinations reachable from the
+  // global Workspaces menu. Do not turn a valid /studio/:tab URL into the
+  // first enabled tab (historically Image Studio) because of Agency config.
+  const visibleTabs = useMemo(() => TABS.filter((tab) => tab.id !== 'apps'), []);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
 const isStudioHome = slug.length === 0;
   const isCreateWorkspace = !idFromParams && slug[0] === 'create';

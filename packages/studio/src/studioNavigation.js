@@ -364,8 +364,8 @@ export const EXPERIENCE_WORKSPACES = [
     tabIds: ['ai-twin', 'agents', 'knowledge-center', 'memory'],
   },
   { id: 'campaigns', label: 'Campaigns', route: '/studio/campaigns', tabIds: ['campaigns'] },
-  { id: 'creative-library', label: 'Creative Library', route: '/studio/asset-library', tabIds: ['asset-library'] },
+  { id: 'creative-library', label: 'Creative Asset Library', route: '/studio/asset-library', tabIds: ['asset-library'] },
   { id: 'publishing', label: 'Publishing', route: '/studio/publishing', tabIds: ['publishing'] },
-  { id: 'workflow', label: 'Workflow', route: '/studio/workflows', tabIds: ['workflows'] },
+  { id: 'workflow', label: 'Workflows', route: '/studio/workflows', tabIds: ['workflows'] },
   { id: 'system', label: 'System', route: '/studio/mcp-cli', tabIds: ['mcp-cli'] },
 ];
