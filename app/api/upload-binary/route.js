@@ -1,9 +1,17 @@
 import { NextResponse } from 'next/server';
 import { validateUploadProxyTarget } from '../../../src/lib/uploadProxyTarget';
+import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
+import { invalidUploadTargetResponse, requestExceedsUploadLimit, uploadTooLargeResponse, unsupportedMediaTypeResponse, validateMultipartUpload } from '@/src/lib/uploadSecurity';
 
 export async function POST(request) {
+    const auth = requireCreatorIdentity(request);
+    if (auth.response) return auth.response;
+    if (requestExceedsUploadLimit(request)) return uploadTooLargeResponse();
     try {
         const formData = await request.formData();
+        const upload = validateMultipartUpload(formData);
+        if (upload.reason === 'upload_too_large') return uploadTooLargeResponse();
+        if (!upload.ok) return unsupportedMediaTypeResponse();
 
         // Extract the original S3 target URL we injected earlier
         const targetUrl = formData.get('x-proxy-target-url');
@@ -14,10 +22,7 @@ export async function POST(request) {
 
         const validatedTarget = validateUploadProxyTarget(targetUrl);
         if (!validatedTarget.ok) {
-            return NextResponse.json(
-                { error: 'Invalid upload target', reason: validatedTarget.reason },
-                { status: 400 }
-            );
+            return invalidUploadTargetResponse();
         }
 
         // Reconstruct the FormData for S3 (excluding our internal proxy marker)
@@ -42,12 +47,9 @@ export async function POST(request) {
         if (s3Response.ok || s3Response.status === 204) {
             return new Response(null, { status: 204 });
         } else {
-            const errorText = await s3Response.text();
-            console.error('S3 Proxy Error:', errorText);
-            return new Response(errorText, { status: s3Response.status });
+            return NextResponse.json({ error: 'Upload provider rejected the request.', code: 'upload_provider_failure' }, { status: 502 });
         }
     } catch (error) {
-        console.error('Upload Proxy Exception:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Upload provider request failed.', code: 'upload_provider_failure' }, { status: 502 });
     }
 }

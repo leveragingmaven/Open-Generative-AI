@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
+import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 
 function getApiKey(request) {
     const serverKey = getServerMuApiKey();
@@ -20,6 +21,8 @@ function cleanHeaders(request) {
 }
 
 export async function GET(request) {
+    const auth = requireCreatorIdentity(request);
+    if (auth.response) return auth.response;
     const { search } = new URL(request.url);
     const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/get_file_upload_url${search}`;
 
@@ -40,6 +43,6 @@ export async function GET(request) {
 
         return NextResponse.json(data, { status: response.status });
     } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Upload URL provider request failed.', code: 'upload_provider_failure' }, { status: 502 });
     }
 }
