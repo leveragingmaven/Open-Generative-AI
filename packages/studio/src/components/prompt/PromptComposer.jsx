@@ -222,13 +222,11 @@ export const PromptPopover = forwardRef(function PromptPopover(
 
     const stopPropagation = (event) => event.stopPropagation();
     popover.addEventListener("mousedown", stopPropagation);
-    popover.addEventListener("click", stopPropagation);
 
     return () => {
       window.removeEventListener("resize", update);
       document.removeEventListener("scroll", update, true);
       popover.removeEventListener("mousedown", stopPropagation);
-      popover.removeEventListener("click", stopPropagation);
     };
   });
 

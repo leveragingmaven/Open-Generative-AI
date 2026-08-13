@@ -347,7 +347,9 @@ export async function getTemplateAgents(apiKey) {
     });
     if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Failed to fetch template agents: ${response.status} - ${errText.slice(0, 100)}`);
+        const error = new Error(`Failed to fetch template agents: ${response.status} - ${errText.slice(0, 100)}`);
+        error.status = response.status;
+        throw error;
     }
     const data = await response.json();
     return Array.isArray(data) ? data : (data.agents || data.items || []);
@@ -372,7 +374,9 @@ export async function getPublishedAgents(apiKey) {
     });
     if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Failed to fetch featured agents: ${response.status} - ${errText.slice(0, 100)}`);
+        const error = new Error(`Failed to fetch featured agents: ${response.status} - ${errText.slice(0, 100)}`);
+        error.status = response.status;
+        throw error;
     }
     const data = await response.json();
     return Array.isArray(data) ? data : (data.agents || data.items || []);

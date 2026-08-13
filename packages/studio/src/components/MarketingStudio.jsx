@@ -205,6 +205,7 @@ const MAX_PRESET_MEDIA_ATTEMPTS = 3;
 
 function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(!isVideo);
   const [attempt, setAttempt] = useState(0);
   const mediaRef = useRef(null);
   const selected = selectedId === item.id || selectedId === item.url;
@@ -278,17 +279,22 @@ function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview
       {failed ? (
         <PresetThumbPlaceholder item={item} isVideo={isVideo} />
       ) : isVideo ? (
-        <video
-          ref={mediaRef}
-          src={item.url}
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          onError={() => setFailed(true)}
-          className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500"
-        />
+        <div className="relative aspect-[3/4] bg-[#161616]">
+          {!loaded && <PresetThumbPlaceholder item={item} isVideo />}
+          <video
+            ref={mediaRef}
+            src={item.url}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            onLoadedData={() => setLoaded(true)}
+            onCanPlay={() => setLoaded(true)}
+            onError={() => setFailed(true)}
+            className={`absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-all duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
+          />
+        </div>
       ) : (
         <img
           ref={mediaRef}

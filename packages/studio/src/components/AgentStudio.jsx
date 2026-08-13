@@ -291,7 +291,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
 
       if (process.env.NODE_ENV !== "production") {
         results.forEach((result) => {
-          if (result.status === "rejected") {
+          const status = result.status === "rejected" ? result.reason?.status : null;
+          if (result.status === "rejected" && status !== 401 && status !== 403) {
             console.warn("AgentStudio: remote catalog read failed", result.reason);
           }
         });

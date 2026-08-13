@@ -435,8 +435,12 @@ export default function VideoStudio({
   // ── control visibility ──
   const [showAr, setShowAr] = useState(true);
   const [showDuration, setShowDuration] = useState(true);
-  const [showResolution, setShowResolution] = useState(false);
-  const [showQuality, setShowQuality] = useState(false);
+  const [showResolution, setShowResolution] = useState(
+    getResolutionsForVideoModel(defaultModel.id).length > 0,
+  );
+  const [showQuality, setShowQuality] = useState(
+    getQualitiesForModel(t2vModels, defaultModel.id).length > 0,
+  );
   const [showMode, setShowMode] = useState(false);
   const [showEffect, setShowEffect] = useState(false);
 
@@ -532,6 +536,20 @@ export default function VideoStudio({
     [getCurrentModels, selectedModel],
   );
 
+  // The composer must follow the active model metadata at render time. The
+  // persisted show* flags are used for legacy state restoration, but they can
+  // be stale when a saved mode/model is restored and must not suppress controls
+  // that the active model actually supports.
+  const activeAspectRatios = getCurrentAspectRatios(selectedModel);
+  const activeDurations = getCurrentDurations(selectedModel);
+  const activeResolutions = getCurrentResolutions(selectedModel);
+  const activeQualities = getQualitiesForModel(
+    imageMode ? i2vModels : t2vModels,
+    selectedModel,
+  );
+  const activeModes = getModesForModel(selectedModel);
+  const canRenderModelControls = !v2vMode;
+
   const isMotionControlSelection = useCallback(
     (modelId, isV2v) => {
       if (!isV2v) return false;
@@ -571,7 +589,9 @@ export default function VideoStudio({
         ? getDurationsForI2VModel(modelId)
         : getDurationsForModel(modelId);
       if (durations.length > 0) {
-        setSelectedDuration(durations[0]);
+        setSelectedDuration((currentDuration) =>
+          durations.includes(currentDuration) ? currentDuration : durations[0],
+        );
         setShowDuration(true);
       } else {
         setShowDuration(false);
@@ -623,10 +643,27 @@ export default function VideoStudio({
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
-        if (data.imageMode !== undefined) setImageMode(data.imageMode);
-        if (data.v2vMode !== undefined) setV2vMode(data.v2vMode);
-        if (data.selectedModel) setSelectedModel(data.selectedModel);
-        if (data.selectedModelName) setSelectedModelName(data.selectedModelName);
+        // A persisted V2V flag is only valid while its persisted model is a
+        // V2V model and a reference video still exists. Older state could keep
+        // v2vMode=true after the reference was cleared, which hid every
+        // model-capability control in the composer on the next visit.
+        const persistedV2V = Boolean(
+          data.v2vMode &&
+          data.uploadedVideoUrl &&
+          v2vModels.some((model) => model.id === data.selectedModel),
+        );
+        const persistedI2V = Boolean(
+          data.imageMode &&
+          i2vModels.some((model) => model.id === data.selectedModel),
+        );
+        const persistedModels = persistedV2V ? v2vModels : persistedI2V ? i2vModels : t2vModels;
+        const persistedModel = persistedModels.find((model) => model.id === data.selectedModel) || persistedModels[0];
+        const persistedModelId = persistedModel?.id || defaultModel.id;
+
+        setImageMode(persistedI2V);
+        setV2vMode(persistedV2V);
+        setSelectedModel(persistedModelId);
+        setSelectedModelName(persistedModel?.name || defaultModel.name);
         if (data.selectedAr) setSelectedAr(data.selectedAr);
         if (data.selectedDuration) setSelectedDuration(data.selectedDuration);
         if (data.selectedResolution) setSelectedResolution(data.selectedResolution);
@@ -646,9 +683,9 @@ export default function VideoStudio({
 
         // Update control visibility based on restored model/mode
         applyControlsForModel(
-          data.selectedModel || defaultModel.id,
-          !!data.imageMode,
-          !!data.v2vMode
+          persistedModelId,
+          persistedI2V,
+          persistedV2V,
         );
       }
     } catch (err) {
@@ -1723,7 +1760,7 @@ const composerPreviews = (
               </div>
 
               {/* Aspect ratio btn */}
-              {showAr && (
+              {canRenderModelControls && activeAspectRatios.length > 0 && (
                 <div className="relative">
                   <button
                     type="button"
@@ -1746,7 +1783,7 @@ const composerPreviews = (
                         Aspect Ratio
                       </PromptPopoverHeader>
                       <PromptMenuList>
-                        {getCurrentAspectRatios(selectedModel).map((r) => (
+                        {activeAspectRatios.map((r) => (
                           <PromptMenuItem
                             key={r}
                             selected={selectedAr === r}
@@ -1820,7 +1857,7 @@ const composerPreviews = (
               )}
 
               {/* Duration btn */}
-              {showDuration && (
+              {canRenderModelControls && activeDurations.length > 0 && (
                 <div className="relative">
                   <button
                     type="button"
@@ -1843,7 +1880,7 @@ const composerPreviews = (
                         Duration
                       </PromptPopoverHeader>
                       <PromptMenuList>
-                        {getCurrentDurations(selectedModel).map((d) => (
+                        {activeDurations.map((d) => (
                           <PromptMenuItem
                             key={d}
                             selected={selectedDuration === d}
@@ -1863,7 +1900,7 @@ const composerPreviews = (
               )}
 
               {/* Resolution btn */}
-              {showResolution && (
+              {canRenderModelControls && activeResolutions.length > 0 && (
                 <div className="relative">
                   <button
                     type="button"
@@ -1886,7 +1923,7 @@ const composerPreviews = (
                         Resolution
                       </PromptPopoverHeader>
                       <PromptMenuList>
-                        {getCurrentResolutions(selectedModel).map((r) => (
+                        {activeResolutions.map((r) => (
                           <PromptMenuItem
                             key={r}
                             selected={selectedResolution === r}
@@ -1897,6 +1934,81 @@ const composerPreviews = (
                             }}
                           >
                             {r}
+                          </PromptMenuItem>
+                        ))}
+                      </PromptMenuList>
+                    </PromptPopover>
+                  )}
+                </div>
+              )}
+
+              {canRenderModelControls && activeQualities.length > 0 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={toggleDropdown("quality")}
+                    className={promptControlClassName({
+                      active: openDropdown === "quality",
+                      compact: true,
+                    })}
+                  >
+                    <PromptQualityIcon />
+                    <span className={PROMPT_CONTROL_LABEL_CLASS}>
+                      {selectedQuality || "Quality"}
+                    </span>
+                  </button>
+                  {openDropdown === "quality" && (
+                    <PromptPopover onClick={(e) => e.stopPropagation()}>
+                      <PromptPopoverHeader>Quality</PromptPopoverHeader>
+                      <PromptMenuList>
+                        {activeQualities.map((quality) => (
+                          <PromptMenuItem
+                            key={quality}
+                            selected={selectedQuality === quality}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedQuality(quality);
+                              setOpenDropdown(null);
+                            }}
+                          >
+                            {quality}
+                          </PromptMenuItem>
+                        ))}
+                      </PromptMenuList>
+                    </PromptPopover>
+                  )}
+                </div>
+              )}
+
+              {canRenderModelControls && activeModes.length > 0 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={toggleDropdown("mode")}
+                    className={promptControlClassName({
+                      active: openDropdown === "mode",
+                      compact: true,
+                    })}
+                  >
+                    <span className={PROMPT_CONTROL_LABEL_CLASS}>
+                      {selectedMode || "Mode"}
+                    </span>
+                  </button>
+                  {openDropdown === "mode" && (
+                    <PromptPopover onClick={(e) => e.stopPropagation()}>
+                      <PromptPopoverHeader>Mode</PromptPopoverHeader>
+                      <PromptMenuList>
+                        {activeModes.map((mode) => (
+                          <PromptMenuItem
+                            key={mode}
+                            selected={selectedMode === mode}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedMode(mode);
+                              setOpenDropdown(null);
+                            }}
+                          >
+                            {mode}
                           </PromptMenuItem>
                         ))}
                       </PromptMenuList>
@@ -1952,7 +2064,7 @@ composerControls={composerGenerationControls}
           mediaActions={composerMediaActions}
           allowEmptySubmit
           messagesClassName="max-h-[40%] min-h-0"
-          composerClassName="shrink-0"
+          composerClassName="shrink-0 min-w-0"
         />
       </div>
 

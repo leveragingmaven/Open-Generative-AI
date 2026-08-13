@@ -7592,6 +7592,18 @@ export const getDurationsForModel = (modelId) => {
   if (!model) return [5];
   const durInput = model.inputs?.duration;
   if (durInput && durInput.enum) return durInput.enum;
+  if (
+    durInput &&
+    durInput.minValue !== undefined &&
+    durInput.maxValue !== undefined &&
+    durInput.step
+  ) {
+    const vals = [];
+    for (let value = durInput.minValue; value <= durInput.maxValue; value += durInput.step) {
+      vals.push(value);
+    }
+    return vals;
+  }
   if (durInput) return [durInput.default || 5];
   return [];
 };
