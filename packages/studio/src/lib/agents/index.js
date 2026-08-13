@@ -43,6 +43,7 @@ export {
 export {
   readTwinMemoriesForAgent,
   resolveAgentTwinContext,
+  composeAgentRuntimeContext,
   buildAgentReply,
   detectRepurposeRequest,
   buildRepurposeInitiation,

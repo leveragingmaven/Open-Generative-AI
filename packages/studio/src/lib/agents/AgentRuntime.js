@@ -231,24 +231,21 @@ export function buildAgentReply(
   { campaignId = null, campaignName = null, userMessage = null, memoryEngine = creativeMemoryEngine } = {}
 ) {
   if (!agent) return "This agent has no profile yet. Add it from the Agents Studio first.";
-  const context = resolveAgentTwinContext(twin);
-  const memories = readTwinMemoriesForAgent(twin?.id, 6, memoryEngine);
-  const skills = (context.creativeDefaults || [])
-    .map((id) => {
-      try {
-        return getSkill(id);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-  const activeCampaignId = campaignId || context.campaignId;
-  const activeCampaignName = campaignName || context.campaignName;
+  const runtimeContext = composeAgentRuntimeContext(agent, twin, { campaignId, campaignName, userMessage, memoryEngine });
+  const { context, memories, skills } = runtimeContext;
+  const { specialistInstructions } = runtimeContext;
+  const activeCampaignId = runtimeContext.campaignId;
+  const activeCampaignName = runtimeContext.campaignName;
+  const userRequest = runtimeContext.userRequest;
 
   const lines = [];
   if (twin?.personality) lines.push(`*${twin.personality}*`);
   lines.push("");
-  lines.push(`I'm **${agent.name}** — your ${agent.category || "creative"} specialist. I run under **${context.name}**, your AI Twin, so I work with its identity, not a separate one.`);
+  lines.push(
+    twin
+      ? `I'm **${agent.name}** — your ${agent.category || "creative"} specialist. I run under **${context.name}**, your AI Twin, so I work with its identity, not a separate one.`
+      : `I'm **${agent.name}** — your ${agent.category || "creative"} specialist. I work directly from my agent profile.`
+  );
   if (agent.specialty) lines.push("");
   lines.push(`**Specialty**: ${agent.specialty}`);
   if (activeCampaignId || activeCampaignName) {
@@ -256,9 +253,9 @@ export function buildAgentReply(
     lines.push(`**Active campaign**: ${activeCampaignName || activeCampaignId}`);
   }
   lines.push("");
-  lines.push(`For "${userMessage?.content?.slice(0, 60) || "your brief"}", here's my plan:`);
+  lines.push(`For "${userRequest || "your brief"}", here's my plan:`);
   lines.push("");
-  const steps = buildAgentSteps({ agent, context, skills, memories, activeCampaignId });
+  const steps = buildAgentSteps({ agent, context, skills, memories, activeCampaignId, specialistInstructions });
   steps.forEach((step, i) => lines.push(`${i + 1}. ${step}`));
 
   if (agent.suggestedRecipeIds?.length) {
@@ -325,8 +322,79 @@ export function buildAgentReply(
   return lines.join("\n");
 }
 
-function buildAgentSteps({ agent, context, skills, memories, activeCampaignId }) {
+// Builds the ordered context that a future model-backed Agent execution can
+// consume without exposing specialist instructions in the user-facing reply.
+// Remote Agents use systemPrompt first; local MavenSync Agents continue to use
+// their existing prompt field or the runtime/profile fallback.
+export function composeAgentRuntimeContext(
+  agent,
+  twin,
+  { campaignId = null, campaignName = null, userMessage = null, memoryEngine = creativeMemoryEngine } = {}
+) {
+  const context = resolveAgentTwinContext(twin);
+  const memories = readTwinMemoriesForAgent(twin?.id, 6, memoryEngine);
+  const skills = (context.creativeDefaults || [])
+    .map((id) => {
+      try {
+        return getSkill(id);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const specialistInstructions = agent?.systemPrompt || agent?.prompt || null;
+  const userRequest = String(userMessage?.content || userMessage || "");
+  const profileContext = [
+    `Agent: ${agent?.name || "Agent"}`,
+    `Category: ${agent?.category || "creative"}`,
+    `Specialty: ${agent?.specialty || ""}`,
+  ].join("\n");
+  const recipeContext = Array.isArray(agent?.suggestedRecipeIds) && agent.suggestedRecipeIds.length
+    ? `Recipes: ${agent.suggestedRecipeIds.join(", ")}`
+    : null;
+  const workflowContext = Array.isArray(agent?.suggestedWorkflowIds) && agent.suggestedWorkflowIds.length
+    ? `Workflows: ${agent.suggestedWorkflowIds.join(", ")}`
+    : null;
+  const twinContext = twin
+    ? [
+        `Twin: ${context.name}`,
+        context.personality ? `Personality: ${context.personality}` : null,
+        context.brandVoice ? `Voice: ${context.brandVoice}` : null,
+        context.knowledge.length ? `Knowledge: ${context.knowledge.join(", ")}` : null,
+        memories.length ? `Memories: ${memories.map((memory) => memory.value).join("; ")}` : null,
+      ].filter(Boolean).join("\n")
+    : null;
+  const messages = [
+    specialistInstructions ? { role: "system", content: specialistInstructions } : null,
+    { role: "system", content: profileContext },
+    recipeContext || workflowContext
+      ? { role: "system", content: [recipeContext, workflowContext].filter(Boolean).join("\n") }
+      : null,
+    twinContext ? { role: "system", content: twinContext } : null,
+    { role: "user", content: userRequest },
+  ].filter(Boolean);
+  return {
+    specialistInstructions,
+    agentProfile: {
+      name: agent?.name || "Agent",
+      category: agent?.category || "creative",
+      specialty: agent?.specialty || "",
+    },
+    recipes: Array.isArray(agent?.suggestedRecipeIds) ? [...agent.suggestedRecipeIds] : [],
+    workflows: Array.isArray(agent?.suggestedWorkflowIds) ? [...agent.suggestedWorkflowIds] : [],
+    context,
+    memories,
+    skills,
+    campaignId: campaignId || context.campaignId,
+    campaignName: campaignName || context.campaignName,
+    userRequest: userRequest.slice(0, 60),
+    messages,
+  };
+}
+
+function buildAgentSteps({ agent, context, skills, memories, activeCampaignId, specialistInstructions }) {
   const steps = ["Read the brief from the active campaign (goal, offer, audience)."];
+  if (specialistInstructions) steps.push("Follow the Agent's specialist instructions for its role and expertise.");
   if (memories.length) {
     steps.push(`Pull my twin's memory: ${memories.map((m) => m.value).join("; ")}.`);
   }

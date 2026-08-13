@@ -56,13 +56,19 @@ function timeAgo(dateStr) {
 function adaptRemoteTemplate(t) {
   const name = t.name || t.title || "Remote Agent";
   const iconUrl = t.icon_url || t.image_url || t.icon || null;
+  const remoteSkills = Array.isArray(t.skills) ? t.skills : [];
   return {
+    id: t.agent_id || t.id || null,
     name,
     specialty: t.specialty || t.description || name,
     description: t.description || "",
-    prompt: t.prompt || `You are ${name}. Analyze the brief, apply your specialty together with the executing AI Twin's context, and produce the creative asset for the active campaign.`,
+    systemPrompt: t.system_prompt || t.prompt || "",
+    prompt: t.prompt || t.system_prompt || `You are ${name}. Analyze the brief, apply your specialty together with the executing AI Twin's context, and produce the creative asset for the active campaign.`,
     category: t.category || "General",
     categories: [t.category || "General", "General"],
+    welcomeMessage: t.welcome_message || "",
+    initialSuggestions: Array.isArray(t.initial_suggestions) ? t.initial_suggestions : [],
+    suggestedSkillIds: remoteSkills.map((skill) => skill?.name || skill?.id).filter(Boolean),
     iconUrl,
     metadata: iconUrl ? { iconUrl } : {},
     remoteId: t.agent_id || t.id || null,
@@ -354,14 +360,13 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   }, [onToggleHeader, isHeaderVisible]);
 
   const startChat = () => {
-    if (!openAgent || !twinId) return;
+    if (!openAgent) return;
     const campaignId = activeTwin?.campaignAccess?.[0] || activeCampaign?.id || null;
     const campaignName = campaignId ? CampaignStore.get(campaignId)?.name : activeCampaign?.name || null;
     const chat = createAgentChat({
       agentId: openAgent.id,
       agentName: openAgent.name,
-      twinId,
-      twinName: activeTwin?.name,
+      ...(twinId ? { twinId, twinName: activeTwin?.name } : {}),
       campaignId,
       campaignName,
       title: "New chat",
@@ -435,6 +440,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   // ── Chat pane ──────────────────────────────────────────────────────────────
   if (openChat && openAgent) {
     const twin = getTwin(openConversation?.twinId || twinId);
+    const agentSuggestions = Array.isArray(openAgent.initialSuggestions) ? openAgent.initialSuggestions : [];
+    const agentMessages = openConversation ? getAgentMessages(openConversation.id) : [];
     return (
       <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
         <div className="flex-shrink-0 h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/40">
@@ -477,30 +484,56 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                 <p className="text-sm text-white/50 mt-2 leading-relaxed">{openAgent.description}</p>
               </div>
               <div className="mt-2 grid grid-cols-1 gap-3 w-full max-w-md text-left">
-                <div className="bg-white/[0.03] border border-white/5 rounded-xl p-3">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-1.5">Creative Skills</p>
-                  <SkillChips ids={openAgent.suggestedSkillIds} />
-                </div>
-                <div className="bg-white/[0.03] border border-white/5 rounded-xl p-3">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-1.5">Recipes</p>
-                  <RecipeChips ids={openAgent.suggestedRecipeIds} />
-                </div>
+                {openAgent.suggestedSkillIds?.length > 0 && (
+                  <div className="bg-white/[0.03] border border-white/5 rounded-xl p-3">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-1.5">Creative Skills</p>
+                    <SkillChips ids={openAgent.suggestedSkillIds} />
+                  </div>
+                )}
+                {openAgent.suggestedRecipeIds?.length > 0 && (
+                  <div className="bg-white/[0.03] border border-white/5 rounded-xl p-3">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-1.5">Recipes</p>
+                    <RecipeChips ids={openAgent.suggestedRecipeIds} />
+                  </div>
+                )}
               </div>
               <button
                 onClick={startChat}
-                disabled={!twinId}
                 className="mt-2 px-6 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all active:scale-95 disabled:opacity-40"
               >
                 Start conversation
               </button>
               {!twinId && (
-                <p className="text-[10px] text-white/30">Create an AI Twin first — agents run under your twin.</p>
+                <p className="text-[10px] text-white/30">No AI Twin selected — this agent will run from its own profile.</p>
               )}
             </div>
           ) : (
             <>
               <div className="max-w-3xl mx-auto space-y-4">
-                {getAgentMessages(openConversation.id).map((msg, i) => {
+                {agentMessages.length === 0 && (openAgent.welcomeMessage || agentSuggestions.length > 0) && (
+                  <div className="space-y-3">
+                    {openAgent.welcomeMessage && (
+                      <div className="max-w-[85%] rounded-2xl rounded-tl-md border border-white/10 bg-[#0d0d0d] px-4 py-3 text-sm leading-relaxed text-white/85">
+                        {openAgent.welcomeMessage}
+                      </div>
+                    )}
+                    {agentSuggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {agentSuggestions.map((suggestion, index) => (
+                          <button
+                            key={`${suggestion.label || suggestion.prompt || "suggestion"}-${index}`}
+                            type="button"
+                            onClick={() => setChatDraft(suggestion.prompt || "")}
+                            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-xs text-white/75 transition-colors hover:border-[#E82070]/40 hover:text-white"
+                          >
+                            {suggestion.label || suggestion.prompt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {agentMessages.map((msg, i) => {
                   const isAssistant = msg.role === "assistant";
                   return (
                     <div key={msg.id || i} className={`flex ${isAssistant ? "justify-start" : "justify-end"}`}>
@@ -662,7 +695,9 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                   agent={agent}
                   onClick={() => {
                     const existing = agents.find((a) => a.name === agent.name);
-                    const target = existing || addFeaturedToMyAgents(agent) || createAgent(createAgentProfile(agent));
+                    const target = existing
+                      ? updateAgent(existing.id, { ...agent, id: existing.id })
+                      : addFeaturedToMyAgents(agent) || createAgent(createAgentProfile(agent));
                     openChatWithAgent(target);
                   }}
                   onAdd={() => addFeaturedToMyAgents(agent)}
