@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -22,11 +22,12 @@ function CampaignHeaderLabel() {
 }
 
 const TAB_BY_ID = Object.fromEntries(TABS.map((tab) => [tab.id, tab]));
+const EXPERIENCE_WORKSPACE_BY_ID = Object.fromEntries(EXPERIENCE_WORKSPACES.map((workspace) => [workspace.id, workspace]));
 
 // Workspaces picker — grouped destination menu built from WORKSPACE_MENU_GROUPS
 // (which references TABS ids). Icons, labels, and routes all resolve from TABS;
 // there is no second hand-maintained route list.
-function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeTabId = null }) {
+function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = null }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -34,11 +35,18 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeTabId = null }
     WORKSPACE_MENU_GROUPS
       .map((group) => ({
         ...group,
-        items: group.tabIds
-          .map((id) => TAB_BY_ID[id])
-          .filter(Boolean)
-          .filter((tab) => !enabledTabIds || enabledTabIds.has(tab.id))
-          .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })),
+        items: [
+          ...(group.workspaceIds || [])
+            .map((id) => EXPERIENCE_WORKSPACE_BY_ID[id])
+            .filter(Boolean)
+            .filter((workspace) => !enabledTabIds || !workspace.tabIds?.length || workspace.tabIds.some((id) => enabledTabIds.has(id)))
+            .map((workspace) => ({ id: workspace.id, label: workspace.label, route: workspace.route, icon: TAB_BY_ID[workspace.tabIds?.[0]]?.icon })),
+          ...(group.tabIds || [])
+            .map((id) => TAB_BY_ID[id])
+            .filter(Boolean)
+            .filter((tab) => !enabledTabIds || enabledTabIds.has(tab.id))
+            .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })),
+        ],
       }))
       .filter((group) => group.items.length)
   ), [enabledTabIds]);
@@ -93,7 +101,7 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeTabId = null }
               <p className="px-3 pt-2.5 pb-1.5 text-[10px] uppercase tracking-[0.22em] text-[#D4A858]/70">{group.label}</p>
               <div className="grid grid-cols-2 gap-1">
                 {group.items.map((item) => {
-                  const active = item.id === activeTabId;
+                  const active = item.id === activeWorkspaceId;
                   return (
                     <button
                       key={item.id}
@@ -188,6 +196,19 @@ const isStudioHome = slug.length === 0;
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialTab());
   const activeWorkspaceTab = (slug.includes('mcp-cli') || slug.includes('apps')) ? 'mcp-cli' : activeTab;
+  const activeWorkspaceId = isStudioHome
+    ? 'dashboard'
+    : isCreateWorkspace
+      ? 'create'
+      : isIntelligenceWorkspace
+        ? 'intelligence'
+        : activeWorkspaceTab === 'asset-library'
+          ? 'creative-library'
+          : activeWorkspaceTab === 'workflows'
+            ? 'workflow'
+            : activeWorkspaceTab === 'mcp-cli'
+              ? 'system'
+              : activeWorkspaceTab;
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -307,7 +328,7 @@ const handleTabChange = (tabId) => {
       return;
     }
     if (route === '/studio') {
-      handleTabChange('asset-library');
+      router.push('/studio');
       return;
     }
     const tabId = route.replace(/^\/studio\//, '');
@@ -767,7 +788,7 @@ const handleTabChange = (tabId) => {
             </div>
 
             <div className="flex-shrink-0 flex items-center gap-3">
-              <WorkspacesMenu onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} activeTabId={activeTab} />
+              <WorkspacesMenu onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} activeWorkspaceId={activeWorkspaceId} />
               {!agencyMode && (
                 <div className="hidden md:flex items-center gap-2 rounded-full border border-[#D4A858]/30 bg-[#D4A858]/[0.08] px-4 py-2 shadow-[0_0_16px_rgba(212,168,88,0.12)]" title="Balance">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#D4A858] animate-pulse" />

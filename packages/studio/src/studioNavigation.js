@@ -308,6 +308,11 @@ export const EXPLORE_APPS_TAB = TABS.find((tab) => tab.id === 'apps');
 // (single source of truth, no hand-maintained duplicate route list).
 export const WORKSPACE_MENU_GROUPS = [
   {
+    id: 'home',
+    label: 'Workspace',
+    workspaceIds: ['dashboard'],
+  },
+  {
     id: 'create',
     label: 'Create',
     tabIds: ['image', 'video', 'marketing', 'audio'],
@@ -315,22 +320,24 @@ export const WORKSPACE_MENU_GROUPS = [
   {
     id: 'ai',
     label: 'AI',
+    workspaceIds: ['intelligence'],
     tabIds: ['ai-twin', 'design-agent', 'agents'],
   },
   {
     id: 'build',
     label: 'Build & Automate',
-    tabIds: ['workflows', 'mcp-cli'],
+    workspaceIds: ['workflow', 'system'],
   },
   {
     id: 'tools',
     label: 'Tools',
-    tabIds: ['lipsync', 'ai-influencer', 'asset-library', 'character', 'cinema', 'vibe-motion', 'clipping', 'knowledge-center', 'memory'],
+    workspaceIds: ['creative-library', 'campaigns'],
+    tabIds: ['lipsync', 'ai-influencer', 'character', 'cinema', 'vibe-motion', 'clipping', 'knowledge-center', 'memory'],
   },
   {
     id: 'publish',
     label: 'Publish',
-    tabIds: ['publishing'],
+    workspaceIds: ['publishing'],
   },
 ];
 
