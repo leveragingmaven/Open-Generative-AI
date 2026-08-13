@@ -28,6 +28,13 @@ import { MavenCanvas } from "./mavensync/MavenCanvas.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 import { MavenPanel } from "./mavensync/MavenPanel.jsx";
 import MarketingMotionWorkspace from "./motion/MarketingMotionWorkspace.jsx";
+import {
+  i2vModels,
+  getAspectRatiosForI2VModel,
+  getDurationsForI2VModel,
+  getResolutionsForI2VModel,
+  getModesForModel,
+} from "../models.js";
 
 const SCROLLBAR_STYLE = `
   .custom-scrollbar-thin::-webkit-scrollbar {
@@ -119,6 +126,51 @@ const OPTIONS = {
   duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 };
 
+const MARKETING_IMAGE_FIELDS = new Set(["image_url", "images_list"]);
+const MARKETING_ADAPTER_FIELDS = new Set([
+  "prompt",
+  "aspect_ratio",
+  "duration",
+  "resolution",
+  "quality",
+  "mode",
+  "image_url",
+  "images_list",
+]);
+
+function isMarketingModelCompatible(model, { requireVideoReference = false } = {}) {
+  if (!model?.hasPrompt || !MARKETING_IMAGE_FIELDS.has(model.imageField)) return false;
+
+  const inputs = model.inputs || {};
+  const hasVideoReference = Boolean(inputs.video_files || inputs.videos_list);
+  if (requireVideoReference && !hasVideoReference) return false;
+
+  // Keep models with mandatory inputs outside the current Marketing adapter
+  // out of the selector. Optional provider-specific inputs can use their
+  // provider defaults and do not block the common image-driven workflow.
+  const unsupportedRequiredInput = Object.entries(inputs).some(([name, definition]) =>
+    definition?.required === true && !MARKETING_ADAPTER_FIELDS.has(name) && name !== model.imageField,
+  );
+  return !unsupportedRequiredInput;
+}
+
+function getMarketingModels({ requireVideoReference = false } = {}) {
+  return i2vModels.filter((model) => isMarketingModelCompatible(model, { requireVideoReference }));
+}
+
+// The existing Ads composer is the standard product/reference-image workflow.
+// Its video preset is retained as existing input state, but the current I2V
+// adapter does not send video_files; therefore video_files is not a selector
+// requirement for this mode.
+const MARKETING_MODELS = getMarketingModels();
+const DEFAULT_MARKETING_MODEL =
+  MARKETING_MODELS.find((model) => model.id === "seedance-2-vip-omni-reference") ||
+  MARKETING_MODELS[0];
+
+function getMarketingQualities(model) {
+  return model?.inputs?.quality?.enum || [];
+}
+
 // ── Components ───────────────────────────────────────────────────────────────
 
 function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = false, images = [] }) {
@@ -175,8 +227,8 @@ function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = 
 // icon is never displayed. Same aspect box as the media it replaces.
 function PresetThumbPlaceholder({ item, isVideo }) {
   return (
-    <div className={`w-full ${isVideo ? "aspect-[3/4]" : "aspect-square"} flex flex-col items-center justify-center gap-1.5 bg-[#161616]`}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <div className={`pointer-events-none w-full ${isVideo ? "aspect-[3/4]" : "aspect-square"} flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-[#E82070]/20 via-[#161616] to-[#D4A858]/20`}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isVideo ? "#D4A858" : "#E82070"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         {isVideo ? (
           <>
             <rect x="2" y="4" width="15" height="16" rx="2" />
@@ -205,10 +257,9 @@ const MAX_PRESET_MEDIA_ATTEMPTS = 3;
 
 function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview }) {
   const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(!isVideo);
   const [attempt, setAttempt] = useState(0);
   const mediaRef = useRef(null);
-  const selected = selectedId === item.id || selectedId === item.url;
+  const selected = selectedId === item.id || selectedId === item.url || selectedId === item.name;
 
   // Watchdog: if the media hasn't started loading within the stall window, bump
   // the attempt counter to force a fresh load. Skips out-of-view lazy images so
@@ -279,22 +330,7 @@ function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview
       {failed ? (
         <PresetThumbPlaceholder item={item} isVideo={isVideo} />
       ) : isVideo ? (
-        <div className="relative aspect-[3/4] bg-[#161616]">
-          {!loaded && <PresetThumbPlaceholder item={item} isVideo />}
-          <video
-            ref={mediaRef}
-            src={item.url}
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="auto"
-            onLoadedData={() => setLoaded(true)}
-            onCanPlay={() => setLoaded(true)}
-            onError={() => setFailed(true)}
-            className={`absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-all duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
-          />
-        </div>
+        <PresetThumbPlaceholder item={item} isVideo />
       ) : (
         <img
           ref={mediaRef}
@@ -412,6 +448,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   const [additionalImages, setAdditionalImages] = useState([]);
 
   const [params, setParams] = useState({
+    model: DEFAULT_MARKETING_MODEL?.id || "",
     ratio: "9:16",
     format: ASSETS.ugc[0].name,
     videoUrl: ASSETS.ugc[0].url,
@@ -429,6 +466,17 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   const [previewAvatar, setPreviewAvatar] = useState(null);
   const [slideDirection, setSlideDirection] = useState("next"); // 'next' | 'prev'
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
+
+  const marketingModel =
+    MARKETING_MODELS.find((model) => model.id === params.model) ||
+    DEFAULT_MARKETING_MODEL;
+  const marketingOptions = {
+    ratio: getAspectRatiosForI2VModel(marketingModel?.id),
+    res: getResolutionsForI2VModel(marketingModel?.id),
+    duration: getDurationsForI2VModel(marketingModel?.id),
+    quality: getMarketingQualities(marketingModel),
+    mode: getModesForModel(marketingModel?.id),
+  };
 
   const textareaRef = useRef(null);
 
@@ -515,17 +563,23 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
       const recipe = buildRecipe("marketing", { prompt: enrichedPrompt });
       const legacyParams = {
         ...recipe,
+        model: marketingModel?.id,
         aspect_ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,
+        quality: params.quality,
+        mode: params.mode,
         images_list: [productImage, avatarImage, ...additionalImages].filter(Boolean),
         video_files: params.videoUrl ? [params.videoUrl] : []
       };
       const result = await executeMarketingStudioRequest(createMarketingStudioRequest({
         prompt: enrichedPrompt,
+        model: marketingModel?.id,
         ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,
+        quality: params.quality,
+        mode: params.mode,
         images: legacyParams.images_list,
         videoFiles: legacyParams.video_files,
         apiKey,
@@ -560,6 +614,26 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   const featuredEntry = featuredIdx >= 0 ? history[featuredIdx] : null;
 
   const resetToPrompt = () => setPrompt("");
+
+  const handleMarketingModelSelect = (model) => {
+    const nextOptions = {
+      ratio: getAspectRatiosForI2VModel(model.id),
+      res: getResolutionsForI2VModel(model.id),
+      duration: getDurationsForI2VModel(model.id),
+      quality: getMarketingQualities(model),
+      mode: getModesForModel(model.id),
+    };
+    setParams((previous) => ({
+      ...previous,
+      model: model.id,
+      ratio: nextOptions.ratio.includes(previous.ratio) ? previous.ratio : nextOptions.ratio[0] || previous.ratio,
+      res: nextOptions.res.includes(previous.res) ? previous.res : nextOptions.res[0] || previous.res,
+      duration: nextOptions.duration.includes(previous.duration) ? previous.duration : nextOptions.duration[0] || previous.duration,
+      quality: nextOptions.quality.includes(previous.quality) ? previous.quality : nextOptions.quality[0] || "",
+      mode: nextOptions.mode.includes(previous.mode) ? previous.mode : nextOptions.mode[0] || "",
+    }));
+    setDropdown(null);
+  };
 
   // ── MavenSync chat messages ──────────────────────────────────────────
   const chatMessages = (() => {
@@ -641,6 +715,36 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   // Generation settings toolbar — compact horizontal row.
   const composerGenerationControls = (
     <div className="flex items-center flex-nowrap gap-1 min-w-0">
+      {/* Model */}
+      <div className="relative min-w-0 shrink">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setDropdown(dropdown === "model" ? null : "model"); }}
+          className={promptControlClassName({ active: dropdown === "model", compact: true })}
+        >
+          <span className={`${PROMPT_CONTROL_LABEL_CLASS} max-w-[120px] truncate min-w-0`}>
+            {marketingModel?.name || "Select Model"}
+          </span>
+          <PromptChevronIcon />
+        </button>
+        {dropdown === "model" && (
+          <PromptPopover onClick={(e) => e.stopPropagation()} className="min-w-[260px] max-h-[60vh]">
+            <PromptPopoverHeader>Video Model</PromptPopoverHeader>
+            <PromptMenuList>
+              {MARKETING_MODELS.map((model) => (
+                <PromptMenuItem
+                  key={model.id}
+                  selected={marketingModel?.id === model.id}
+                  onClick={() => handleMarketingModelSelect(model)}
+                >
+                  {model.name}
+                </PromptMenuItem>
+              ))}
+            </PromptMenuList>
+          </PromptPopover>
+        )}
+      </div>
+
       {/* Format */}
       <div className="relative min-w-0 shrink">
         <button
@@ -658,7 +762,10 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           title="Video Format Presets"
           items={ASSETS.ugc}
           selectedId={params.format}
-          onSelect={(item) => setParams({ ...params, format: item.name, videoUrl: item.url })}
+          onSelect={(item) => {
+            setParams({ ...params, format: item.name, videoUrl: item.url });
+            setDropdown(null);
+          }}
           onClose={() => setDropdown(null)}
           isVideo
         />
@@ -715,7 +822,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
       </div>
 
       {/* Simple controls */}
-      {['ratio', 'res', 'duration'].map(key => (
+      {['ratio', 'res', 'duration', 'quality', 'mode'].filter((key) => marketingOptions[key].length > 0).map(key => (
         <div key={key} className="relative min-w-0 shrink">
           <button
             onClick={(e) => { e.stopPropagation(); setDropdown(dropdown === key ? null : key); }}
@@ -742,7 +849,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           <SimpleDropdown
             isOpen={dropdown === key}
             title={key === "ratio" ? "Aspect Ratio" : key === "res" ? "Resolution" : "Duration"}
-            options={OPTIONS[key]}
+            options={marketingOptions[key]}
             selected={params[key]}
             onSelect={(val) => setParams({ ...params, [key]: val })}
             onClose={() => setDropdown(null)}

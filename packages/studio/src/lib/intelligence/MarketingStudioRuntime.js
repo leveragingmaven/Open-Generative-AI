@@ -24,13 +24,14 @@ export function marketingStudioRuntimeEnabled() {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
-export function createMarketingStudioRequest({ prompt, ratio, duration, resolution, images = [], videoFiles = [], apiKey } = {}) {
+export function createMarketingStudioRequest({ model, prompt, ratio, duration, resolution, images = [], videoFiles = [], apiKey } = {}) {
   return {
     recipeId: "marketing",
     studioId: "marketing",
     intent: prompt || "",
     inputs: {
       prompt: prompt || "",
+      model,
       aspect_ratio: ratio,
       duration,
       resolution,

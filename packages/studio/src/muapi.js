@@ -25,6 +25,16 @@ function jsonHeaders(key) {
     return headers;
 }
 
+function agentListFromResponse(data) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.agents)) return data.agents;
+    if (Array.isArray(data?.items)) return data.items;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.data?.agents)) return data.data.agents;
+    if (Array.isArray(data?.data?.items)) return data.data.items;
+    return [];
+}
+
 function notifyAuthRequired(status, detail) {
     if (typeof window === 'undefined') return;
     if (status !== 401 && status !== 403) return;
@@ -172,7 +182,8 @@ export async function generateI2V(apiKey, params) {
 }
 
 export async function generateMarketingStudioAd(apiKey, params) {
-    const endpoint = params.resolution === '1080p' ? 'sd-2-vip-omni-reference-1080p' : 'seedance-2-vip-omni-reference';
+    const modelInfo = getI2VModelById(params.model);
+    const endpoint = modelInfo?.endpoint || (params.resolution === '1080p' ? 'sd-2-vip-omni-reference-1080p' : 'seedance-2-vip-omni-reference');
     const payload = {
         prompt: params.prompt,
         aspect_ratio: params.aspect_ratio || '16:9',
@@ -180,6 +191,8 @@ export async function generateMarketingStudioAd(apiKey, params) {
         images_list: params.images_list || [],
         video_files: params.video_files || []
     };
+    if (params.quality) payload.quality = params.quality;
+    if (params.mode) payload.mode = params.mode;
     return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
 }
 
@@ -352,7 +365,7 @@ export async function getTemplateAgents(apiKey) {
         throw error;
     }
     const data = await response.json();
-    return Array.isArray(data) ? data : (data.agents || data.items || []);
+    return agentListFromResponse(data);
 };
 
 export async function getUserAgents(apiKey) {
@@ -364,7 +377,7 @@ export async function getUserAgents(apiKey) {
         throw new Error(`Failed to fetch user agents: ${response.status} - ${errText.slice(0, 100)}`);
     }
     const data = await response.json();
-    return Array.isArray(data) ? data : (data.agents || data.items || []);
+    return agentListFromResponse(data);
 };
 
 export async function getPublishedAgents(apiKey) {
@@ -379,7 +392,7 @@ export async function getPublishedAgents(apiKey) {
         throw error;
     }
     const data = await response.json();
-    return Array.isArray(data) ? data : (data.agents || data.items || []);
+    return agentListFromResponse(data);
 };
 
 // GET /agents/user/conversations — returns the user's chat history across all agents
