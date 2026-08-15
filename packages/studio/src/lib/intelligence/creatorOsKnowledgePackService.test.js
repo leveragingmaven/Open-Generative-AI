@@ -54,6 +54,18 @@ test("preserves a non-empty V4 offer domain during normalization", () => {
   assert.equal(normalized.domains.offer, offer);
 });
 
+test("preserves a non-empty V5 authority domain during normalization", () => {
+  const authority = "Authority Anchors\nFoundational Pattern\nCategory-of-One Positioning";
+  const normalized = normalizeHubKnowledgePack({ ...hubPack, domains: { authority } });
+
+  assert.equal(normalized.domains.authority, authority);
+});
+
+test("normalizes a missing or empty V5 authority domain to null", () => {
+  assert.equal(normalizeHubKnowledgePack(hubPack).domains.authority, null);
+  assert.equal(normalizeHubKnowledgePack({ ...hubPack, domains: { authority: "   " } }).domains.authority, null);
+});
+
 test("normalizes a missing or empty V4 offer domain to null", () => {
   assert.equal(normalizeHubKnowledgePack(hubPack).domains.offer, null);
   assert.equal(normalizeHubKnowledgePack({ ...hubPack, domains: { offer: "   " } }).domains.offer, null);

@@ -73,6 +73,9 @@ function hubMemories(pack) {
       ? knowledgeMemory("mavensync-current-offer", "offer", offer)
       : [],
     audience,
+    authority: hasContent(pack?.domains?.authority)
+      ? knowledgeMemory("mavensync-authority", "authority", pack.domains.authority)
+      : [],
   };
 }
 
@@ -317,7 +320,7 @@ export default function KnowledgeCenterStudio() {
               <h2 className="mt-1.5 text-xl font-semibold">What you can do, and how</h2>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <KnowledgeCard component="Authority" detail="Proof points, credentials, and trusted references." icon="authority" memories={null} emptyTitle="No authority content" emptyDetail="Connect references and credentials to build this section." />
+              <KnowledgeCard component="Authority" detail="Proof points, credentials, and trusted references." icon="authority" memories={memoriesFor("authority")} emptyTitle="No authority content" emptyDetail="Connect references and credentials to build this section." />
               <KnowledgeCard component="Frameworks" detail="Reusable structures that shape your work." icon="frameworks" memories={null} emptyTitle="No frameworks yet" emptyDetail="Frameworks you save or import will appear here." />
               <KnowledgeCard component="Skills" detail="Capabilities and specialized workflows available to you." icon="skills" memories={null} emptyTitle="No skills attached" emptyDetail="Import a skill to make specialized workflows available here." />
               <KnowledgeCard component="Repositories" detail="Connected sources, libraries, and reference material." icon="repositories" memories={null} emptyTitle="No repositories connected" emptyDetail="Upload a repository to reuse as source material." />

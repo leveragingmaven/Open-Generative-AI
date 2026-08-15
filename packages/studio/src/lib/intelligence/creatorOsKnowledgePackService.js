@@ -42,6 +42,7 @@ export function normalizeHubKnowledgePack(input) {
     voice: null,
     audience: hasContent(input.domains?.audience) ? clone(input.domains.audience) : null,
     offer: hasContent(input.domains?.offer) ? clone(input.domains.offer) : null,
+    authority: hasContent(input.domains?.authority) ? clone(input.domains.authority) : null,
     ip: Object.keys(ip).length ? ip : null,
     approvedClaims: null,
     resources: knowledgeCenter,
