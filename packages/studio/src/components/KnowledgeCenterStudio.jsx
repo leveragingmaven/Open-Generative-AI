@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { MemoryStorageAdapter } from "../lib/intelligence/MemoryStorageAdapter.js";
+import { getCurrentCreatorOsKnowledgePack } from "../lib/intelligence/creatorOsKnowledgePackService.js";
 import { CAMPAIGN_STATUS_LABELS, CAMPAIGN_STATUS_STYLES } from "../lib/campaigns/campaignStatus.js";
 
 function readMemories() {
@@ -20,6 +22,58 @@ function readCampaigns() {
   } catch (e) {
     return [];
   }
+}
+
+function hasContent(value) {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function extractBlueprintSection(content, heading) {
+  if (typeof content !== "string") return null;
+  const lines = content.split(/\r?\n/);
+  const headingText = `## ${heading}`.toLowerCase();
+  const start = lines.findIndex((line) => line.trim().toLowerCase() === headingText);
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line.trim()));
+  const section = lines.slice(start + 1, end < 0 ? lines.length : end).join("\n").trim();
+  return section || null;
+}
+
+function knowledgeMemory(id, type, value, metadata = {}) {
+  return [{
+    id,
+    type,
+    value,
+    scope: "workspace",
+    approved: true,
+    metadata: { source: "mavensync-hub", ...metadata },
+  }];
+}
+
+function hubMemories(pack) {
+  const blueprint = pack?.domains?.ip?.authorityBlueprint;
+  const brand = extractBlueprintSection(blueprint, "Brand DNA");
+  const voice = extractBlueprintSection(blueprint, "Voice Foundation");
+  const audience = hasContent(pack?.domains?.audience)
+    ? knowledgeMemory("mavensync-audience", "audience", pack.domains.audience)
+    : (() => {
+      const section = extractBlueprintSection(blueprint, "Audience");
+      return section ? knowledgeMemory("mavensync-audience", "audience", section) : [];
+    })();
+  const currentOffer = pack?.offers?.active?.[0];
+
+  return {
+    brand: brand ? knowledgeMemory("mavensync-brand-dna", "brand", brand, { section: "## Brand DNA" }) : [],
+    voice: voice ? knowledgeMemory("mavensync-voice-foundation", "voice", voice, { section: "## Voice Foundation" }) : [],
+    offer: currentOffer && typeof currentOffer === "object" && hasContent(currentOffer)
+      ? knowledgeMemory("mavensync-current-offer", "offer", currentOffer)
+      : [],
+    audience,
+  };
 }
 
 function SectionIcon({ type }) {
@@ -88,7 +142,7 @@ function EmptyState({ title, detail }) {
   );
 }
 
-function KnowledgeCard({ component, detail, icon, memories = null, emptyTitle, emptyDetail }) {
+function KnowledgeCard({ component, detail, icon, memories = null, emptyTitle, emptyDetail, loading = false }) {
   const hasContent = Array.isArray(memories) && memories.length > 0;
   return (
     <div className="rounded-2xl border border-[#333333] bg-[#1B1B1B] p-5 transition hover:border-[#D4A858]/50 hover:bg-[#232323]">
@@ -102,9 +156,12 @@ function KnowledgeCard({ component, detail, icon, memories = null, emptyTitle, e
         </div>
       </div>
       {hasContent ? (
-        <MemoryList memories={memories} />
+        <>
+          <MemoryList memories={memories} />
+          {loading ? <p className="mt-3 text-[10px] text-[#808080]">Checking Hub knowledge…</p> : null}
+        </>
       ) : (
-        <EmptyState title={emptyTitle} detail={emptyDetail} />
+        <EmptyState title={loading ? "Loading Hub knowledge…" : emptyTitle} detail={loading ? "Your existing local knowledge remains available while Hub knowledge loads." : emptyDetail} />
       )}
     </div>
   );
@@ -156,10 +213,36 @@ function QuickActionCard({ action, onNavigate }) {
 export default function KnowledgeCenterStudio() {
   const router = useRouter();
   const { activeCampaign, clearActiveCampaign } = useActiveCampaign();
+  const [hubPack, setHubPack] = useState(null);
+  const [hubResolved, setHubResolved] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getCurrentCreatorOsKnowledgePack()
+      .then((pack) => {
+        if (!active) return;
+        setHubPack(pack);
+        setHubResolved(true);
+      })
+      .catch(() => {
+        if (active) setHubResolved(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const memories = readMemories();
   const campaigns = readCampaigns();
   const byType = (type) => memories.filter((memory) => memory.type === type);
+  const hub = hubPack ? hubMemories(hubPack) : null;
+  const memoriesFor = (type) => {
+    if (!hubResolved || !hubPack) return byType(type);
+    // A successful Hub response is authoritative for offers. Other cards use
+    // local memory only when the Hub has no deterministic value for them.
+    if (type === "offer") return hub.offer;
+    return hub[type].length ? hub[type] : byType(type);
+  };
 
   const quickActions = [
     { label: "Import Skill", detail: "No supported skill import screen exists in this workspace yet.", icon: "skills", unavailable: true },
@@ -221,10 +304,10 @@ export default function KnowledgeCenterStudio() {
               <h2 className="mt-1.5 text-xl font-semibold">Who you are, and how you speak</h2>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <KnowledgeCard component="Brand DNA" detail="The foundational identity and story that anchors every asset." icon="brand" memories={byType("brand")} emptyTitle="No brand DNA recorded" emptyDetail="Capture who your brand is through memory or a connected framework." />
-              <KnowledgeCard component="Voice" detail="Tone, vocabulary, and language rules used across creative output." icon="voice" memories={byType("voice")} emptyTitle="No voice guidelines yet" emptyDetail="Add voice guidance to keep every asset consistent in tone." />
-              <KnowledgeCard component="Offer" detail="What you sell, the value you promise, and who it is for." icon="offer" memories={byType("offer")} emptyTitle="No offer defined" emptyDetail="Record the offer to guide campaign and messaging decisions." />
-              <KnowledgeCard component="Audience" detail="The people you create for, their needs, and interests." icon="audience" memories={byType("audience")} emptyTitle="No audience defined" emptyDetail="Attach audience knowledge to focus every creative choice." />
+              <KnowledgeCard component="Brand DNA" detail="The foundational identity and story that anchors every asset." icon="brand" memories={memoriesFor("brand")} loading={!hubResolved} emptyTitle="No brand DNA recorded" emptyDetail="Capture who your brand is through memory or a connected framework." />
+              <KnowledgeCard component="Voice" detail="Tone, vocabulary, and language rules used across creative output." icon="voice" memories={memoriesFor("voice")} loading={!hubResolved} emptyTitle="No voice guidelines yet" emptyDetail="Add voice guidance to keep every asset consistent in tone." />
+              <KnowledgeCard component="Offer" detail="What you sell, the value you promise, and who it is for." icon="offer" memories={memoriesFor("offer")} loading={!hubResolved} emptyTitle="No offer defined" emptyDetail="Record the offer to guide campaign and messaging decisions." />
+              <KnowledgeCard component="Audience" detail="The people you create for, their needs, and interests." icon="audience" memories={memoriesFor("audience")} loading={!hubResolved} emptyTitle="No audience defined" emptyDetail="Attach audience knowledge to focus every creative choice." />
             </div>
           </section>
 
