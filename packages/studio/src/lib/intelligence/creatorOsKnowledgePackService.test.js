@@ -53,6 +53,15 @@ test("retrieves the authenticated pack with credentialed CORS and normalizes it"
   assert.equal(pack.metadata.checksum, "sha256:pack");
 });
 
+test("retrieves and normalizes the production response envelope", async () => {
+  const pack = await getCurrentCreatorOsKnowledgePack({
+    fetchImpl: async () => ({ ok: true, async json() { return { success: true, pack: hubPack }; } }),
+  });
+
+  assert.equal(pack.domains.ip.authorityBlueprint, hubPack.authorityBlueprint.content);
+  assert.equal(pack.metadata.authorityBlueprintVersion, hubPack.authorityBlueprint.version);
+});
+
 test("no pack and retrieval failure preserve the existing no-knowledge behavior", async () => {
   assert.equal(normalizeHubKnowledgePack(null), null);
   assert.equal(await getCurrentCreatorOsKnowledgePack({

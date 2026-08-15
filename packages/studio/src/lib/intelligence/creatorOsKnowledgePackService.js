@@ -72,7 +72,8 @@ export async function getCurrentCreatorOsKnowledgePack({ fetchImpl = globalThis.
   try {
     const response = await fetchImpl(HUB_KNOWLEDGE_PACK_URL, { credentials: "include" });
     if (!response?.ok) return null;
-    return normalizeHubKnowledgePack(await response.json());
+    const payload = await response.json();
+    return normalizeHubKnowledgePack(payload?.pack ?? payload);
   } catch {
     return null;
   }
