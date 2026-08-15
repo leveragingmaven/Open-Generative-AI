@@ -55,7 +55,7 @@ function knowledgeMemory(id, type, value, metadata = {}) {
 }
 
 function frameworkMemories(frameworks) {
-  return (Array.isArray(frameworks) ? frameworks : []).map((framework, index) => (
+  return (Array.isArray(frameworks) ? frameworks : []).flatMap((framework, index) => (
     knowledgeMemory(`mavensync-framework-${index}`, "frameworks", framework)
   ));
 }
