@@ -64,13 +64,13 @@ function hubMemories(pack) {
       const section = extractBlueprintSection(blueprint, "Audience");
       return section ? knowledgeMemory("mavensync-audience", "audience", section) : [];
     })();
-  const currentOffer = pack?.offers?.active?.[0];
+  const offer = pack?.domains?.offer;
 
   return {
     brand: brand ? knowledgeMemory("mavensync-brand-dna", "brand", brand, { section: "## Brand DNA" }) : [],
     voice: voice ? knowledgeMemory("mavensync-voice-foundation", "voice", voice, { section: "## Voice Foundation" }) : [],
-    offer: currentOffer && typeof currentOffer === "object" && hasContent(currentOffer)
-      ? knowledgeMemory("mavensync-current-offer", "offer", currentOffer)
+    offer: hasContent(offer)
+      ? knowledgeMemory("mavensync-current-offer", "offer", offer)
       : [],
     audience,
   };

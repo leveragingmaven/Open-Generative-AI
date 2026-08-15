@@ -47,6 +47,18 @@ test("preserves a non-empty V3 audience domain during normalization", () => {
   assert.deepEqual(normalized.domains.audience, audience);
 });
 
+test("preserves a non-empty V4 offer domain during normalization", () => {
+  const offer = "Loop Breaker 11. Offer Clarity";
+  const normalized = normalizeHubKnowledgePack({ ...hubPack, domains: { offer } });
+
+  assert.equal(normalized.domains.offer, offer);
+});
+
+test("normalizes a missing or empty V4 offer domain to null", () => {
+  assert.equal(normalizeHubKnowledgePack(hubPack).domains.offer, null);
+  assert.equal(normalizeHubKnowledgePack({ ...hubPack, domains: { offer: "   " } }).domains.offer, null);
+});
+
 test("normalizes a missing audience domain to null", () => {
   const normalized = normalizeHubKnowledgePack(hubPack);
 
