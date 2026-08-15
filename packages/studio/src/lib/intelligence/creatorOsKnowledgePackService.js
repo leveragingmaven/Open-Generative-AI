@@ -40,7 +40,7 @@ export function normalizeHubKnowledgePack(input) {
   const domains = {
     brand: null,
     voice: null,
-    audience: null,
+    audience: hasContent(input.domains?.audience) ? clone(input.domains.audience) : null,
     ip: Object.keys(ip).length ? ip : null,
     approvedClaims: null,
     resources: knowledgeCenter,

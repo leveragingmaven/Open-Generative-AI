@@ -40,6 +40,19 @@ test("normalizes the Hub pack into the existing Knowledge Pack contract", () => 
   assert.equal(normalized.supplementalContext, undefined);
 });
 
+test("preserves a non-empty V3 audience domain during normalization", () => {
+  const audience = { name: "Growth-minded founders", needs: ["clarity", "momentum"] };
+  const normalized = normalizeHubKnowledgePack({ ...hubPack, domains: { audience } });
+
+  assert.deepEqual(normalized.domains.audience, audience);
+});
+
+test("normalizes a missing audience domain to null", () => {
+  const normalized = normalizeHubKnowledgePack(hubPack);
+
+  assert.equal(normalized.domains.audience, null);
+});
+
 test("retrieves the authenticated pack with credentialed CORS and normalizes it", async () => {
   let request;
   const pack = await getCurrentCreatorOsKnowledgePack({
