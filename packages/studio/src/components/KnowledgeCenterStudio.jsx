@@ -131,7 +131,15 @@ function MemoryList({ memories }) {
     <ul className="mt-3 space-y-2">
       {memories.map((memory) => (
         <li key={memory.id} className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2">
-          <p className="line-clamp-3 text-xs leading-relaxed text-[#E5E5E5]">{formatValue(memory.value)}</p>
+          {memory.type === "frameworks" && memory.value && typeof memory.value === "object" && !Array.isArray(memory.value) ? (
+            <>
+              <p className="text-xs font-medium leading-relaxed text-[#E5E5E5]">{memory.value.title}</p>
+              {memory.value.summary ? <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-[#B5B5B5]">{memory.value.summary}</p> : null}
+              {memory.value.category ? <p className="mt-1 text-[9px] uppercase tracking-wider text-[#808080]">{memory.value.category}</p> : null}
+            </>
+          ) : (
+            <p className="line-clamp-3 text-xs leading-relaxed text-[#E5E5E5]">{formatValue(memory.value)}</p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-wider text-[#808080]">
             {memory.scope ? <span className="rounded-full border border-white/10 px-1.5 py-0.5">{memory.scope}</span> : null}
             {memory.approved ? <span className="rounded-full border border-emerald-400/30 bg-emerald-400/[0.08] px-1.5 py-0.5 text-emerald-300">Approved</span> : null}
