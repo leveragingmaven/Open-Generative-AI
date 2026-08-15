@@ -54,6 +54,12 @@ function knowledgeMemory(id, type, value, metadata = {}) {
   }];
 }
 
+function frameworkMemories(frameworks) {
+  return (Array.isArray(frameworks) ? frameworks : []).map((framework, index) => (
+    knowledgeMemory(`mavensync-framework-${index}`, "frameworks", framework)
+  ));
+}
+
 function hubMemories(pack) {
   const blueprint = pack?.domains?.ip?.authorityBlueprint;
   const brand = extractBlueprintSection(blueprint, "Brand DNA");
@@ -76,6 +82,7 @@ function hubMemories(pack) {
     authority: hasContent(pack?.domains?.authority)
       ? knowledgeMemory("mavensync-authority", "authority", pack.domains.authority)
       : [],
+    frameworks: frameworkMemories(pack?.domains?.frameworks),
   };
 }
 
@@ -321,7 +328,7 @@ export default function KnowledgeCenterStudio() {
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <KnowledgeCard component="Authority" detail="Proof points, credentials, and trusted references." icon="authority" memories={memoriesFor("authority")} emptyTitle="No authority content" emptyDetail="Connect references and credentials to build this section." />
-              <KnowledgeCard component="Frameworks" detail="Reusable structures that shape your work." icon="frameworks" memories={null} emptyTitle="No frameworks yet" emptyDetail="Frameworks you save or import will appear here." />
+              <KnowledgeCard component="Frameworks" detail="Reusable structures that shape your work." icon="frameworks" memories={memoriesFor("frameworks")} loading={!hubResolved} emptyTitle="No frameworks yet" emptyDetail="Frameworks you save or import will appear here." />
               <KnowledgeCard component="Skills" detail="Capabilities and specialized workflows available to you." icon="skills" memories={null} emptyTitle="No skills attached" emptyDetail="Import a skill to make specialized workflows available here." />
               <KnowledgeCard component="Repositories" detail="Connected sources, libraries, and reference material." icon="repositories" memories={null} emptyTitle="No repositories connected" emptyDetail="Upload a repository to reuse as source material." />
             </div>

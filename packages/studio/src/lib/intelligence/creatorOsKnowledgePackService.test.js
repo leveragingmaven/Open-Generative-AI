@@ -23,6 +23,11 @@ const hubPack = {
   checksum: "sha256:pack",
 };
 
+const frameworks = [
+  { title: "Signal Story", category: "positioning", summary: "A concise story structure." },
+  { title: "Offer Ladder", category: "offer", summary: "A progression of offer commitments." },
+];
+
 test("normalizes the Hub pack into the existing Knowledge Pack contract", () => {
   const normalized = normalizeHubKnowledgePack(hubPack);
 
@@ -59,6 +64,19 @@ test("preserves a non-empty V5 authority domain during normalization", () => {
   const normalized = normalizeHubKnowledgePack({ ...hubPack, domains: { authority } });
 
   assert.equal(normalized.domains.authority, authority);
+});
+
+test("preserves V6 Frameworks entries during normalization", () => {
+  const normalized = normalizeHubKnowledgePack({ ...hubPack, domains: { frameworks } });
+
+  assert.deepEqual(normalized.domains.frameworks, frameworks);
+  assert.notEqual(normalized.domains.frameworks, frameworks);
+  assert.notEqual(normalized.domains.frameworks[0], frameworks[0]);
+});
+
+test("normalizes missing or empty V6 Frameworks safely", () => {
+  assert.deepEqual(normalizeHubKnowledgePack(hubPack).domains.frameworks, []);
+  assert.deepEqual(normalizeHubKnowledgePack({ ...hubPack, domains: { frameworks: [] } }).domains.frameworks, []);
 });
 
 test("normalizes a missing or empty V5 authority domain to null", () => {

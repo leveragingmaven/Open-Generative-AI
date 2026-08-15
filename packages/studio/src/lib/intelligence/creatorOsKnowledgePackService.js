@@ -32,6 +32,7 @@ export function normalizeHubKnowledgePack(input) {
   const supplemental = input.supplementalContext || {};
   const ipLibrary = normalizeArray(supplemental.ipLibrary);
   const knowledgeCenter = normalizeArray(supplemental.knowledgeCenter);
+  const frameworks = normalizeArray(input.domains?.frameworks);
   const ip = {};
 
   if (hasContent(blueprint?.content)) ip.authorityBlueprint = blueprint.content;
@@ -43,6 +44,7 @@ export function normalizeHubKnowledgePack(input) {
     audience: hasContent(input.domains?.audience) ? clone(input.domains.audience) : null,
     offer: hasContent(input.domains?.offer) ? clone(input.domains.offer) : null,
     authority: hasContent(input.domains?.authority) ? clone(input.domains.authority) : null,
+    frameworks,
     ip: Object.keys(ip).length ? ip : null,
     approvedClaims: null,
     resources: knowledgeCenter,
