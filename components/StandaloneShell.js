@@ -497,125 +497,97 @@ const handleTabChange = (tabId) => {
     isActive ? "ms-creative-studio h-full w-full" : "hidden"
   );
 
-  const studioContent = (
-    <>
-      {isStudioHome && <MavenSyncDashboard />}
-      {isCreateWorkspace && <MavenSyncCreateWorkspace />}
-      {isIntelligenceWorkspace && <MavenSyncIntelligenceWorkspace />}
-      {visibleTabIds.has('image') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'image' && !isCreateWorkspace && !isIntelligenceWorkspace)}>
-          <ImageStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />
-        </div>
-      )}
-      {visibleTabIds.has('video') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'video')}>
-          <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} repurposeTarget={repurposeTarget} onRepurposeTargetHandled={() => setRepurposeTarget(null)} />
-        </div>
-      )}
-      {visibleTabIds.has('clipping') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'clipping')}>
-          <ClippingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />
-        </div>
-      )}
-      {visibleTabIds.has('vibe-motion') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'vibe-motion')}>
-          <VibeMotionStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />
-        </div>
-      )}
-      {visibleTabIds.has('lipsync') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'lipsync')}>
-          <LipSyncStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />
-        </div>
-      )}
-      {visibleTabIds.has('body-swap') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'body-swap')}>
-          <RecastStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />
-        </div>
-      )}
-      {visibleTabIds.has('cinema') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'cinema')}>
-          <CinemaStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />
-        </div>
-      )}
-      {visibleTabIds.has('audio') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'audio')}>
-          <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />
-        </div>
-      )}
-      {visibleTabIds.has('marketing') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'marketing')}>
-          <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />
-        </div>
-      )}
-      {visibleTabIds.has('character') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'character')}>
-          <CharacterStudio apiKey={studioApiKey} characterTarget={characterTarget} onCharacterTargetHandled={() => setCharacterTarget(null)} />
-        </div>
-      )}
-      {visibleTabIds.has('workflows') && (
-        <div className={activeWorkspaceTab === 'workflows' ? "h-full w-full" : "hidden"}>
-          <WorkflowStudio apiKey={studioApiKey} active={activeWorkspaceTab === 'workflows'} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-        </div>
-      )}
-      {visibleTabIds.has('agents') && (
-        <div className={activeWorkspaceTab === 'agents' ? "h-full w-full" : "hidden"}>
-          <AgentStudio apiKey={studioApiKey} active={activeWorkspaceTab === 'agents'} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-        </div>
-      )}
-      {visibleTabIds.has('design-agent') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'design-agent')}>
-          {activeWorkspaceTab === 'design-agent' && (
-            <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-          )}
-        </div>
-      )}
-      {visibleTabIds.has('apps') && (
-        <div className={activeWorkspaceTab === 'apps' ? "h-full w-full" : "hidden"}>
-          <AppsStudio apiKey={studioApiKey} />
-        </div>
-      )}
-      {(visibleTabIds.has('mcp-cli') || activeWorkspaceTab === 'mcp-cli') && (
-        <div className={activeWorkspaceTab === 'mcp-cli' ? "h-full w-full" : "hidden"}>
-          <McpCliStudio />
-        </div>
-      )}
-      {visibleTabIds.has('ai-twin') && (
-        <div className={activeWorkspaceTab === 'ai-twin' ? "h-full w-full" : "hidden"}>
-          <AiTwinTab apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} twinTarget={twinTarget} onTwinTargetHandled={() => setTwinTarget(null)} />
-        </div>
-      )}
-      {visibleTabIds.has('ai-influencer') && (
-        <div className={creativeStudioFrameClass(activeWorkspaceTab === 'ai-influencer')}>
-          <AiInfluencerStudio apiKey={studioApiKey} />
-        </div>
-      )}
-      {visibleTabIds.has('publishing') && (
-        <div className={activeWorkspaceTab === 'publishing' ? "h-full w-full" : "hidden"}>
-          <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />
-        </div>
-      )}
-      {effectiveVisibleTabIds.has('asset-library') && !isStudioHome && (
-        <div className={activeWorkspaceTab === 'asset-library' ? "h-full w-full" : "hidden"}>
-          <AssetLibraryStudio />
-        </div>
-      )}
-      {visibleTabIds.has('campaigns') && (
-        <div className={activeWorkspaceTab === 'campaigns' ? "h-full w-full" : "hidden"}>
-          <CampaignWorkspace onNavigate={handleTabChange} />
-        </div>
-      )}
-      {visibleTabIds.has('knowledge-center') && (
-        <div className={activeWorkspaceTab === 'knowledge-center' ? "h-full w-full" : "hidden"}>
-          <KnowledgeCenterStudio />
-        </div>
-      )}
-      {visibleTabIds.has('memory') && (
-        <div className={activeWorkspaceTab === 'memory' ? "h-full w-full" : "hidden"}>
-          <CreativeMemoryStudio />
-        </div>
-      )}
-    </>
-  );
+  let activeWorkspaceContent = null;
+  if (isStudioHome) {
+    activeWorkspaceContent = <MavenSyncDashboard />;
+  } else if (isCreateWorkspace) {
+    activeWorkspaceContent = <MavenSyncCreateWorkspace />;
+  } else if (isIntelligenceWorkspace) {
+    activeWorkspaceContent = <MavenSyncIntelligenceWorkspace />;
+  } else {
+    switch (activeWorkspaceTab) {
+      case 'image':
+        if (visibleTabIds.has('image')) activeWorkspaceContent = <ImageStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('image')} onGenerationError={makeErrorCallback('image')} />;
+        break;
+      case 'video':
+        if (visibleTabIds.has('video')) activeWorkspaceContent = <VideoStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('video')} onGenerationError={makeErrorCallback('video')} repurposeTarget={repurposeTarget} onRepurposeTargetHandled={() => setRepurposeTarget(null)} />;
+        break;
+      case 'clipping':
+        if (visibleTabIds.has('clipping')) activeWorkspaceContent = <ClippingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('clipping')} onGenerationError={makeErrorCallback('clipping')} />;
+        break;
+      case 'vibe-motion':
+        if (visibleTabIds.has('vibe-motion')) activeWorkspaceContent = <VibeMotionStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('vibe-motion')} onGenerationError={makeErrorCallback('vibe-motion')} />;
+        break;
+      case 'lipsync':
+        if (visibleTabIds.has('lipsync')) activeWorkspaceContent = <LipSyncStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('lipsync')} onGenerationError={makeErrorCallback('lipsync')} />;
+        break;
+      case 'body-swap':
+        if (visibleTabIds.has('body-swap')) activeWorkspaceContent = <RecastStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('body-swap')} onGenerationError={makeErrorCallback('body-swap')} />;
+        break;
+      case 'cinema':
+        if (visibleTabIds.has('cinema')) activeWorkspaceContent = <CinemaStudio apiKey={studioApiKey} onGenerationComplete={makeSuccessCallback('cinema')} onGenerationError={makeErrorCallback('cinema')} />;
+        break;
+      case 'audio':
+        if (visibleTabIds.has('audio')) activeWorkspaceContent = <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />;
+        break;
+      case 'marketing':
+        if (visibleTabIds.has('marketing')) activeWorkspaceContent = <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />;
+        break;
+      case 'character':
+        if (visibleTabIds.has('character')) activeWorkspaceContent = <CharacterStudio apiKey={studioApiKey} characterTarget={characterTarget} onCharacterTargetHandled={() => setCharacterTarget(null)} />;
+        break;
+      case 'workflows':
+        if (visibleTabIds.has('workflows')) activeWorkspaceContent = <WorkflowStudio apiKey={studioApiKey} active isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
+        break;
+      case 'agents':
+        if (visibleTabIds.has('agents')) activeWorkspaceContent = <AgentStudio apiKey={studioApiKey} active isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
+        break;
+      case 'design-agent':
+        if (visibleTabIds.has('design-agent')) activeWorkspaceContent = <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
+        break;
+      case 'apps':
+        if (visibleTabIds.has('apps')) activeWorkspaceContent = <AppsStudio apiKey={studioApiKey} />;
+        break;
+      case 'mcp-cli':
+        if (visibleTabIds.has('mcp-cli') || activeWorkspaceTab === 'mcp-cli') activeWorkspaceContent = <McpCliStudio />;
+        break;
+      case 'ai-twin':
+        if (visibleTabIds.has('ai-twin')) activeWorkspaceContent = <AiTwinTab apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} twinTarget={twinTarget} onTwinTargetHandled={() => setTwinTarget(null)} />;
+        break;
+      case 'ai-influencer':
+        if (visibleTabIds.has('ai-influencer')) activeWorkspaceContent = <AiInfluencerStudio apiKey={studioApiKey} />;
+        break;
+      case 'publishing':
+        if (visibleTabIds.has('publishing')) activeWorkspaceContent = <PublishingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('publishing')} onGenerationError={makeErrorCallback('publishing')} />;
+        break;
+      case 'asset-library':
+        if (effectiveVisibleTabIds.has('asset-library') && !isStudioHome) activeWorkspaceContent = <AssetLibraryStudio />;
+        break;
+      case 'campaigns':
+        if (visibleTabIds.has('campaigns')) activeWorkspaceContent = <CampaignWorkspace onNavigate={handleTabChange} />;
+        break;
+      case 'knowledge-center':
+        if (visibleTabIds.has('knowledge-center')) activeWorkspaceContent = <KnowledgeCenterStudio />;
+        break;
+      case 'memory':
+        if (visibleTabIds.has('memory')) activeWorkspaceContent = <CreativeMemoryStudio />;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const usesCreativeStudioFrame = new Set([
+    'image', 'video', 'clipping', 'vibe-motion', 'lipsync', 'body-swap',
+    'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer',
+  ]).has(activeWorkspaceTab);
+  const studioContent = (isStudioHome || isCreateWorkspace || isIntelligenceWorkspace)
+    ? activeWorkspaceContent
+    : (
+      <div className={usesCreativeStudioFrame ? creativeStudioFrameClass(Boolean(activeWorkspaceContent)) : "h-full w-full"}>
+        {activeWorkspaceContent}
+      </div>
+    );
 
   const dragOverlay = isDragging && (
     <div className="fixed inset-0 z-[100] bg-[#E82070]/10 backdrop-blur-md border-4 border-dashed border-[#E82070]/50 flex items-center justify-center pointer-events-none transition-all duration-300">
