@@ -37,10 +37,10 @@ export class KnowledgeContextRouter {
       resources: include("resources", false) ? [...pack.domains.resources] : [],
       visualDirection: include("visualDirection", BRAND_TERMS.test(text)) ? pack.domains.visualDirection : null,
       selectedOffer: selectedOffer(pack, input, offerRelevant),
+      metadata: { ...pack.metadata },
     };
     return context;
   }
 }
 
 export const knowledgeContextRouter = new KnowledgeContextRouter();
-

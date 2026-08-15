@@ -6,6 +6,7 @@ import { InMemoryAssetStorage } from "./InMemoryAssetStorage.js";
 import { ProviderRegistryExecutionAdapter } from "./ProviderExecution.js";
 import { providerRegistry as defaultProviderRegistry } from "../providers/ProviderRegistry.js";
 import { InMemoryExecutionPersistence } from "./ExecutionPersistence.js";
+import { prepareKnowledgePackRequest } from "./creatorOsKnowledgePackService.js";
 
 const enabled = (name) => ["1", "true", "yes", "on"].includes(String(process?.env?.[name] || "").toLowerCase());
 
@@ -27,7 +28,8 @@ export async function executeMediaStudioRequest(request, { legacyExecute, runtim
       assetStorage: new InMemoryAssetStorage(),
       ...runtimeOptions,
     });
-    const plan = runtime.intelligence.plan({ ...request, capabilityRequirements: [{ id: request.capability, kind: "required" }] });
+    const plannedRequest = await prepareKnowledgePackRequest(request);
+    const plan = runtime.intelligence.plan({ ...plannedRequest, capabilityRequirements: [{ id: request.capability, kind: "required" }] });
     const context = runtime.execution.createExecutionContext(plan);
     const job = runtime.execution.createJob(context);
     runtime.execution.queue(job.id);

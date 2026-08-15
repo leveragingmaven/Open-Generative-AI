@@ -13,6 +13,26 @@ import { InMemoryAssetRepository } from "./AssetRepository.js";
 import { AsyncExecutionCoordinator } from "./AsyncExecutionCoordinator.js";
 import { buildCreativePromptInstructions, creativeReviewMetadata } from "../creative-brief/index.js";
 import { createUsageRecord, credentialMode, usageAccounting } from "./UsageAccounting.js";
+import { assembleModelRequest } from "./ModelRequestAssembler.js";
+
+const IDENTITY_CONTEXT_DOMAINS = [
+  "brand",
+  "voice",
+  "audience",
+  "ip",
+  "approvedClaims",
+  "resources",
+  "visualDirection",
+];
+
+function selectedIdentityContext(knowledgeContext) {
+  if (!knowledgeContext || typeof knowledgeContext !== "object") return {};
+  return Object.fromEntries(
+    IDENTITY_CONTEXT_DOMAINS
+      .filter((domain) => knowledgeContext[domain] != null)
+      .map((domain) => [domain, knowledgeContext[domain]])
+  );
+}
 
 function assertPlan(plan) {
   if (!plan?.request?.requestId) throw new Error("Execution requires a planned request");
@@ -58,6 +78,43 @@ export class CreativeExecutionEngine {
       ...(input.metadata || {}),
       ...(review ? { creativeReview: review } : {}),
     };
+    const request = plan.request || {};
+    const selectedKnowledgeContext = plan.knowledgeContext || request.knowledgeContext || null;
+    const conversational = input.conversational === true
+      || request.conversational === true
+      || request.metadata?.conversational === true;
+    const assembled = assembleModelRequest({
+      request,
+      prompt: recipe?.input?.prompt ?? request.inputs?.prompt ?? request.intent,
+      input: recipe?.input || request.inputs || {},
+      references: request.references,
+      identityContext: selectedIdentityContext(selectedKnowledgeContext),
+      selectedOffer: selectedKnowledgeContext?.selectedOffer || null,
+      metadata: selectedKnowledgeContext?.packVersion != null
+        ? {
+            sources: selectedKnowledgeContext.packId ? { identity: selectedKnowledgeContext.packId } : {},
+            versions: { identity: selectedKnowledgeContext.packVersion },
+            knowledgePack: selectedKnowledgeContext.metadata || {},
+          }
+        : {},
+      campaign: input.campaign || plan.campaign || null,
+      projectContext: input.projectContext || plan.projectContext || null,
+      memoryProjection: plan.memoryProjection,
+      selectedRecipe: recipe,
+      selectedSkill: input.selectedSkill || plan.selectedSkill || null,
+      selectedAgent: input.selectedAgent || plan.selectedAgent || null,
+      selectedWorkflow: input.selectedWorkflow || plan.selectedWorkflow || null,
+      ...(conversational
+        ? {
+            conversational: true,
+            messages: input.messages || input.conversation?.messages || [],
+            maxInputCharacters: input.maxInputCharacters,
+            reservedOutputCharacters: input.reservedOutputCharacters,
+            requiredContextCharacters: input.requiredContextCharacters,
+          }
+        : {}),
+    });
+    executionMetadata.modelRequestDiagnostics = assembled.diagnostics;
     return this.persistence.saveContext(createExecutionContext({
       requestId: plan.request.requestId,
       accountId: plan.request.accountId,
@@ -72,6 +129,7 @@ export class CreativeExecutionEngine {
       correlationId: input.correlationId,
       idempotencyKey: input.idempotencyKey || plan.request.idempotencyKey,
       policy: input.policy,
+      modelRequest: assembled.modelRequest,
       executionMetadata,
     }));
   }

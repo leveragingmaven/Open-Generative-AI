@@ -10,6 +10,7 @@ export function createExecutionContext(input = {}) {
     planId: input.planId || null,
     assetRequestId: input.assetRequestId || null,
     recipe: input.recipe || null,
+    modelRequest: input.modelRequest || null,
     projectedMemory: input.projectedMemory || null,
     knowledgeContext: input.knowledgeContext || null,
     capabilityRequirements: Array.isArray(input.capabilityRequirements) ? [...input.capabilityRequirements] : [],

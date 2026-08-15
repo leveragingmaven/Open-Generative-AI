@@ -41,6 +41,7 @@ export { CAPABILITIES, CAPABILITY_KINDS, createCapabilityDefinition, createCapab
 export { CapabilityRegistry, capabilityRegistry } from "./CapabilityRegistry.js";
 export { ProviderCapabilityRegistry, providerCapabilityRegistry } from "./ProviderCapabilityRegistry.js";
 export { getEligibleDeployments } from "./CapabilityMatcher.js";
+export { getEligibleModelCandidates } from "./ModelCandidateEligibility.js";
 export { scoreDeployment, rankDeployments } from "./CapabilityScorer.js";
 export { CapabilityRouter, capabilityRouter } from "./CapabilityRouter.js";
 export { createCreativeRequest } from "./CreativeRequest.js";
@@ -78,6 +79,7 @@ export { CheckpointRepository, InMemoryCheckpointRepository } from "./Checkpoint
 export { AsyncProviderExecutionPort, isTerminalProviderStatus, normalizeAsyncSubmission } from "./AsyncProviderExecution.js";
 export { AsyncExecutionCoordinator } from "./AsyncExecutionCoordinator.js";
 export { createImageStudioRuntime, createImageStudioRequest } from "./ImageStudioRuntime.js";
+export { HUB_KNOWLEDGE_PACK_URL, getCurrentCreatorOsKnowledgePack, normalizeHubKnowledgePack, prepareKnowledgePackRequest } from "./creatorOsKnowledgePackService.js";
 export { createMarketingStudioRuntime, createMarketingStudioRequest, executeMarketingStudioRequest } from "./MarketingStudioRuntime.js";
 export { WORKFLOW_NODE_TYPES, createWorkflowNode } from "./WorkflowNode.js";
 export { createWorkflowContext } from "./WorkflowContext.js";

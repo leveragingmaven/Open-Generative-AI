@@ -6,6 +6,7 @@ import { InMemoryAssetStorage } from "./InMemoryAssetStorage.js";
 import { ProviderRegistryExecutionAdapter } from "./ProviderExecution.js";
 import { providerRegistry as defaultProviderRegistry } from "../providers/ProviderRegistry.js";
 import { InMemoryExecutionPersistence } from "./ExecutionPersistence.js";
+import { prepareKnowledgePackRequest } from "./creatorOsKnowledgePackService.js";
 
 export function createMarketingStudioRuntime({ providerRegistry, memory, recipes, router, executionPersistence, assetRepository, assetStorage, fetchImpl } = {}) {
   const intelligence = new CreativeIntelligenceEngine({ memory, recipes, router });
@@ -55,7 +56,8 @@ export async function executeMarketingStudioRequest(request, { runtimeFactory = 
       assetStorage: new InMemoryAssetStorage(),
       ...runtimeOptions,
     });
-    const plan = runtime.intelligence.plan({ ...request, capabilityRequirements: [{ id: "video_generation", kind: "required" }] });
+    const plannedRequest = await prepareKnowledgePackRequest(request);
+    const plan = runtime.intelligence.plan({ ...plannedRequest, capabilityRequirements: [{ id: "video_generation", kind: "required" }] });
     const context = runtime.execution.createExecutionContext(plan);
     const job = runtime.execution.createJob(context);
     runtime.execution.queue(job.id);

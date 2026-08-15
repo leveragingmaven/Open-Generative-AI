@@ -6,6 +6,7 @@ import { InMemoryAssetStorage } from "./InMemoryAssetStorage.js";
 import { ProviderRegistryExecutionAdapter } from "./ProviderExecution.js";
 import { providerRegistry as defaultProviderRegistry } from "../providers/ProviderRegistry.js";
 import { InMemoryExecutionPersistence } from "./ExecutionPersistence.js";
+import { prepareKnowledgePackRequest } from "./creatorOsKnowledgePackService.js";
 
 export function createImageStudioRuntime({ providerRegistry, memory, recipes, router, executionPersistence, assetRepository, assetStorage, fetchImpl } = {}) {
   const intelligence = new CreativeIntelligenceEngine({ memory, recipes, router });
@@ -36,8 +37,9 @@ export async function executeImageStudioRequest(request, { runtimeFactory = crea
       assetStorage: new InMemoryAssetStorage(),
       ...runtimeOptions,
     });
+    const plannedRequest = await prepareKnowledgePackRequest(request);
     const plan = runtime.intelligence.plan({
-      ...request,
+      ...plannedRequest,
       capabilityRequirements: [request.imageMode ? "image_editing" : "image_generation"],
     });
     if (!runtime.intelligence.validate(plan).valid) throw new Error("Image Studio Creative OS plan validation failed");
