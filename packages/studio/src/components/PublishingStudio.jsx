@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
+import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
@@ -354,6 +355,8 @@ export default function PublishingStudio() {
           </div>
         </div>
       </WorkspaceHero>
+
+      <GhlHubPublishingAccounts />
 
       <WorkspaceSection title="Ready to Publish" description="Assets returned by the existing Publishing Center asset selection.">
         {assets.length ? (

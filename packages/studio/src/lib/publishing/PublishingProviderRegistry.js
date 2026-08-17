@@ -1,4 +1,5 @@
 import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
+import { ghlHubPublishingProvider } from "./GhlHubPublishingProvider.js";
 import { PUBLISHING_PROVIDER_IDS } from "./publishingTypes.js";
 
 export class PublishingProviderRegistry {
@@ -6,6 +7,7 @@ export class PublishingProviderRegistry {
     this.providers = new Map();
     this.activeProviderId = PUBLISHING_PROVIDER_IDS.MUAPI;
     this.register(muApiPublishingProvider);
+    this.register(ghlHubPublishingProvider);
   }
 
   register(provider) {

@@ -3,6 +3,7 @@ import { PublishingValidationError } from "./publishingErrors.js";
 
 export const PUBLISHING_PROVIDER_IDS = {
   MUAPI: "muapi",
+  GHL_HUB: "ghl_hub",
 };
 
 export const PUBLISHING_STATUS = {

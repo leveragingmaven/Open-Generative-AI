@@ -1,5 +1,6 @@
 export * from "./PublishingProvider.js";
 export * from "./MuApiPublishingProvider.js";
+export * from "./GhlHubPublishingProvider.js";
 export * from "./PublishingProviderRegistry.js";
 export * from "./publishingTypes.js";
 export * from "./publishingErrors.js";
