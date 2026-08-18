@@ -69,8 +69,8 @@ test("emotional-pacing declares advisory dependency metadata", () => {
   assert.deepEqual(SKILL.sharedUtilities, ["communication-utils"]);
 });
 
-test("manifest declares the compatible recipes", () => {
-  assert.deepEqual(SKILL.compatibleRecipes, [
+test("manifest declares the compatible content types", () => {
+  assert.deepEqual(SKILL.compatibleContentTypes, [
     "video-script",
     "podcast",
     "story-content",

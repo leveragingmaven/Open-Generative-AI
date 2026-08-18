@@ -493,7 +493,8 @@ export function verifyCallToActionStrategy(input = {}) {
 // Registered in the Creative Skills Registry. All v1 required fields are
 // present; v2 additive sections (capabilities, decisionRules, knowledge,
 // workflow, validation, aiTwin, creativeIntelligence, metadata) are advisory.
-// dependsOn, complements, sharedUtilities, and compatibleRecipes are
+// dependsOn, complements, sharedUtilities, compatibleContentTypes, and
+// compatibleCampaignTemplates are
 // informational metadata only: they describe relationships and do not
 // introduce a dependency engine or runtime loading behavior.
 
@@ -512,16 +513,16 @@ export default {
   dependsOn: ["offer-strategy", "customer-transformation"],
   complements: ["trust-building"],
   sharedUtilities: ["communication-utils"],
-  compatibleRecipes: [
+  compatibleContentTypes: [
     "sales-page",
     "landing-page",
     "email-campaign",
     "webinar",
-    "product-launch",
     "funnel-strategy",
     "social-campaign",
     "checkout-flow",
   ],
+  compatibleCampaignTemplates: ["product-launch"],
   creativePrinciples: [
     "one-action: present one primary action per message",
     "transformation-aligned: align the CTA with the customer transformation",

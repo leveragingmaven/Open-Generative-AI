@@ -457,7 +457,7 @@ export function verifyNarrativeFlow(input = {}) {
 // Registered in the Creative Skills Registry. All v1 required fields are
 // present; v2 additive sections (capabilities, decisionRules, knowledge,
 // workflow, validation, aiTwin, creativeIntelligence, metadata) are advisory.
-// dependsOn, complements, sharedUtilities, and compatibleRecipes are
+// dependsOn, complements, sharedUtilities, and compatibleContentTypes are
 // informational metadata only: they describe relationships and do not
 // introduce a dependency engine or runtime loading behavior.
 
@@ -476,7 +476,7 @@ export default {
   dependsOn: ["story-structure"],
   complements: ["emotional-pacing", "character-perspective"],
   sharedUtilities: ["communication-utils"],
-  compatibleRecipes: [
+  compatibleContentTypes: [
     "blog",
     "podcast",
     "video-script",

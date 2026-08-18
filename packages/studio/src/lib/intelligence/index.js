@@ -48,6 +48,7 @@ export { createCreativeRequest } from "./CreativeRequest.js";
 export { createCreativePlan } from "./CreativePlan.js";
 export { RecipeResolver } from "./RecipeResolver.js";
 export { CreativeIntelligenceEngine, creativeIntelligenceEngine } from "./CreativeIntelligenceEngine.js";
+export { SkillAwarePlanCompiler, skillAwarePlanCompiler, compileSkillAwarePlan } from "./SkillAwarePlanCompiler.js";
 export { CREATIVE_EXECUTION_STATUS, EXECUTION_ATTEMPT_STATUS } from "./ExecutionTypes.js";
 export { createExecutionContext } from "./ExecutionContext.js";
 export { createExecutionAttempt } from "./ExecutionAttempt.js";

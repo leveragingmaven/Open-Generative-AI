@@ -66,17 +66,17 @@ test("call-to-action-strategy declares advisory dependency metadata", () => {
   assert.ok(SKILL.sharedUtilities.includes("communication-utils"));
 });
 
-test("manifest declares the compatible recipes", () => {
-  assert.deepEqual(SKILL.compatibleRecipes, [
+test("manifest declares the compatible content types", () => {
+  assert.deepEqual(SKILL.compatibleContentTypes, [
     "sales-page",
     "landing-page",
     "email-campaign",
     "webinar",
-    "product-launch",
     "funnel-strategy",
     "social-campaign",
     "checkout-flow",
   ]);
+  assert.deepEqual(SKILL.compatibleCampaignTemplates, ["product-launch"]);
 });
 
 test("manifest declares all seven decision rules", () => {

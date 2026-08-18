@@ -165,8 +165,8 @@ test("foundational skills declare advisory dependency metadata", () => {
   assert.deepEqual(story.complements, ["emotional-pacing", "narrative-flow"]);
   assert.deepEqual(story.sharedUtilities, ["communication-utils"]);
   assert.equal(story.category, "storytelling");
-  assert.ok(story.compatibleRecipes.includes("video-script"));
-  assert.ok(story.compatibleRecipes.includes("podcast"));
+  assert.ok(story.compatibleContentTypes.includes("video-script"));
+  assert.ok(story.compatibleContentTypes.includes("podcast"));
   const flow = SKILL_LIBRARY["narrative-flow"];
   assert.deepEqual(flow.dependsOn, ["story-structure"]);
   assert.deepEqual(flow.complements, ["emotional-pacing", "character-perspective"]);
