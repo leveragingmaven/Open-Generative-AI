@@ -41,10 +41,71 @@ function mockSubmissionAndPolling({ submission = { request_id: 'request-1' }, po
   };
 }
 
+async function generateAndCaptureBody(params = imageParams()) {
+  let submissionUrl;
+  let submissionBody;
+  globalThis.fetch = mockSubmissionAndPolling({
+    polls: [response({ status: 'completed' })],
+    onFetch: (url, options) => {
+      if (options?.method === 'POST') {
+        submissionUrl = url;
+        submissionBody = JSON.parse(options.body);
+      }
+    },
+  });
+  await generateImage('test-key', params);
+  return { submissionUrl, submissionBody };
+}
+
 async function rejectsWith(fetchImpl, expected, params = imageParams()) {
   globalThis.fetch = fetchImpl;
   await assert.rejects(() => generateImage('test-key', params), expected);
 }
+
+test('default Ideogram v3 T2I submits only prompt and aspect ratio', async () => {
+  const { submissionUrl, submissionBody } = await generateAndCaptureBody({
+    model: 'ideogram-v3-t2i',
+    prompt: 'enriched production prompt',
+    aspect_ratio: '1:1',
+  });
+
+  assert.equal(submissionUrl, 'https://api.muapi.ai/api/v1/ideogram-v3-t2i');
+  assert.deepEqual(submissionBody, {
+    prompt: 'enriched production prompt',
+    aspect_ratio: '1:1',
+  });
+  assert.equal('image_url' in submissionBody, false);
+  assert.equal('resolution' in submissionBody, false);
+  assert.equal('quality' in submissionBody, false);
+});
+
+test('Ideogram v3 T2I ignores unsupported image, resolution, and quality defaults when absent', async () => {
+  const { submissionBody } = await generateAndCaptureBody({
+    model: 'ideogram-v3-t2i',
+    prompt: 'test prompt',
+    aspect_ratio: '1:1',
+    image_url: null,
+    resolution: '1K',
+    quality: 'high',
+  });
+
+  assert.equal('image_url' in submissionBody, false);
+  assert.equal('resolution' in submissionBody, false);
+  assert.equal('quality' in submissionBody, false);
+});
+
+test('reference-image models continue receiving their image field', async () => {
+  const { submissionBody } = await generateAndCaptureBody({
+    model: 'flux-pulid',
+    prompt: 'reference portrait',
+    aspect_ratio: '1:1',
+    image_url: 'https://test/reference.png',
+    strength: 0.75,
+  });
+
+  assert.equal(submissionBody.image_url, 'https://test/reference.png');
+  assert.equal(submissionBody.strength, 0.75);
+});
 
 test('completed returns immediately', async () => {
   const urls = [];

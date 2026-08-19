@@ -137,16 +137,17 @@ async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 
 export async function generateImage(apiKey, params) {
     const modelInfo = getModelById(params.model);
     const endpoint = modelInfo?.endpoint || params.model;
+    const isIdeogramV3T2I = endpoint === 'ideogram-v3-t2i';
     const payload = { prompt: params.prompt };
     if (params.aspect_ratio) payload.aspect_ratio = params.aspect_ratio;
-    if (params.resolution) payload.resolution = params.resolution;
-    if (params.quality) payload.quality = params.quality;
+    if (!isIdeogramV3T2I && params.resolution) payload.resolution = params.resolution;
+    if (!isIdeogramV3T2I && params.quality) payload.quality = params.quality;
     if (params.image_url) { 
         payload.image_url = params.image_url; 
         payload.strength = params.strength || 0.6; 
     } else if (params.images_list) {
         payload.images_list = params.images_list;
-    } else {
+    } else if (!isIdeogramV3T2I) {
         payload.image_url = null;
     }
     if (params.seed && params.seed !== -1) payload.seed = params.seed;
