@@ -1,6 +1,15 @@
 class ProviderCapabilityRegistry {
   constructor() {
     this.deployments = new Map();
+    this.models = new Map();
+  }
+
+  static clone(value) {
+    if (Array.isArray(value)) return value.map((entry) => ProviderCapabilityRegistry.clone(entry));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, ProviderCapabilityRegistry.clone(entry)]));
+    }
+    return value;
   }
 
   register(deployment) {
@@ -34,12 +43,48 @@ class ProviderCapabilityRegistry {
     return normalized;
   }
 
+  registerModel(model) {
+    if (!model?.id || !model.providerId) {
+      throw new Error("Model id and providerId are required");
+    }
+    const normalized = {
+      id: model.id,
+      providerId: model.providerId,
+      logicalFamily: model.logicalFamily || model.family || null,
+      modelId: model.modelId || null,
+      endpointId: model.endpointId || null,
+      operation: model.operation || null,
+      modality: model.modality || null,
+      capabilities: Array.isArray(model.capabilities) ? [...model.capabilities] : [],
+      tier: model.tier || null,
+      variant: ProviderCapabilityRegistry.clone(model.variant || {}),
+      resolution: ProviderCapabilityRegistry.clone(model.resolution || null),
+      duration: ProviderCapabilityRegistry.clone(model.duration || null),
+      referenceLimits: ProviderCapabilityRegistry.clone(model.referenceLimits || {}),
+      inputLimits: ProviderCapabilityRegistry.clone(model.inputLimits || {}),
+      quality: ProviderCapabilityRegistry.clone(model.quality || null),
+      pricing: ProviderCapabilityRegistry.clone(model.pricing || {}),
+      source: ProviderCapabilityRegistry.clone(model.source || null),
+      verification: ProviderCapabilityRegistry.clone(model.verification || null),
+    };
+    this.models.set(normalized.id, normalized);
+    return normalized;
+  }
+
   get(id) {
     return this.deployments.get(id) || null;
   }
 
   list() {
     return [...this.deployments.values()];
+  }
+
+  getModel(id) {
+    return this.models.get(id) || null;
+  }
+
+  listModels() {
+    return [...this.models.values()];
   }
 }
 

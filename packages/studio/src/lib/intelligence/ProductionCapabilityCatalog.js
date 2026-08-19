@@ -128,10 +128,147 @@ export const PRODUCTION_DEPLOYMENTS = Object.freeze([
   },
 ]);
 
+const MUAPI_CATALOG_SOURCE = Object.freeze({
+  document: "MUAPI_MODEL_INTELLIGENCE_CATALOG.md",
+  compiledAt: "2026-08-13",
+  sourceType: "research-catalog",
+});
+
+const verified = (section, note = null) => ({
+  status: "verified",
+  section,
+  ...(note ? { note } : {}),
+});
+
+// Representative model records only. These are stored alongside deployments,
+// but are intentionally not deployments themselves yet, so routing behavior is
+// unchanged while the normalized catalog contract is established.
+export const MUAPI_MODEL_FIXTURES = Object.freeze([
+  {
+    id: "muapi-tool-ai-background-remover",
+    providerId: "muapi",
+    logicalFamily: "ai-background-remover",
+    modelId: "ai-background-remover",
+    endpointId: "ai-background-remover",
+    operation: "background_removal",
+    modality: "image",
+    capabilities: [CAPABILITIES.BACKGROUND_REMOVAL, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "specialist",
+    variant: { purpose: "background-removal" },
+    inputLimits: { required: ["image"] },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 0.01 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Product Photography & Background Removal"),
+  },
+  {
+    id: "muapi-flux-kontext-dev-t2i",
+    providerId: "muapi",
+    logicalFamily: "flux-kontext-t2i",
+    modelId: "flux-kontext-dev-t2i",
+    endpointId: "flux-kontext-dev-t2i",
+    operation: "image_generation",
+    modality: "image",
+    capabilities: [CAPABILITIES.IMAGE_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "dev",
+    variant: { familyTier: "dev" },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 0.02 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Text-to-Image", "Flux Kontext tiers are represented as one logical family."),
+  },
+  {
+    id: "muapi-flux-kontext-pro-t2i",
+    providerId: "muapi",
+    logicalFamily: "flux-kontext-t2i",
+    modelId: "flux-kontext-pro-t2i",
+    endpointId: "flux-kontext-pro-t2i",
+    operation: "image_generation",
+    modality: "image",
+    capabilities: [CAPABILITIES.IMAGE_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "pro",
+    variant: { familyTier: "pro" },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 0.03 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Text-to-Image", "Flux Kontext tiers are represented as one logical family."),
+  },
+  {
+    id: "muapi-flux-kontext-max-t2i",
+    providerId: "muapi",
+    logicalFamily: "flux-kontext-t2i",
+    modelId: "flux-kontext-max-t2i",
+    endpointId: "flux-kontext-max-t2i",
+    operation: "image_generation",
+    modality: "image",
+    capabilities: [CAPABILITIES.IMAGE_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "max",
+    variant: { familyTier: "max" },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 0.06 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Text-to-Image", "Flux Kontext tiers are represented as one logical family."),
+  },
+  {
+    id: "muapi-veo3-image-to-video",
+    providerId: "muapi",
+    logicalFamily: "veo-image-to-video",
+    modelId: "veo3-image-to-video",
+    endpointId: "veo3-image-to-video",
+    operation: "image_to_video",
+    modality: "video",
+    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "standard",
+    variant: { generation: "veo3" },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 2.5 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Image-to-Video"),
+  },
+  {
+    id: "muapi-veo31-image-to-video",
+    providerId: "muapi",
+    logicalFamily: "veo-image-to-video",
+    modelId: "veo3.1-image-to-video",
+    endpointId: "veo3.1-image-to-video",
+    operation: "image_to_video",
+    modality: "video",
+    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "standard",
+    variant: { generation: "veo3.1" },
+    pricing: { currency: "USD", unit: "generation", unitPrice: 2.5 },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("Image-to-Video"),
+  },
+  {
+    id: "muapi-seedance-25-image-to-video-family",
+    providerId: "muapi",
+    logicalFamily: "seedance-2.5-image-to-video",
+    modelId: null,
+    endpointId: null,
+    operation: "image_to_video",
+    modality: "video",
+    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    tier: "parameterized",
+    variant: { parameterized: ["resolution"] },
+    resolution: { values: ["480p", "720p", "1080p", "4K"] },
+    pricing: {
+      currency: "USD",
+      unit: "generation",
+      unitPrice: null,
+      rule: {
+        type: "lookup",
+        parameter: "resolution",
+        values: { "480p": 0.85, "720p": 1.7, "1080p": 4.25, "4K": 8.5 },
+      },
+    },
+    source: MUAPI_CATALOG_SOURCE,
+    verification: verified("High-level shape of the catalog", "Family pricing is verified; concrete endpoint IDs are intentionally not invented from the wildcard catalog notation."),
+  },
+]);
+
 export function registerProductionCapabilities({ capabilities = capabilityRegistry, deployments = providerCapabilityRegistry } = {}) {
   PRODUCTION_CAPABILITIES.forEach((definition) => capabilities.register(definition));
   PRODUCTION_DEPLOYMENTS.forEach((deployment) => deployments.register(deployment));
-  return { capabilities: PRODUCTION_CAPABILITIES, deployments: PRODUCTION_DEPLOYMENTS };
+  if (typeof deployments.registerModel === "function") {
+    MUAPI_MODEL_FIXTURES.forEach((model) => deployments.registerModel(model));
+  }
+  return { capabilities: PRODUCTION_CAPABILITIES, deployments: PRODUCTION_DEPLOYMENTS, models: MUAPI_MODEL_FIXTURES };
 }
 
 registerProductionCapabilities();

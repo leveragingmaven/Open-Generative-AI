@@ -11,6 +11,11 @@ export function createCreativeRequest(input = {}) {
     studioId: input.studioId || null,
     recipeId: input.recipeId || null,
     intent: input.intent || "",
+    capabilityRequirements: Array.isArray(input.capabilityRequirements)
+      ? input.capabilityRequirements.map((requirement) => (
+          requirement && typeof requirement === "object" ? { ...requirement } : requirement
+        ))
+      : [],
     inputs: input.inputs && typeof input.inputs === "object" ? { ...input.inputs } : {},
     references: Array.isArray(input.references) ? [...input.references] : [],
     output: input.output && typeof input.output === "object" ? { ...input.output } : {},

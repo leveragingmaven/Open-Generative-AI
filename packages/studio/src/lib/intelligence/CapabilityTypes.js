@@ -54,10 +54,28 @@ export function createCapabilityDefinition(input = {}) {
 }
 
 export function createCapabilityRequirement(input = {}) {
-  return {
+  const requirement = {
     id: input.id || input.capabilityId,
     kind: input.kind || CAPABILITY_KINDS.REQUIRED,
     weight: input.weight ?? 1,
     constraints: input.constraints && typeof input.constraints === "object" ? { ...input.constraints } : {},
   };
+
+  // Optional task requirements are descriptive only at this stage. Matcher
+  // and scorer behavior remains unchanged until those fields are explicitly
+  // adopted by routing policy.
+  [
+    "specialist",
+    "qualityIntent",
+    "qualityFloor",
+    "targetResolution",
+    "duration",
+    "referenceCount",
+    "modality",
+    "operation",
+  ].forEach((field) => {
+    if (input[field] !== undefined) requirement[field] = input[field];
+  });
+
+  return requirement;
 }

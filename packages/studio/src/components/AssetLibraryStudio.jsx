@@ -182,26 +182,30 @@ export default function AssetLibraryStudio() {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [serverWarning, setServerWarning] = useState(null);
   const [publishingSelectMode, setPublishingSelectMode] = useState(false);
   const [publishingNotice, setPublishingNotice] = useState(null);
 
-  const reload = () => {
+  const reload = async () => {
     setLoading(true);
     try {
       const filters = { query, sort, type: typeFilter, favorites: favoriteFilter ? true : null };
       if (archiveFilter === "current") filters.archived = false;
       if (archiveFilter === "archived") filters.archived = true;
-      setAllAssets(service.list());
-      setAssets(service.search(filters));
+      const loaded = await service.listWithDurableAssets({ campaignId: activeCampaign?.id });
+      setAllAssets(loaded.assets);
+      setAssets(service.search({ ...filters, assets: loaded.assets }));
       setLoadError(null);
+      setServerWarning(loaded.error ? "Durable Creative Assets are temporarily unavailable; showing local assets." : null);
     } catch (error) {
       setLoadError(error.message || "Unable to load creative assets");
+      setServerWarning(null);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { reload(); }, [query, sort, typeFilter, favoriteFilter, archiveFilter]);
+  useEffect(() => { reload(); }, [query, sort, typeFilter, favoriteFilter, archiveFilter, activeCampaign?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -346,6 +350,7 @@ export default function AssetLibraryStudio() {
       </WorkspaceSection>
 
       <WorkspaceSection title="Asset Grid" description={publishingSelectMode ? `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} available for publishing selection.` : `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
+        {serverWarning ? <p className="mb-3 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)]">{serverWarning}</p> : null}
         {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <AssetCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}</div>}
       </WorkspaceSection>
 

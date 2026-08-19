@@ -5,10 +5,17 @@ import { creativeMemoryEngine } from "./CreativeMemoryEngine.js";
 import { RecipeResolver } from "./RecipeResolver.js";
 import { deriveCreativeSkillGuidance, selectCreativeSkillsForStudio } from "../creative-brief/index.js";
 import { knowledgeContextRouter } from "./KnowledgeContextRouter.js";
+import { createCapabilityRequirement } from "./CapabilityTypes.js";
 
-function normalizeRequirements(recipe, input = {}) {
-  const requirements = input.capabilityRequirements || recipe.capabilityRequirements || [];
-  return requirements.map((requirement) => typeof requirement === "string" ? { id: requirement, kind: "required" } : { ...requirement });
+function normalizeRequirements(recipe, request, input = {}) {
+  const requirements = input.capabilityRequirements?.length
+    ? input.capabilityRequirements
+    : request.capabilityRequirements?.length
+      ? request.capabilityRequirements
+      : recipe.capabilityRequirements || [];
+  return requirements.map((requirement) => createCapabilityRequirement(
+    typeof requirement === "string" ? { id: requirement } : requirement
+  ));
 }
 
 export class CreativeIntelligenceEngine {
@@ -43,7 +50,7 @@ export class CreativeIntelligenceEngine {
       minConfidence: input.minMemoryConfidence,
       ttlMs: input.memoryTtlMs,
     });
-    const capabilityRequirements = normalizeRequirements(compiledRecipe, input);
+    const capabilityRequirements = normalizeRequirements(compiledRecipe, request, input);
     const routing = capabilityRequirements.length
       ? this.router.resolve({ required: capabilityRequirements.filter((item) => item.kind !== "preferred"), preferred: capabilityRequirements.filter((item) => item.kind === "preferred") }, {
         policy: input.routingPolicy,

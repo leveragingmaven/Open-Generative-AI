@@ -1,5 +1,42 @@
 import { createCreativeAsset } from "./CreativeAsset.js";
 
+export function normalizeCreativeLibraryAsset(asset = {}) {
+  const generatedFiles = Array.isArray(asset.generatedFiles) && asset.generatedFiles.length
+    ? asset.generatedFiles
+    : (asset.storageReference || asset.providerOutputReference || asset.url ? [asset.storageReference || asset.providerOutputReference || asset.url] : []);
+  return {
+    ...createCreativeAsset({ ...asset, generatedFiles }),
+    ...asset,
+    generatedFiles,
+    metadata: { ...(asset.metadata || {}) },
+  };
+}
+
+export function mergeCreativeLibraryAssets(localAssets = [], durableAssets = []) {
+  const merged = new Map();
+  for (const asset of localAssets) if (asset?.id) merged.set(asset.id, normalizeCreativeLibraryAsset(asset));
+  for (const asset of durableAssets) {
+    if (!asset?.id) continue;
+    const local = merged.get(asset.id);
+    merged.set(asset.id, {
+      ...(local || {}),
+      ...normalizeCreativeLibraryAsset(asset),
+      favorite: local?.favorite ?? asset.favorite ?? false,
+      archived: local?.archived ?? asset.archived ?? false,
+    });
+  }
+  return [...merged.values()];
+}
+
+export async function fetchDurableCreativeAssets({ fetchImpl = globalThis?.fetch, campaignId } = {}) {
+  if (typeof fetchImpl !== "function") throw new Error("durable_asset_fetch_unavailable");
+  const query = campaignId ? `?campaignId=${encodeURIComponent(campaignId)}` : "";
+  const response = await fetchImpl(`/api/creative-assets${query}`, { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`durable_asset_fetch_failed:${response.status}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.assets) ? payload.assets.map(normalizeCreativeLibraryAsset) : [];
+}
+
 const LEGACY_HISTORY_KEYS = [
   "hg_image_studio_persistent", "hg_video_studio_persistent", "hg_cinema_studio_persistent",
   "hg_marketing_studio_persistent", "hg_audio_studio_persistent", "hg_lipsync_studio_persistent",
@@ -56,8 +93,20 @@ export class AssetLibraryService {
     });
   }
 
+  async listWithDurableAssets({ includeLegacy = true, durableLoader = fetchDurableCreativeAssets, campaignId } = {}) {
+    const local = this.list({ includeLegacy });
+    try {
+      const durable = await durableLoader({ campaignId });
+      return { assets: mergeCreativeLibraryAssets(local, durable), error: null };
+    } catch (error) {
+      return { assets: local, error };
+    }
+  }
+
   search({ query = "", sort = "newest", includeLegacy = true, ...filters } = {}) {
-    let assets = this.list({ includeLegacy });
+    const sourceAssets = filters.assets || null;
+    delete filters.assets;
+    let assets = sourceAssets ? [...sourceAssets] : this.list({ includeLegacy });
     const normalizedQuery = query.trim().toLowerCase();
     if (normalizedQuery) assets = assets.filter((asset) => JSON.stringify(asset).toLowerCase().includes(normalizedQuery));
     assets = assets.filter((asset) => Object.entries(filters).every(([key, value]) => {

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { CreatorAccountSchemaMissingError, resolveCreatorAccountId } from './creatorAccountStore.js';
 
 export const CREATOR_OS_SESSION_COOKIE = 'creator_os_session';
 const DEFAULT_ISSUER = 'ai-gency';
@@ -6,6 +7,8 @@ const DEFAULT_AUDIENCE = 'mavensync-creator-os';
 const TOKEN_CLOCK_SKEW_SECONDS = 5;
 const MAX_TOKEN_LIFETIME_SECONDS = 60;
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
+const EXECUTION_AUTHORIZATION_TTL_SECONDS = 5 * 60;
+const EXECUTION_AUTHORIZATION_MAX_TTL_SECONDS = 15 * 60;
 
 function setting(name, fallback = '') {
   return String(process.env[name] || fallback).trim();
@@ -28,6 +31,110 @@ function verifySignature(encodedPayload, encodedSignature, secret) {
   const actual = base64UrlDecode(encodedSignature);
   const expected = signature(secret, encodedPayload);
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function executionAuthorizationError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function executionIdentity(identity) {
+  return {
+    accountId: String(identity?.accountId || '').trim(),
+    creatorId: String(identity?.creatorId || identity?.userId || identity?.identityKey || '').trim(),
+    identityKey: String(identity?.identityKey || '').trim(),
+  };
+}
+
+export function createAgentExecutionAuthorizationContext({ identity, request } = {}) {
+  const context = {
+    identity: executionIdentity(identity),
+    agentId: String(request?.agentId || request?.agentTemplateId || '').trim(),
+    conversationId: String(request?.conversationId || '').trim(),
+    operation: String(request?.operation || request?.capability || '').trim(),
+    intentFingerprint: crypto.createHash('sha256').update(stableSerialize({
+      agentId: String(request?.agentId || request?.agentTemplateId || '').trim(),
+      conversationId: String(request?.conversationId || '').trim(),
+      userIntent: String(request?.userIntent || '').trim(),
+      operation: String(request?.operation || request?.capability || '').trim(),
+      campaignId: request?.campaignId || null,
+      twinContext: request?.twinContext || null,
+      inputs: request?.inputs || {},
+      references: request?.references || [],
+      attachments: request?.attachments || [],
+      requestedSkillIds: request?.requestedSkillIds || request?.skillIds || [],
+      requestedRecipeId: request?.requestedRecipeId || request?.recipeId || null,
+      requestedWorkflowId: request?.requestedWorkflowId || request?.workflowId || null,
+      metadata: request?.metadata || {},
+    })).digest('hex'),
+  };
+  return context;
+}
+
+export function issueAgentExecutionAuthorizationProof(context, {
+  now = Math.floor(Date.now() / 1000),
+  ttlSeconds = EXECUTION_AUTHORIZATION_TTL_SECONDS,
+  approvedBy = context?.identity?.creatorId,
+} = {}) {
+  if (!context?.identity?.accountId || !context?.identity?.creatorId || !context?.agentId || !context?.conversationId || !context?.operation || !context?.intentFingerprint) {
+    throw new Error('execution_authorization_context_required');
+  }
+  const ttl = Number(ttlSeconds);
+  if (!Number.isInteger(ttl) || ttl <= 0 || ttl > EXECUTION_AUTHORIZATION_MAX_TTL_SECONDS) {
+    throw new Error('invalid_execution_authorization_ttl');
+  }
+  const payload = {
+    type: 'mavensync-agent-execution-approval',
+    version: 1,
+    authorizationId: crypto.randomUUID(),
+    status: 'approved',
+    context,
+    approvedBy: String(approvedBy || '').trim(),
+    issuedAt: now,
+    expiresAt: now + ttl,
+  };
+  if (!payload.approvedBy) throw new Error('execution_approver_required');
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  return `${encodedPayload}.${base64UrlEncode(signature(requiredSecret(), encodedPayload))}`;
+}
+
+export function verifyAgentExecutionAuthorizationProof(proof, context, {
+  now = Math.floor(Date.now() / 1000),
+} = {}) {
+  if (typeof proof !== 'string') throw executionAuthorizationError('execution_authorization_proof_required');
+  const segments = proof.split('.');
+  if (segments.length !== 2) throw executionAuthorizationError('invalid_execution_authorization_proof');
+  const [encodedPayload, encodedSignature] = segments;
+  const secret = requiredSecret();
+  if (!verifySignature(encodedPayload, encodedSignature, secret)) throw executionAuthorizationError('invalid_execution_authorization_signature');
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecode(encodedPayload).toString('utf8'));
+  } catch {
+    throw executionAuthorizationError('invalid_execution_authorization_payload');
+  }
+  if (payload.type !== 'mavensync-agent-execution-approval' || payload.version !== 1 || payload.status !== 'approved') {
+    throw executionAuthorizationError('invalid_execution_authorization_claims');
+  }
+  if (!Number.isInteger(payload.issuedAt) || !Number.isInteger(payload.expiresAt) || payload.expiresAt <= payload.issuedAt) {
+    throw executionAuthorizationError('invalid_execution_authorization_times');
+  }
+  if (payload.expiresAt - payload.issuedAt > EXECUTION_AUTHORIZATION_MAX_TTL_SECONDS || payload.expiresAt <= now || payload.issuedAt > now + TOKEN_CLOCK_SKEW_SECONDS) {
+    throw executionAuthorizationError('execution_authorization_expired');
+  }
+  if (!payload.authorizationId || !payload.approvedBy || stableSerialize(payload.context) !== stableSerialize(context)) {
+    throw executionAuthorizationError('execution_authorization_context_mismatch');
+  }
+  return payload;
 }
 
 function requiredSecret() {
@@ -94,9 +201,25 @@ export function readCreatorIdentity(request, { now = Math.floor(Date.now() / 100
   }
 }
 
-export function requireCreatorIdentity(request) {
+export async function requireCreatorIdentity(request, { resolveAccountId = resolveCreatorAccountId } = {}) {
   const identity = readCreatorIdentity(request);
-  if (identity) return { identity, response: null };
+  if (identity) {
+    try {
+      const accountId = await resolveAccountId(identity.identityKey);
+      return { identity: { ...identity, accountId }, response: null };
+    } catch (error) {
+      const schemaMissing = error instanceof CreatorAccountSchemaMissingError || error?.code === 'creator_account_schema_missing';
+      return {
+        identity: null,
+        response: Response.json(
+          schemaMissing
+            ? { error: 'Creator OS account mapping is not migrated.', code: 'creator_account_schema_missing' }
+            : { error: 'Creator OS account mapping is unavailable.', code: 'creator_account_mapping_unavailable' },
+          { status: 503 },
+        ),
+      };
+    }
+  }
   return {
     identity: null,
     response: Response.json(

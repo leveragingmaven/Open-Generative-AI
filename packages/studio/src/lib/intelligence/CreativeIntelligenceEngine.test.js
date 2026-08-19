@@ -52,6 +52,65 @@ test("CreativeIntelligenceEngine assembles memory, recipe, capability, and routi
   assert.equal(engine.validate(plan).valid, true);
 });
 
+test("CreativeRequest preserves optional execution requirements without provider or model IDs", () => {
+  const deployments = {
+    list: () => [{
+      id: "background-remover",
+      providerId: "muapi",
+      capabilities: ["background_removal"],
+      availability: "available",
+      priority: 1,
+      confidence: 0.8,
+    }],
+  };
+  const engine = new CreativeIntelligenceEngine({
+    memory: memoryStub(),
+    recipes: new RecipeResolver({ recipes: { image: { id: "image" } } }),
+    router: new CapabilityRouter({ capabilities: new CapabilityRegistry(), deployments }),
+  });
+  const plan = engine.plan({
+    recipeId: "image",
+    capabilityRequirements: [{
+      id: "background_removal",
+      specialist: true,
+      qualityIntent: "draft",
+      targetResolution: "1080p",
+      duration: { maxSeconds: 6 },
+      referenceCount: { max: 1 },
+      modality: "image",
+      operation: "background_removal",
+    }],
+  });
+
+  assert.deepEqual(plan.capabilityRequirements[0], {
+    id: "background_removal",
+    kind: "required",
+    weight: 1,
+    constraints: {},
+    specialist: true,
+    qualityIntent: "draft",
+    targetResolution: "1080p",
+    duration: { maxSeconds: 6 },
+    referenceCount: { max: 1 },
+    modality: "image",
+    operation: "background_removal",
+  });
+  assert.equal(plan.capabilityRequirements[0].providerId, undefined);
+  assert.equal(plan.capabilityRequirements[0].modelId, undefined);
+  assert.equal(plan.routing.deploymentId, "background-remover");
+});
+
+test("legacy recipe capability requirements remain unchanged when optional fields are absent", () => {
+  const engine = new CreativeIntelligenceEngine({
+    memory: memoryStub(),
+    recipes: new RecipeResolver({ recipes: { image: { id: "image", capabilityRequirements: ["image_generation"] } } }),
+    router: { resolve: ({ required }) => ({ deploymentId: "legacy", providerId: "muapi", required }) },
+  });
+  const plan = engine.plan({ recipeId: "image" });
+
+  assert.deepEqual(plan.capabilityRequirements, [{ id: "image_generation", kind: "required", weight: 1, constraints: {} }]);
+});
+
 test("CreativeIntelligenceEngine preserves optional memory degradation and validates requirements", () => {
   const engine = new CreativeIntelligenceEngine({
     memory: { projectMemory: () => ({ memories: [], values: {}, provenance: [] }) },

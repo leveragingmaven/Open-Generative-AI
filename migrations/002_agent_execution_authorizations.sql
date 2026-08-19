@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS agent_execution_authorizations (
+  authorization_id VARCHAR(191) NOT NULL,
+  account_id BIGINT UNSIGNED NOT NULL,
+  creator_identity_key VARCHAR(191) NOT NULL,
+  agent_id VARCHAR(191) NOT NULL,
+  conversation_id VARCHAR(191) NOT NULL,
+  operation VARCHAR(191) NOT NULL,
+  request_fingerprint CHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  issued_at DATETIME NOT NULL,
+  expires_at DATETIME NOT NULL,
+  consumed_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+  approver_identity VARCHAR(191) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (authorization_id),
+  KEY idx_agent_execution_auth_account_status (account_id, status, expires_at),
+  KEY idx_agent_execution_auth_creator (account_id, creator_identity_key),
+  CONSTRAINT chk_agent_execution_auth_status CHECK (status IN ('issued', 'consumed', 'expired', 'revoked'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

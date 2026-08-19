@@ -55,3 +55,10 @@ export {
   buildRecastInitiation,
   recastGuidanceLines,
 } from "./AgentRuntime.js";
+
+export {
+  AGENT_EXECUTION_AUTHORIZATION_STATUS,
+  createAgentExecutionRequest,
+  validateAgentExecutionRequest,
+  isAgentExecutionAuthorized,
+} from "./AgentExecutionRequest.js";

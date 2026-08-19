@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS creative_execution_attempts (
+  attempt_id VARCHAR(191) NOT NULL,
+  job_id VARCHAR(191) NOT NULL,
+  attempt_number INT UNSIGNED NOT NULL,
+  provider_id VARCHAR(191) NULL,
+  deployment_id VARCHAR(191) NULL,
+  provider_job_id VARCHAR(191) NULL,
+  status VARCHAR(32) NOT NULL,
+  started_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  duration_ms BIGINT UNSIGNED NULL,
+  failure_json JSON NULL,
+  provider_response_ref VARCHAR(191) NULL,
+  usage_json JSON NULL,
+  metadata_json JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (attempt_id),
+  UNIQUE KEY uq_creative_attempts_job_number (job_id, attempt_number),
+  KEY idx_creative_attempts_job_status (job_id, status),
+  KEY idx_creative_attempts_provider_job (provider_job_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

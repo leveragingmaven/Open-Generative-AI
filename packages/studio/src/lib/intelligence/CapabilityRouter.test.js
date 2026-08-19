@@ -48,3 +48,31 @@ test("CapabilityRouter rejects unknown capabilities and unavailable deployments"
   assert.throws(() => router.resolve({ required: ["unknown"] }), /Unknown capability/);
   assert.throws(() => router.resolve({ required: ["image_generation"] }), /No eligible deployment/);
 });
+
+test("CapabilityRouter remains compatible with richer descriptive requirements", () => {
+  const capabilities = new CapabilityRegistry();
+  const deployments = new ProviderCapabilityRegistry();
+  deployments.register({
+    id: "background-remover",
+    providerId: "muapi",
+    capabilities: ["background_removal"],
+    availability: "available",
+  });
+  const router = new CapabilityRouter({ capabilities, deployments });
+  const result = router.resolve({
+    required: [{
+      id: "background_removal",
+      specialist: true,
+      qualityIntent: "final",
+      qualityFloor: 0.8,
+      targetResolution: "1080p",
+      duration: 6,
+      referenceCount: 1,
+      modality: "image",
+      operation: "background_removal",
+    }],
+  });
+
+  assert.equal(result.deploymentId, "background-remover");
+  assert.equal(result.providerId, "muapi");
+});

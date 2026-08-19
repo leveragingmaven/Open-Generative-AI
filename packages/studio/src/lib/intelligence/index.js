@@ -45,6 +45,12 @@ export { getEligibleModelCandidates } from "./ModelCandidateEligibility.js";
 export { scoreDeployment, rankDeployments } from "./CapabilityScorer.js";
 export { CapabilityRouter, capabilityRouter } from "./CapabilityRouter.js";
 export { createCreativeRequest } from "./CreativeRequest.js";
+export {
+  AGENT_EXECUTION_AUTHORIZATION_STATUS,
+  createAgentExecutionRequest,
+  validateAgentExecutionRequest,
+  isAgentExecutionAuthorized,
+} from "../agents/AgentExecutionRequest.js";
 export { createCreativePlan } from "./CreativePlan.js";
 export { RecipeResolver } from "./RecipeResolver.js";
 export { CreativeIntelligenceEngine, creativeIntelligenceEngine } from "./CreativeIntelligenceEngine.js";
