@@ -1,5 +1,5 @@
 import { CreativeProvider } from "./CreativeProvider.js";
-import { PROVIDER_CAPABILITIES, PROVIDER_IDS, normalizeProviderResponse } from "./providerTypes.js";
+import { PROVIDER_CAPABILITIES, PROVIDER_IDS, normalizeProviderError, normalizeProviderResponse } from "./providerTypes.js";
 import * as muapi from "../../muapi.js";
 
 export class MuApiProvider extends CreativeProvider {
@@ -33,43 +33,50 @@ export class MuApiProvider extends CreativeProvider {
     };
     const methodName = methods[operation] || operation;
     if (!methodName || typeof this[methodName] !== "function") this.notImplemented(`execute:${operation || "unknown"}`);
-    return this[methodName](apiKey, params);
+    return Promise.resolve()
+      .then(() => this[methodName](apiKey, {
+        ...params,
+        ...(request.signal ? { signal: request.signal } : {}),
+        ...(request.onProviderJobAccepted ? { onRequestId: request.onProviderJobAccepted } : {}),
+      }))
+      .then((result) => normalizeProviderResponse(result, { provider: this.id }))
+      .catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateImage(apiKey, params) {
-    return muapi.generateImage(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateImage(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateI2I(apiKey, params) {
-    return muapi.generateI2I(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateI2I(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateVideo(apiKey, params) {
-    return muapi.generateVideo(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateVideo(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateI2V(apiKey, params) {
-    return muapi.generateI2V(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateI2V(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateMarketingStudioAd(apiKey, params) {
-    return muapi.generateMarketingStudioAd(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateMarketingStudioAd(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   processV2V(apiKey, params) {
-    return muapi.processV2V(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.processV2V(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   processRecast(apiKey, params) {
-    return muapi.processRecast(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.processRecast(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   processLipSync(apiKey, params) {
-    return muapi.processLipSync(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.processLipSync(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   generateAudio(apiKey, params) {
-    return muapi.generateAudio(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id }));
+    return muapi.generateAudio(apiKey, params).then((res) => normalizeProviderResponse(res, { provider: this.id })).catch((error) => { throw normalizeProviderError(error); });
   }
 
   uploadFile(apiKey, file, onProgress) {

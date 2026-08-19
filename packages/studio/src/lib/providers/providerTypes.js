@@ -32,10 +32,41 @@ export function normalizeProviderResponse(response, fallback = {}) {
     response.data?.url ||
     fallback.url ||
     null;
+  const providerResponseRef =
+    response.providerResponseRef ||
+    response.provider_response_ref ||
+    response.request_id ||
+    response.id ||
+    fallback.providerResponseRef ||
+    null;
+  const usage = response.usage || response.providerMetadata?.usage || fallback.usage || null;
+  const outputReferences =
+    response.outputReferences ||
+    (Array.isArray(response.outputs) ? response.outputs : null) ||
+    (url ? [url] : null) ||
+    fallback.outputReferences ||
+    [];
 
   return {
     ...fallback,
     ...response,
     ...(url ? { url } : {}),
+    outputReferences,
+    ...(providerResponseRef ? { providerResponseRef } : {}),
+    ...(usage ? { usage } : {}),
   };
+}
+
+export function normalizeProviderError(error, fallback = {}) {
+  const code = String(error?.code || fallback.code || "provider_execution_failed");
+  const normalized = new Error(
+    code === "provider_timeout" || code === "provider_execution_timeout"
+      ? "Provider execution timed out."
+      : code === "provider_credential_unavailable"
+        ? "Provider credential is unavailable."
+        : "Provider execution failed.",
+  );
+  normalized.code = code;
+  if (error?.name === "AbortError") normalized.name = "AbortError";
+  return normalized;
 }

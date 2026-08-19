@@ -37,6 +37,12 @@ class FakeDb {
       const job = attempt && this.jobs.get(attempt.job_id);
       return [[attempt && job && String(job.account_id) === String(params[1]) ? attempt : undefined].filter(Boolean)];
     }
+    if (normalized.startsWith('SELECT a.* FROM creative_execution_attempts a') && normalized.includes('a.provider_job_id')) {
+      const rows = [...this.attempts.values()]
+        .filter((attempt) => attempt.provider_job_id === params[0] && String(this.jobs.get(attempt.job_id)?.account_id) === String(params[1]))
+        .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+      return [rows.slice(0, 1)];
+    }
     if (normalized.startsWith('SELECT a.* FROM creative_execution_attempts a')) {
       const rows = [...this.attempts.values()]
         .filter((attempt) => attempt.job_id === params[0] && String(this.jobs.get(attempt.job_id)?.account_id) === String(params[1]))
@@ -123,4 +129,12 @@ test('attempt survives repository re-instantiation', async () => {
   await repository(db).createAttempt({ id: 'attempt-persisted', jobId: 'job-1', accountId: 'account-1' });
   const restored = await repository(db).getAttempt('attempt-persisted', { accountId: 'account-1' });
   assert.equal(restored.id, 'attempt-persisted');
+});
+
+test('recovery lookup identifies a persisted remote provider job within the account scope', async () => {
+  const db = new FakeDb();
+  const repo = repository(db);
+  await repo.createAttempt({ id: 'attempt-remote', jobId: 'job-1', accountId: 'account-1', providerJobId: 'remote-job-1' });
+  assert.equal((await repo.getAttemptByProviderJobId('remote-job-1', { accountId: 'account-1' })).id, 'attempt-remote');
+  assert.equal(await repo.getAttemptByProviderJobId('remote-job-1', { accountId: 'other-account' }), null);
 });

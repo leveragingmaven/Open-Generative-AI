@@ -71,6 +71,18 @@ function selectedReferences(input = {}) {
   return references.map(selectedReference).filter(Boolean);
 }
 
+function untrustedSourceMaterial(input = {}) {
+  const source = firstDefined(
+    input.sourceMaterial,
+    input.untrustedSourceMaterial,
+    input.request?.sourceMaterial,
+    input.request?.untrustedSourceMaterial,
+    input.request?.inputs?.sourceMaterial,
+  );
+  if (source == null) return null;
+  return { trust: "untrusted", data: sanitize(source) };
+}
+
 function currentPrompt(input = {}) {
   const currentRequest = input.currentRequest;
   return String(firstDefined(
@@ -161,6 +173,7 @@ export function assembleModelRequest(input = {}) {
   const compiled = compileContext(compileInput(input, memoryProjection));
   const prompt = currentPrompt(input);
   const references = selectedReferences(input);
+  const sourceMaterial = untrustedSourceMaterial(input);
   const current = currentRequestForHistory(input, prompt, references);
   const conversation = isConversational(input)
     ? projectConversation({
@@ -181,6 +194,7 @@ export function assembleModelRequest(input = {}) {
     input: {
       prompt,
       references,
+      ...(sourceMaterial ? { sourceMaterial } : {}),
     },
     generation: modelGeneration(input),
   };

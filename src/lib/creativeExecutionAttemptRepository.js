@@ -109,6 +109,16 @@ export class MySqlCreativeExecutionAttemptRepository {
     return this.listAttemptsOnConnection(this.db, jobId, { accountId });
   }
 
+  async getAttemptByProviderJobId(providerJobId, { accountId } = {}) {
+    const [rows] = await this.db.query(
+      `SELECT a.* FROM creative_execution_attempts a
+       INNER JOIN creative_jobs j ON j.job_id = a.job_id
+       WHERE a.provider_job_id = ? AND j.account_id = ? ORDER BY a.created_at DESC LIMIT 1`,
+      [providerJobId, accountId],
+    );
+    return rowToAttempt(rows[0]);
+  }
+
   async listAttemptsOnConnection(connection, jobId, { accountId } = {}) {
     const [rows] = await connection.query(
       `SELECT a.* FROM creative_execution_attempts a

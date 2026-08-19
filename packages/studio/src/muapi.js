@@ -41,13 +41,14 @@ function notifyAuthRequired(status, detail) {
     window.dispatchEvent(new CustomEvent('muapi:auth-required', { detail: { status, message: detail } }));
 }
 
-async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000) {
+async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000, signal) {
     const pollUrl = `${BASE_URL}/api/v1/predictions/${requestId}/result`;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         await new Promise(resolve => setTimeout(resolve, interval));
         try {
             const response = await fetch(pollUrl, {
-                headers: jsonHeaders(key)
+                headers: jsonHeaders(key),
+                ...(signal ? { signal } : {}),
             });
             if (!response.ok) {
                 const errText = await response.text();
@@ -60,18 +61,20 @@ async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000)
             if (status === 'completed' || status === 'succeeded' || status === 'success') return data;
             if (status === 'failed' || status === 'error') throw new Error(`Generation failed: ${data.error || 'Unknown error'}`);
         } catch (error) {
+            if (signal?.aborted || error?.name === 'AbortError') throw error;
             if (attempt === maxAttempts) throw error;
         }
     }
     throw new Error('Generation timed out after polling.');
 }
 
-async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 60) {
+async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 60, signal) {
     const url = `${BASE_URL}/api/v1/${endpoint}`;
     const response = await fetch(url, {
         method: 'POST',
         headers: jsonHeaders(key),
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
         const errText = await response.text();
@@ -82,7 +85,7 @@ async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 
     const requestId = submitData.request_id || submitData.id;
     if (!requestId) return submitData;
     if (onRequestId) onRequestId(requestId);
-    const result = await pollForResult(requestId, key, maxAttempts);
+    const result = await pollForResult(requestId, key, maxAttempts, 2000, signal);
     const outputUrl = result.outputs?.[0] || result.url || result.output?.url;
     return { ...result, url: outputUrl };
 }
@@ -103,7 +106,7 @@ export async function generateImage(apiKey, params) {
         payload.image_url = null;
     }
     if (params.seed && params.seed !== -1) payload.seed = params.seed;
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 60);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 60, params.signal);
 }
 
 export async function generateI2I(apiKey, params) {
@@ -126,7 +129,7 @@ export async function generateI2I(apiKey, params) {
     if (modelInfo?.inputs?.name) {
         payload.name = params.name || modelInfo.inputs.name.default;
     }
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 60);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 60, params.signal);
 }
 
 export async function generateVideo(apiKey, params) {
@@ -143,7 +146,7 @@ export async function generateVideo(apiKey, params) {
     if (params.image_url) payload.image_url = params.image_url;
     if (params.images_list?.length > 0) payload.images_list = params.images_list;
     if (params.videos_list?.length > 0) payload.videos_list = params.videos_list;
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function generateI2V(apiKey, params) {
@@ -178,7 +181,7 @@ export async function generateI2V(apiKey, params) {
     if (modelInfo?.inputs?.name) {
         payload.name = params.name || modelInfo.inputs.name.default;
     }
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function generateMarketingStudioAd(apiKey, params) {
@@ -193,7 +196,7 @@ export async function generateMarketingStudioAd(apiKey, params) {
     };
     if (params.quality) payload.quality = params.quality;
     if (params.mode) payload.mode = params.mode;
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function processV2V(apiKey, params) {
@@ -207,7 +210,7 @@ export async function processV2V(apiKey, params) {
     if (modelInfo?.hasPrompt && params.prompt) {
         payload.prompt = params.prompt;
     }
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function processRecast(apiKey, params) {
@@ -227,7 +230,7 @@ export async function processRecast(apiKey, params) {
     if (params.character_orientation) {
         payload.character_orientation = params.character_orientation;
     }
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function processLipSync(apiKey, params) {
@@ -240,7 +243,7 @@ export async function processLipSync(apiKey, params) {
     if (modelInfo?.hasPrompt) payload.prompt = params.prompt || '';
     if (params.resolution) payload.resolution = params.resolution;
     if (params.seed !== undefined && params.seed !== -1) payload.seed = params.seed;
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function generateAudio(apiKey, params) {
@@ -254,7 +257,7 @@ export async function generateAudio(apiKey, params) {
             payload[key] = params[key];
         }
     }
-    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export function uploadFile(apiKey, file, onProgress) {
@@ -681,7 +684,7 @@ export async function runClipping(apiKey, params) {
         aspect_ratio: params.aspect_ratio || "9:16",
         return_coordinates_only: !!params.return_coordinates_only
     };
-    return submitAndPoll("ai-clipping", payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll("ai-clipping", payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function runMotionGraphics(apiKey, params) {
@@ -690,7 +693,7 @@ export async function runMotionGraphics(apiKey, params) {
         aspect_ratio: params.aspect_ratio || "16:9",
         duration_seconds: params.duration_seconds || 6,
     };
-    return submitAndPoll("motion-graphics", payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll("motion-graphics", payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
 export async function runMotionGraphicsEdit(apiKey, params) {
@@ -700,5 +703,5 @@ export async function runMotionGraphicsEdit(apiKey, params) {
         aspect_ratio: params.aspect_ratio || "16:9",
         duration_seconds: params.duration_seconds || 6,
     };
-    return submitAndPoll("motion-graphics-edit", payload, apiKey, params.onRequestId, 900);
+    return submitAndPoll("motion-graphics-edit", payload, apiKey, params.onRequestId, 900, params.signal);
 }

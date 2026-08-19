@@ -77,8 +77,15 @@ class FakeDb {
   }
 }
 
-function service(db, { providerResult = db.providerResult, failProvider = false, persistedRouting = null, router, credentialResolver, assetPersistence } = {}) {
-  const registry = { get: () => ({ id: 'test-provider', execute: async (request) => { db.calls += 1; db.providerRequest = request; if (failProvider) throw new Error('provider_failed'); return providerResult; } }) };
+function service(db, { providerResult = db.providerResult, failProvider = false, providerDelayMs = 0, acceptedProviderJobId = null, providerExecutionTimeoutMs, persistedRouting = null, router, credentialResolver, assetPersistence, providerExecutor, costAuthorization = { authorize: async () => ({ authorized: true }) } } = {}) {
+  const registry = { get: () => ({ id: 'test-provider', execute: async (request) => {
+    db.calls += 1;
+    db.providerRequest = request;
+    if (acceptedProviderJobId) request.onProviderJobAccepted?.(acceptedProviderJobId, 'submitted');
+    if (providerDelayMs) await new Promise((resolve) => setTimeout(resolve, providerDelayMs));
+    if (failProvider) throw new Error('provider_failed');
+    return providerResult;
+  } }) };
   if (persistedRouting) db.jobs.get('job-1').plan_json = JSON.stringify({ ...JSON.parse(db.jobs.get('job-1').plan_json), routing: persistedRouting });
   return new CreativeJobExecutionService({
     db,
@@ -86,8 +93,10 @@ function service(db, { providerResult = db.providerResult, failProvider = false,
     attemptRepository: new MySqlCreativeExecutionAttemptRepository({ db }),
     providerRegistry: registry,
     capabilityRouter: router || { resolve: () => ({ providerId: 'test-provider', deploymentId: 'deployment-1' }) },
-    providerExecutor: new ProviderRegistryExecutionAdapter({ registry }),
+    providerExecutor: providerExecutor || new ProviderRegistryExecutionAdapter({ registry }),
     credentialResolver,
+    costAuthorization,
+    providerExecutionTimeoutMs,
     assetPersistence: assetPersistence || { async persistOnConnection(connection, { result }) { return { asset: { id: 'asset-1' }, storageReferences: result.outputReferences }; } },
   });
 }
@@ -103,6 +112,101 @@ test('execution-ready job routes, invokes Provider Registry, and persists comple
   assert.equal(db.attempts.get('attempt-1').provider_job_id, 'provider-job-1');
   assert.deepEqual(JSON.parse(db.jobs.get('job-1').result_json).outputReferences, ['https://provider/output.png']);
   assert.equal(JSON.parse(db.jobs.get('job-1').result_json).assetId, 'asset-1');
+});
+
+test('synchronous provider completes before the configured deadline', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { providerDelayMs: 1 }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, true);
+  assert.equal(result.recoveryRequired, undefined);
+});
+
+test('BYOK execution remains allowed and does not request MavenSync-funded authorization', async () => {
+  const db = new FakeDb();
+  let authorizationCalls = 0;
+  const result = await service(db, {
+    persistedRouting: { providerId: 'muapi', deploymentId: 'muapi-image', cost: { unit: 'image', creditAmount: 2 } },
+    costAuthorization: { authorize: async () => { authorizationCalls += 1; return { authorized: false }; } },
+  }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, true);
+  assert.equal(authorizationCalls, 0);
+});
+
+test('agency-funded execution fails before provider invocation without cost authorization', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { costAuthorization: null }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(db.calls, 0);
+  assert.equal(JSON.parse(db.jobs.get('job-1').error_json).code, 'cost_authorization_required');
+});
+
+test('unknown agency cost is rejected explicitly before provider invocation', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { costAuthorization: { authorize: async ({ estimatedCredits }) => ({ authorized: estimatedCredits !== null, code: 'allowance_cost_unknown' }) } })
+    .executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(db.calls, 0);
+  assert.equal(JSON.parse(db.jobs.get('job-1').error_json).code, 'allowance_cost_unknown');
+});
+
+test('missing MuAPI BYOK does not fall back to a server-funded credential', async () => {
+  const db = new FakeDb();
+  let fundingAuthorizationCalls = 0;
+  const result = await service(db, {
+    persistedRouting: { providerId: 'muapi', deploymentId: 'muapi-image' },
+    costAuthorization: { authorize: async () => { fundingAuthorizationCalls += 1; return { authorized: true }; } },
+    credentialResolver: async () => { throw Object.assign(new Error('missing'), { code: 'provider_credential_required:muapi' }); },
+  }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(db.calls, 0);
+  assert.equal(fundingAuthorizationCalls, 0);
+  assert.equal(JSON.parse(db.jobs.get('job-1').error_json).code, 'provider_credential_required:muapi');
+});
+
+test('provider timeout without acceptance durably fails without retrying', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { providerDelayMs: 40, providerExecutionTimeoutMs: 5 }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(result.recoveryRequired, undefined);
+  assert.equal(db.jobs.get('job-1').status, 'failed');
+  assert.equal(db.attempts.get('attempt-1').status, 'failed');
+  assert.equal(JSON.stringify(result).includes('provider payload'), false);
+  assert.equal(JSON.stringify(result).includes('server-only-secret'), false);
+});
+
+test('provider failure persistence does not expose the provider error payload', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { providerExecutor: { execute: async () => { throw new Error('private prompt and provider payload'); } } })
+    .executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(JSON.stringify(result).includes('private prompt and provider payload'), false);
+  assert.equal(JSON.stringify(db.jobs.get('job-1')).includes('private prompt and provider payload'), false);
+  assert.equal(JSON.parse(db.jobs.get('job-1').error_json).message, 'Provider execution failed.');
+});
+
+test('provider timeout after acceptance persists recovery state and blocks fresh execution', async () => {
+  const db = new FakeDb();
+  const executor = service(db, { providerDelayMs: 40, acceptedProviderJobId: 'remote-job-1', providerExecutionTimeoutMs: 5 });
+  const result = await executor.executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, false);
+  assert.equal(result.recoveryRequired, true);
+  assert.equal(db.jobs.get('job-1').status, 'running');
+  assert.equal(db.attempts.get('attempt-1').status, 'running');
+  assert.equal(db.attempts.get('attempt-1').provider_job_id, 'remote-job-1');
+  assert.equal(JSON.parse(db.attempts.get('attempt-1').metadata_json).recoveryRequired, true);
+  await assert.rejects(
+    executor.executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' }),
+    /creative_job_not_execution_ready/,
+  );
+  assert.equal(db.calls, 1);
+});
+
+test('provider submitted result with a remote job ID is recoverable, not a fresh-generation failure', async () => {
+  const db = new FakeDb();
+  const result = await service(db, { providerResult: { status: 'submitted', request_id: 'remote-job-2', outputs: [] } }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.recoveryRequired, true);
+  assert.equal(db.attempts.get('attempt-1').provider_job_id, 'remote-job-2');
+  assert.equal(db.jobs.get('job-1').status, 'running');
 });
 
 test('persisted routing is reused and absent routing uses Capability Router', async () => {

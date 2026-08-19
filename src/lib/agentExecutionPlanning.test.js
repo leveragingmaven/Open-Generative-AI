@@ -100,3 +100,17 @@ test('invalid recipe is reported as planning failure without creating a job', as
   assert.equal(repository.job.metadata.planning.planningError.code, 'planning_failed');
   assert.equal(repository.job.id, 'job-1');
 });
+
+test('malformed structured plan is rejected before it can be persisted', async () => {
+  const repository = jobRepository(request());
+  const compiler = { compile: () => ({ planId: 'plan-1', request: {}, recipe: { id: 'image' }, capabilityRequirements: 'not-an-array' }) };
+  const result = await new AgentExecutionPlanningService({
+    jobRepository: repository,
+    skillResolver: { getSkill: (id) => skills[id] || (() => { throw new Error('skill_not_found'); })() },
+    compiler,
+  }).planAcceptedJob({ jobId: 'job-1', accountId: 'account-1' });
+  assert.equal(result.planned, false);
+  assert.equal(result.plan, null);
+  assert.equal(repository.job.metadata.planning.planningError.code, 'structured_state_invalid');
+  assert.equal(repository.job.plan, undefined);
+});

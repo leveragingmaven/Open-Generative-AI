@@ -26,6 +26,10 @@ function publicExecutionResult(result) {
     completed: result.completed === true,
     providerResponseRef: result.attempt?.providerResponseRef || result.job?.result?.providerResponseRef || null,
     outputReferences: result.job?.result?.outputReferences || [],
+    ...(result.recoveryRequired ? {
+      recoveryRequired: true,
+      providerJobId: result.attempt?.providerJobId || result.job?.result?.providerJobId || null,
+    } : {}),
   };
 }
 
@@ -50,7 +54,7 @@ export async function handleAgentExecutionRunPost(request, {
       accountId: identity.accountId,
       creatorIdentityKey: identity.identityKey || identity.creatorId || identity.userId,
     });
-    return Response.json({ ok: true, status: result.completed ? 'completed' : 'failed', executionStarted: true, result: publicExecutionResult(result) });
+    return Response.json({ ok: true, status: result.recoveryRequired ? 'recovery_required' : result.completed ? 'completed' : 'failed', executionStarted: true, result: publicExecutionResult(result) });
   } catch (error) {
     return errorResponse(error);
   }

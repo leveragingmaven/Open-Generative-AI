@@ -1,5 +1,6 @@
 import { SkillResolver } from '../../packages/studio/src/lib/skills/SkillResolver.js';
 import { SkillAwarePlanCompiler } from '../../packages/studio/src/lib/intelligence/SkillAwarePlanCompiler.js';
+import { validateCompiledPlan } from './structuredStateValidation.js';
 
 function asArray(value) {
   return Array.isArray(value) ? value : value == null ? [] : [value];
@@ -99,6 +100,17 @@ export class AgentExecutionPlanningService {
       });
     } catch (error) {
       const updated = await this.jobRepository.updatePlanningResult({ jobId, accountId, unresolvedAdvisories: skills.unresolved, planningError: { code: error.code || 'planning_failed', message: error.message } });
+      return { planned: false, plan: null, job: updated, unresolvedSkillReferences: skills.unresolved };
+    }
+    try {
+      validateCompiledPlan(plan);
+    } catch {
+      const updated = await this.jobRepository.updatePlanningResult({
+        jobId,
+        accountId,
+        unresolvedAdvisories: skills.unresolved,
+        planningError: { code: 'structured_state_invalid', message: 'Compiled planning state failed validation.' },
+      });
       return { planned: false, plan: null, job: updated, unresolvedSkillReferences: skills.unresolved };
     }
     const planningError = plan.state === 'non_executable' || plan.valid === false
