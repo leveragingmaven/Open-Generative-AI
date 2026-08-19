@@ -11,6 +11,10 @@ function json(value) {
   return value == null ? null : JSON.stringify(value);
 }
 
+function dateValue(value) {
+  return value ? new Date(value) : null;
+}
+
 function parseJson(value, fallback = null) {
   if (value == null) return fallback;
   if (typeof value === 'object') return value;
@@ -205,7 +209,7 @@ export class MySqlCreativeJobRepository {
         json(lineage.twinContext), context.planId || null, context.assetRequestId || null,
         context.recipe?.id || lineage.request.requestedRecipeId || null, json(context.recipe), lineage.operation,
         ACCEPTED_EXECUTION_STATUS, job.status, job.priority, job.attempts, context.id, json(context),
-        null, json(job.result), json(job.error), json(job.metadata), job.createdAt, job.updatedAt],
+        null, json(job.result), json(job.error), json(job.metadata), dateValue(job.createdAt), dateValue(job.updatedAt)],
     );
     return job;
   }

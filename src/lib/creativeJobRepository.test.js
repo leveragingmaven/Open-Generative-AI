@@ -157,6 +157,10 @@ test('creative job INSERT keeps columns, placeholders, and parameters aligned', 
   assert.equal(columnList.split(',').length, 27);
   assert.equal((valueList.match(/\?/g) || []).length, 27);
   assert.equal(db.jobInsertParams.length, 27);
+  assert.ok(db.jobInsertParams[25] instanceof Date);
+  assert.ok(Number.isFinite(db.jobInsertParams[25].getTime()));
+  assert.ok(db.jobInsertParams[26] instanceof Date);
+  assert.ok(Number.isFinite(db.jobInsertParams[26].getTime()));
 });
 
 test('duplicate acceptance and duplicate authorization cannot create another job', async () => {
