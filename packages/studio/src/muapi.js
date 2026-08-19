@@ -41,6 +41,37 @@ function notifyAuthRequired(status, detail) {
     window.dispatchEvent(new CustomEvent('muapi:auth-required', { detail: { status, message: detail } }));
 }
 
+const TERMINAL_STATUSES = new Set(['failed', 'error', 'cancelled']);
+const SUCCESS_STATUSES = new Set(['completed', 'succeeded', 'success']);
+
+function sanitizeProviderMessage(value) {
+    if (typeof value !== 'string') return '';
+    return value
+        .replace(/[\u0000-\u001f\u007f]/g, ' ')
+        .replace(/(?:bearer\s+|(?:x-)?api[-_ ]?key\s*[:=]\s*)[^\s,;]+/gi, '[redacted]')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 200);
+}
+
+function providerErrorMessage(data) {
+    const detail = data?.detail;
+    return sanitizeProviderMessage(
+        data?.error || detail?.error || data?.message || detail?.message || (typeof detail === 'string' ? detail : '')
+    ) || 'Unknown provider error';
+}
+
+function providerStatus(data) {
+    const status = data?.status || data?.detail?.status;
+    return typeof status === 'string' ? status.toLowerCase() : '';
+}
+
+function terminalProviderError(data) {
+    const error = new Error(`Generation failed: ${providerErrorMessage(data)}`);
+    error.retryable = false;
+    return error;
+}
+
 async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000, signal) {
     const pollUrl = `${BASE_URL}/api/v1/predictions/${requestId}/result`;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -53,15 +84,28 @@ async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000,
             if (!response.ok) {
                 const errText = await response.text();
                 if (response.status >= 500) continue;
-                notifyAuthRequired(response.status, errText);
-                throw new Error(`Poll Failed: ${response.status} - ${errText.slice(0, 100)}`);
+                let errorData;
+                try {
+                    errorData = JSON.parse(errText);
+                } catch {
+                    errorData = null;
+                }
+                const detail = errorData ? providerErrorMessage(errorData) : (sanitizeProviderMessage(errText) || 'Unknown provider error');
+                notifyAuthRequired(response.status, detail);
+                if (TERMINAL_STATUSES.has(providerStatus(errorData))) {
+                    throw terminalProviderError(errorData);
+                }
+                const error = new Error(`Poll Failed: ${response.status} - ${detail}`);
+                error.retryable = false;
+                throw error;
             }
             const data = await response.json();
-            const status = data.status?.toLowerCase();
-            if (status === 'completed' || status === 'succeeded' || status === 'success') return data;
-            if (status === 'failed' || status === 'error') throw new Error(`Generation failed: ${data.error || 'Unknown error'}`);
+            const status = providerStatus(data);
+            if (SUCCESS_STATUSES.has(status)) return data;
+            if (TERMINAL_STATUSES.has(status)) throw terminalProviderError(data);
         } catch (error) {
             if (signal?.aborted || error?.name === 'AbortError') throw error;
+            if (error?.retryable === false) throw error;
             if (attempt === maxAttempts) throw error;
         }
     }
