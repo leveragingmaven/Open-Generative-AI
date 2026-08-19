@@ -129,6 +129,17 @@ test("no pack and retrieval failure preserve the existing no-knowledge behavior"
   assert.equal(request.knowledgePack, null);
 });
 
+test("a hanging Knowledge Pack request resolves to the existing no-knowledge fallback", async () => {
+  const startedAt = Date.now();
+  const pack = await getCurrentCreatorOsKnowledgePack({
+    timeoutMs: 10,
+    fetchImpl: async () => new Promise(() => {}),
+  });
+
+  assert.equal(pack, null);
+  assert.ok(Date.now() - startedAt < 500, "Knowledge Pack timeout should be bounded");
+});
+
 test("router receives the normalized contract and selects the current offer", () => {
   const normalized = normalizeHubKnowledgePack(hubPack);
   const selected = new KnowledgeContextRouter().select(normalized, {

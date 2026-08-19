@@ -24,6 +24,7 @@ import dynamic from "next/dynamic";
 import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
 import { notify } from "../lib/notifications/notify.js";
 import CampaignChip from "./CampaignChip.jsx";
+import RecoverableErrorBoundary, { RecoverableErrorFallback } from "./RecoverableErrorBoundary.jsx";
 import {
   EmptyState,
   ErrorState,
@@ -1043,15 +1044,26 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
           ) : (
             <div className="flex-1 relative bg-[#050505]">
               {nodeSchemas && workflowDef ? (
-                <WorkflowUI
-                  workflowId={selectedWorkflow?.id}
-                  initialNodeSchemas={nodeSchemas}
-                  initialWorkflowData={{
-                    ...workflowDef,
-                    // Inject ID to prevent builder from assuming this is a new unsaved flow
-                    workflow_id: selectedWorkflow?.id
-                  }}
-                />
+                <RecoverableErrorBoundary
+                  resetKey={selectedWorkflow?.id || "workflow-builder"}
+                  fallback={(error, retry) => (
+                    <RecoverableErrorFallback
+                      title="Workflow Builder could not finish loading"
+                      description="The workflow builder module failed to load. Reload to try again."
+                      onRetry={retry}
+                    />
+                  )}
+                >
+                  <WorkflowUI
+                    workflowId={selectedWorkflow?.id}
+                    initialNodeSchemas={nodeSchemas}
+                    initialWorkflowData={{
+                      ...workflowDef,
+                      // Inject ID to prevent builder from assuming this is a new unsaved flow
+                      workflow_id: selectedWorkflow?.id
+                    }}
+                  />
+                </RecoverableErrorBoundary>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-4">

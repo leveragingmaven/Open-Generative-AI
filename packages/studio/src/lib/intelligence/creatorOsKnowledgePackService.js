@@ -1,4 +1,5 @@
 const HUB_KNOWLEDGE_PACK_URL = "https://hub.mavensync.space/api/creator-os/knowledge-pack/current";
+const DEFAULT_KNOWLEDGE_TIMEOUT_MS = 8000;
 
 function hasContent(value) {
   if (value == null) return false;
@@ -71,15 +72,34 @@ export function normalizeHubKnowledgePack(input) {
 }
 
 /** Retrieve the current authenticated user's Hub pack without handling SSO secrets. */
-export async function getCurrentCreatorOsKnowledgePack({ fetchImpl = globalThis.fetch } = {}) {
+export async function getCurrentCreatorOsKnowledgePack({ fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_KNOWLEDGE_TIMEOUT_MS } = {}) {
   if (typeof fetchImpl !== "function") return null;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_KNOWLEDGE_TIMEOUT_MS;
+  let timer;
   try {
-    const response = await fetchImpl(HUB_KNOWLEDGE_PACK_URL, { credentials: "include" });
+    const request = fetchImpl(HUB_KNOWLEDGE_PACK_URL, {
+      credentials: "include",
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    const timeoutMarker = {};
+    const response = await Promise.race([
+      request,
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          controller?.abort();
+          resolve(timeoutMarker);
+        }, timeout);
+      }),
+    ]);
+    if (response === timeoutMarker) return null;
     if (!response?.ok) return null;
     const payload = await response.json();
     return normalizeHubKnowledgePack(payload?.pack ?? payload);
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

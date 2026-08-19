@@ -48,6 +48,7 @@ export { default as KnowledgeCenterStudio } from './components/KnowledgeCenterSt
 export { default as CreativeMemoryStudio } from './components/CreativeMemoryStudio';
 export { default as CommandBar } from './components/CommandBar';
 export { default as ComingSoonStudio } from './components/ComingSoonStudio';
+export { default as RecoverableErrorBoundary, RecoverableErrorFallback, reloadCreatorOs } from './components/RecoverableErrorBoundary.jsx';
 export { default as CampaignWorkspace } from './components/CampaignWorkspace';
 export { default as CampaignChip } from './components/CampaignChip';
 export { CampaignStore, CAMPAIGN_STATUSES } from './lib/campaigns/CampaignStore.js';

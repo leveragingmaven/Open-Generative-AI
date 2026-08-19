@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, RecoverableErrorBoundary, RecoverableErrorFallback, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -211,8 +211,6 @@ const isStudioHome = slug.length === 0;
   const [repurposeTarget, setRepurposeTarget] = useState(null);
   const [motionTarget, setMotionTarget] = useState(null);
 const [characterTarget, setCharacterTarget] = useState(null);
-  const [hasMounted, setHasMounted] = useState(false);
-
   useEffect(() => {
     if (!slug.includes('apps')) return;
     window.location.replace('/studio/mcp-cli');
@@ -382,7 +380,6 @@ const handleTabChange = (tabId) => {
   }, []);
 
   useEffect(() => {
-    setHasMounted(true);
     if (agencyMode) {
       setApiKey(null);
       setBalance(null);
@@ -482,12 +479,6 @@ const handleTabChange = (tabId) => {
     setDroppedFiles(null);
   }, []);
 
-  if (!hasMounted) return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-      <div className="animate-spin text-[#E82070] text-3xl">◌</div>
-    </div>
-  );
-
   if (!agencyMode && !apiKey && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
@@ -543,7 +534,20 @@ const handleTabChange = (tabId) => {
         if (visibleTabIds.has('agents')) activeWorkspaceContent = <AgentStudio apiKey={studioApiKey} active isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
         break;
       case 'design-agent':
-        if (visibleTabIds.has('design-agent')) activeWorkspaceContent = <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
+        if (visibleTabIds.has('design-agent')) activeWorkspaceContent = (
+          <RecoverableErrorBoundary
+            resetKey={activeWorkspaceTab}
+            fallback={(error, retry) => (
+              <RecoverableErrorFallback
+                title="Design Studio could not finish loading"
+                description="The Design Studio module failed to load. Reload to try again."
+                onRetry={retry}
+              />
+            )}
+          >
+            <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
+          </RecoverableErrorBoundary>
+        );
         break;
       case 'apps':
         if (visibleTabIds.has('apps')) activeWorkspaceContent = <AppsStudio apiKey={studioApiKey} />;
@@ -811,5 +815,9 @@ const handleTabChange = (tabId) => {
   // All routes (including /workflow/:id and /workflow/:id/:tab) render inside
   // the Creative OS shell — the workflow builder is a Creative OS workspace,
   // not a separate legacy application.
-  return <CampaignProvider>{creativeShell}</CampaignProvider>;
+  return (
+    <RecoverableErrorBoundary resetKey={slug.join("/")}>
+      <CampaignProvider>{creativeShell}</CampaignProvider>
+    </RecoverableErrorBoundary>
+  );
 }
