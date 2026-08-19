@@ -3,16 +3,67 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, CharacterStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, AiTwinTab, PublishingStudio, AssetLibraryStudio, KnowledgeCenterStudio, CreativeMemoryStudio, McpCliStudio, CampaignWorkspace, MavenSyncDashboard, MavenSyncCreateWorkspace, MavenSyncIntelligenceWorkspace, CommandBar, ComingSoonStudio, CampaignProvider, RecoverableErrorBoundary, RecoverableErrorFallback, useActiveCampaign, getUserBalance, TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from 'studio';
-
-const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
-  ssr: false,
-  loading: () => <div className="h-full w-full bg-black flex items-center justify-center text-white/20">Loading Design Studio...</div>
-});
+import { CampaignProvider, useActiveCampaign } from '../packages/studio/src/lib/campaigns/CampaignContext.js';
+import { TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from '../packages/studio/src/studioNavigation.js';
+import MavenSyncDashboard from '../packages/studio/src/components/experience/MavenSyncDashboard.jsx';
+import CommandBar from '../packages/studio/src/components/CommandBar.jsx';
+import RecoverableErrorBoundary, { RecoverableErrorFallback } from '../packages/studio/src/components/RecoverableErrorBoundary.jsx';
 import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
 
 const STORAGE_KEY = 'muapi_key';
+function WorkspaceLoading({ label }) {
+  return <div className="flex h-full w-full items-center justify-center bg-black text-white/20">Loading {label}...</div>;
+}
+
+function workspaceImport(loader, label) {
+  const LoadedWorkspace = dynamic(loader, {
+    ssr: false,
+    loading: () => <WorkspaceLoading label={label} />,
+  });
+  return function WorkspaceModule(props) {
+    return (
+      <RecoverableErrorBoundary
+        resetKey={label}
+        fallback={(_, retry) => (
+          <RecoverableErrorFallback
+            title={`${label} could not finish loading`}
+            description={`The ${label} module failed to load. Reload to try again.`}
+            onRetry={retry}
+          />
+        )}
+      >
+        <LoadedWorkspace {...props} />
+      </RecoverableErrorBoundary>
+    );
+  };
+}
+
+const ImageStudio = workspaceImport(() => import('../packages/studio/src/components/ImageStudio.jsx'), 'Image Studio');
+const VideoStudio = workspaceImport(() => import('../packages/studio/src/components/VideoStudio.jsx'), 'Video Studio');
+const ClippingStudio = workspaceImport(() => import('../packages/studio/src/components/ClippingStudio.jsx'), 'Clipping Studio');
+const VibeMotionStudio = workspaceImport(() => import('../packages/studio/src/components/VibeMotionStudio.jsx'), 'Vibe Motion Studio');
+const LipSyncStudio = workspaceImport(() => import('../packages/studio/src/components/LipSyncStudio.jsx'), 'Lip Sync Studio');
+const RecastStudio = workspaceImport(() => import('../packages/studio/src/components/RecastStudio.jsx'), 'Recast Studio');
+const CinemaStudio = workspaceImport(() => import('../packages/studio/src/components/CinemaStudio.jsx'), 'Cinema Studio');
+const AudioStudio = workspaceImport(() => import('../packages/studio/src/components/AudioStudio.jsx'), 'Audio Studio');
+const MarketingStudio = workspaceImport(() => import('../packages/studio/src/components/MarketingStudio.jsx'), 'Marketing Studio');
+const CharacterStudio = workspaceImport(() => import('../packages/studio/src/components/character/CharacterStudio.jsx'), 'Character Studio');
+const WorkflowStudio = workspaceImport(() => import('../packages/studio/src/components/WorkflowStudio.jsx'), 'Workflow Studio');
+const AgentStudio = workspaceImport(() => import('../packages/studio/src/components/AgentStudio.jsx'), 'Agents');
+const AppsStudio = workspaceImport(() => import('../packages/studio/src/components/AppsStudio.jsx'), 'Apps');
+const AiTwinTab = workspaceImport(() => import('../packages/studio/src/components/AiTwinTab.jsx'), 'AI Twin');
+const AiInfluencerStudio = workspaceImport(() => import('../packages/studio/src/components/AiInfluencerStudio.jsx'), 'AI Influencer');
+const PublishingStudio = workspaceImport(() => import('../packages/studio/src/components/PublishingStudio.jsx'), 'Publishing');
+const AssetLibraryStudio = workspaceImport(() => import('../packages/studio/src/components/AssetLibraryStudio.jsx'), 'Creative Library');
+const KnowledgeCenterStudio = workspaceImport(() => import('../packages/studio/src/components/KnowledgeCenterStudio.jsx'), 'Knowledge Center');
+const CreativeMemoryStudio = workspaceImport(() => import('../packages/studio/src/components/CreativeMemoryStudio.jsx'), 'Creative Memory');
+const McpCliStudio = workspaceImport(() => import('../packages/studio/src/components/McpCliStudio.jsx'), 'System');
+const CampaignWorkspace = workspaceImport(() => import('../packages/studio/src/components/CampaignWorkspace.jsx'), 'Campaigns');
+const MavenSyncCreateWorkspace = workspaceImport(() => import('../packages/studio/src/components/experience/MavenSyncCreateWorkspace.jsx'), 'Create Workspace');
+const MavenSyncIntelligenceWorkspace = workspaceImport(() => import('../packages/studio/src/components/experience/MavenSyncIntelligenceWorkspace.jsx'), 'Intelligence');
+const ComingSoonStudio = workspaceImport(() => import('../packages/studio/src/components/ComingSoonStudio.jsx'), 'Workspace');
+const DesignAgentStudio = workspaceImport(() => import('../packages/studio/src/components/DesignAgentStudio.jsx'), 'Design Studio');
 
 // Renders the Active Campaign name in the Creative OS header when one is set.
 function CampaignHeaderLabel() {
@@ -372,6 +423,7 @@ const handleTabChange = (tabId) => {
 
   const fetchBalance = useCallback(async (key) => {
     try {
+      const { getUserBalance } = await import('../packages/studio/src/lib/providers/ProviderRegistry.js');
       const data = await getUserBalance(key);
       setBalance(data.balance);
     } catch (err) {
@@ -534,20 +586,7 @@ const handleTabChange = (tabId) => {
         if (visibleTabIds.has('agents')) activeWorkspaceContent = <AgentStudio apiKey={studioApiKey} active isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
         break;
       case 'design-agent':
-        if (visibleTabIds.has('design-agent')) activeWorkspaceContent = (
-          <RecoverableErrorBoundary
-            resetKey={activeWorkspaceTab}
-            fallback={(error, retry) => (
-              <RecoverableErrorFallback
-                title="Design Studio could not finish loading"
-                description="The Design Studio module failed to load. Reload to try again."
-                onRetry={retry}
-              />
-            )}
-          >
-            <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />
-          </RecoverableErrorBoundary>
-        );
+        if (visibleTabIds.has('design-agent')) activeWorkspaceContent = <DesignAgentStudio apiKey={studioApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />;
         break;
       case 'apps':
         if (visibleTabIds.has('apps')) activeWorkspaceContent = <AppsStudio apiKey={studioApiKey} />;

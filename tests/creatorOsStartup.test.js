@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const shellSource = readFileSync(new URL("../components/StandaloneShell.js", import.meta.url), "utf8");
+const errorSource = readFileSync(new URL("../app/studio/error.js", import.meta.url), "utf8");
 
 test("Studio startup does not retain the unbounded global spinner gate", () => {
   assert.doesNotMatch(shellSource, /if \(!hasMounted\)/);
@@ -18,4 +19,12 @@ test("Studio retains active-workspace-only mounting", () => {
   assert.match(shellSource, /case 'publishing':/);
   assert.match(shellSource, /case 'agents':/);
   assert.doesNotMatch(shellSource, /const studioContent = \(\s*<>/);
+});
+
+test("Studio startup isolates workspaces from the full studio barrel", () => {
+  assert.doesNotMatch(shellSource, /from ['"]studio['"]/);
+  assert.doesNotMatch(shellSource, /import\(['"]studio['"]\)/);
+  assert.match(shellSource, /import\('\.\.\/packages\/studio\/src\/components\/ImageStudio\.jsx'/);
+  assert.match(shellSource, /import\('\.\.\/packages\/studio\/src\/components\/KnowledgeCenterStudio\.jsx'/);
+  assert.doesNotMatch(errorSource, /from ['"]studio['"]/);
 });
