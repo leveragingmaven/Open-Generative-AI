@@ -21,7 +21,7 @@ function cleanHeaders(request) {
 }
 
 export async function GET(request) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const { search } = new URL(request.url);
     const targetUrl = `${getMuApiBaseUrl().replace(/\/+$/, '')}/app/get_file_upload_url${search}`;

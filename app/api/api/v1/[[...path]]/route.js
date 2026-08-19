@@ -56,7 +56,7 @@ async function toNextResponse(response) {
 }
 
 async function proxyMuApiRequest(request, { params }) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
     if (rateLimit) return rateLimit;

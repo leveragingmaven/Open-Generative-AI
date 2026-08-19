@@ -26,7 +26,7 @@ function missingKeyResponse() {
 }
 
 export async function GET(request, { params }) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
     if (rateLimit) return rateLimit;
@@ -75,7 +75,7 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
     if (rateLimit) return rateLimit;
@@ -108,7 +108,7 @@ export async function POST(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
     if (rateLimit) return rateLimit;
@@ -138,7 +138,7 @@ export async function DELETE(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
     if (rateLimit) return rateLimit;
