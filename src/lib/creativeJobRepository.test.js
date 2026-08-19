@@ -48,6 +48,8 @@ class FakeTransactionalDb {
       return [{ affectedRows: 0 }];
     }
     if (normalized.startsWith('INSERT INTO creative_jobs')) {
+      this.jobInsertSql = normalized;
+      this.jobInsertParams = [...params];
       if (this.failJobInsert) throw new Error('job_insert_failed');
       const [jobId, accountId, creatorIdentityKey, authorizationId, requestId, idempotencyKey,
         agentId, conversationId, campaignId, twinContextJson, planId, assetRequestId, recipeId,
@@ -141,6 +143,20 @@ test('accepts one issued authorization and preserves job lineage', async () => {
   assert.equal(job.campaign_id, 'campaign-1');
   assert.deepEqual(JSON.parse(job.twin_context_json), { twinId: 'twin-1' });
   assert.equal(job.status, 'pending');
+});
+
+test('creative job INSERT keeps columns, placeholders, and parameters aligned', async () => {
+  const db = new FakeTransactionalDb();
+  seedAuthorization(db);
+  await repository(db).acceptAuthorizedJob({ request: request(), authorizationId: 'authorization-1', requestFingerprint: 'fingerprint-1' });
+
+  const columnList = db.jobInsertSql.match(/INSERT INTO creative_jobs \((.*?)\) VALUES/s)?.[1];
+  const valueList = db.jobInsertSql.match(/VALUES \((.*?)\)$/s)?.[1];
+  assert.ok(columnList);
+  assert.ok(valueList);
+  assert.equal(columnList.split(',').length, 27);
+  assert.equal((valueList.match(/\?/g) || []).length, 27);
+  assert.equal(db.jobInsertParams.length, 27);
 });
 
 test('duplicate acceptance and duplicate authorization cannot create another job', async () => {

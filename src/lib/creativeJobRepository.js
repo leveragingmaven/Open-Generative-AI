@@ -199,7 +199,7 @@ export class MySqlCreativeJobRepository {
         recipe_id, recipe_json, operation, execution_status, status, priority, attempt_count,
         execution_context_id, execution_context_json, plan_json, result_json, error_json, metadata_json,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [job.id, lineage.accountId, lineage.creatorIdentityKey, lineage.authorizationId, lineage.requestId,
         lineage.idempotencyKey, lineage.agentId, lineage.conversationId, lineage.campaignId,
         json(lineage.twinContext), context.planId || null, context.assetRequestId || null,
