@@ -18,6 +18,7 @@ export function createCreativeRequest(input = {}) {
       : [],
     inputs: input.inputs && typeof input.inputs === "object" ? { ...input.inputs } : {},
     references: Array.isArray(input.references) ? [...input.references] : [],
+    attachments: Array.isArray(input.attachments) ? [...input.attachments] : [],
     output: input.output && typeof input.output === "object" ? { ...input.output } : {},
     knowledgePack: input.knowledgePack || null,
     knowledgeContext: input.knowledgeContext || null,

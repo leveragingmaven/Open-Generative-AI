@@ -66,7 +66,7 @@ export class AgentExecutionPlanningService {
     this.compiler = compiler || new SkillAwarePlanCompiler({ skillResolver });
   }
 
-  async planAcceptedJob({ jobId, accountId, request, agent = null, workflow = null } = {}) {
+  async planAcceptedJob({ jobId, accountId, request, agent = null, workflow = null, planId = null } = {}) {
     const job = await this.jobRepository.getJob(jobId, { accountId });
     if (!job) throw new Error('creative_job_not_found');
     const sourceRequest = request || job.executionContext?.executionMetadata?.agentExecutionRequest;
@@ -87,6 +87,7 @@ export class AgentExecutionPlanningService {
     let plan;
     try {
       plan = compiler.compile({
+        ...(planId ? { planId } : {}),
         request: compiledRequest,
         explicitSkillIds: skills.canonicalSkillIds,
         requireSkills: !noCanonicalRequestedSkills,
@@ -99,7 +100,7 @@ export class AgentExecutionPlanningService {
         } : null,
       });
     } catch (error) {
-      const updated = await this.jobRepository.updatePlanningResult({ jobId, accountId, unresolvedAdvisories: skills.unresolved, planningError: { code: error.code || 'planning_failed', message: error.message } });
+      const updated = await this.jobRepository.updatePlanningResult({ jobId, accountId, request: sourceRequest, unresolvedAdvisories: skills.unresolved, planningError: { code: error.code || 'planning_failed', message: error.message } });
       return { planned: false, plan: null, job: updated, unresolvedSkillReferences: skills.unresolved };
     }
     try {
@@ -108,6 +109,7 @@ export class AgentExecutionPlanningService {
       const updated = await this.jobRepository.updatePlanningResult({
         jobId,
         accountId,
+        request: sourceRequest,
         unresolvedAdvisories: skills.unresolved,
         planningError: { code: 'structured_state_invalid', message: 'Compiled planning state failed validation.' },
       });
@@ -116,7 +118,7 @@ export class AgentExecutionPlanningService {
     const planningError = plan.state === 'non_executable' || plan.valid === false
       ? { code: 'planning_failed', message: plan.errors?.[0]?.message || 'Compiled plan is not executable.' }
       : null;
-    const updated = await this.jobRepository.updatePlanningResult({ jobId, accountId, plan, unresolvedAdvisories: skills.unresolved, planningError });
+    const updated = await this.jobRepository.updatePlanningResult({ jobId, accountId, request: sourceRequest, plan, unresolvedAdvisories: skills.unresolved, planningError });
     return { planned: !planningError, plan, job: updated, unresolvedSkillReferences: skills.unresolved };
   }
 }

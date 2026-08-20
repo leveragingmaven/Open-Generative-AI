@@ -85,6 +85,24 @@ function requestGenerationValue(request, params, key) {
   return modelRequest?.generation?.output?.[key] ?? params[key];
 }
 
+function structuredResponseFormat(request, params) {
+  const structuredOutput = requestGenerationValue(request, params, "structuredOutput");
+  if (!structuredOutput || typeof structuredOutput !== "object" || Array.isArray(structuredOutput)) return undefined;
+  const name = typeof structuredOutput.name === "string" ? structuredOutput.name.trim() : "";
+  const schema = structuredOutput.schema;
+  if (!name || !schema || typeof schema !== "object" || Array.isArray(schema)) {
+    throw new Error("Structured output requires a schema name and JSON schema");
+  }
+  return {
+    type: "json_schema",
+    json_schema: {
+      name,
+      strict: structuredOutput.strict !== false,
+      schema,
+    },
+  };
+}
+
 export class OpenAICompatibleProvider extends CreativeProvider {
   constructor({ fetchImpl = globalThis.fetch, config = runtimeConfig() } = {}) {
     super({ id: PROVIDER_IDS.OPENAI, name: "OpenAI-compatible", capabilities: ["text", "llm", "streaming"] });
@@ -122,6 +140,7 @@ export class OpenAICompatibleProvider extends CreativeProvider {
         messages: requestMessages(request, params),
         temperature: requestGenerationValue(request, params, "temperature"),
         max_tokens: requestGenerationValue(request, params, "max_tokens"),
+        response_format: structuredResponseFormat(request, params),
       }),
     });
     if (!response.ok) throw new Error(`OpenAI-compatible request failed: ${response.status} ${response.statusText || ""}`.trim());

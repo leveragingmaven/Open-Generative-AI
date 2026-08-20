@@ -155,3 +155,44 @@ test("provider-facing messages label source material as untrusted data", async (
   assert.equal(messages[0].role, "system");
   assert.equal(messages[0].content, "Follow application instructions.");
 });
+
+test("provider-neutral structured output maps to OpenAI-compatible JSON schema format", async () => {
+  const { provider, calls } = providerWithCapture();
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["status"],
+    properties: { status: { type: "string", enum: ["resolved"] } },
+  };
+
+  await provider.execute({
+    operation: "text_generation",
+    context: {
+      modelRequest: {
+        instructions: "Return structured data.",
+        identityContext: {},
+        projectContext: {},
+        taskContext: {},
+        conversation: null,
+        input: { prompt: "Extract intent." },
+        generation: {
+          model: "structured-model",
+          output: {
+            structuredOutput: { name: "creative_intent", strict: true, schema },
+          },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(calls[0].body.response_format, {
+    type: "json_schema",
+    json_schema: { name: "creative_intent", strict: true, schema },
+  });
+});
+
+test("legacy text requests do not emit a response format", async () => {
+  const { provider, calls } = providerWithCapture();
+  await provider.execute({ operation: "text_generation", inputs: { prompt: "plain text" } });
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[0].body, "response_format"), false);
+});

@@ -46,6 +46,18 @@ export { scoreDeployment, rankDeployments } from "./CapabilityScorer.js";
 export { CapabilityRouter, capabilityRouter } from "./CapabilityRouter.js";
 export { createCreativeRequest } from "./CreativeRequest.js";
 export {
+  CREATIVE_INTENT_RESULT_SCHEMA,
+  CREATIVE_INTENT_STATUS,
+  CREATIVE_REFERENCE_ROLES,
+  SUPPORTED_CREATIVE_INTENT_OPERATIONS,
+  CreativeIntentExtractionError,
+  CreativeIntentExtractionService,
+  StructuredTextIntelligencePort,
+  normalizeTrustedIntentAttachments,
+  validateCreativeIntentResult,
+} from "./CreativeIntentExtractionService.js";
+export { ProviderStructuredTextIntelligence } from "./StructuredTextIntelligence.js";
+export {
   AGENT_EXECUTION_AUTHORIZATION_STATUS,
   createAgentExecutionRequest,
   validateAgentExecutionRequest,

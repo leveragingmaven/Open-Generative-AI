@@ -118,6 +118,20 @@ test('rejects incomplete or incorrectly scoped jobs without attempts', async () 
   }
 });
 
+test('does not accept plans that still require input or approval', async () => {
+  for (const state of ['non_executable', 'requires_input', 'requires_approval']) {
+    const db = new FakeDb();
+    db.jobs.get('job-1').plan_json = JSON.stringify({ planId: 'plan-1', valid: state !== 'non_executable', state, recipe: { id: 'image' }, capabilityRequirements: [{ id: 'image_generation' }] });
+    await assert.rejects(
+      service(db).acceptPlannedJobForExecution({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' }),
+      new RegExp(state === 'non_executable' ? 'compiled_plan_not_executable' : `creative_plan_${state}`),
+    );
+    assert.equal(db.jobs.get('job-1').status, 'pending');
+    assert.equal(db.jobs.get('job-1').execution_status, 'planned');
+    assert.equal(db.attempts.size, 0);
+  }
+});
+
 test('attempt insertion failure rolls back the job transition', async () => {
   const db = new FakeDb({ failAttemptInsert: true });
   await assert.rejects(service(db).acceptPlannedJobForExecution({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' }), /attempt_insert_failed/);

@@ -243,7 +243,7 @@ export class MySqlCreativeJobRepository {
     }
   }
 
-  async updatePlanningResult({ jobId, accountId, plan = null, planningError = null, unresolvedAdvisories = [] } = {}) {
+  async updatePlanningResult({ jobId, accountId, request = null, plan = null, planningError = null, unresolvedAdvisories = [] } = {}) {
     const job = await this.getJob(jobId, { accountId });
     if (!job) return null;
     const planning = {
@@ -263,7 +263,11 @@ export class MySqlCreativeJobRepository {
       recipe: plan?.recipe || job.executionContext?.recipe || null,
       capabilityRequirements: plan?.capabilityRequirements || job.executionContext?.capabilityRequirements || [],
       routing: plan?.routing || job.executionContext?.routing || null,
-      executionMetadata: { ...(job.executionContext?.executionMetadata || {}), planning },
+      executionMetadata: {
+        ...(job.executionContext?.executionMetadata || {}),
+        ...(request ? { agentExecutionRequest: request } : {}),
+        planning,
+      },
     };
     const status = planningError ? 'failed' : job.status;
     const executionStatus = planningError ? 'failed' : 'planned';
@@ -278,6 +282,30 @@ export class MySqlCreativeJobRepository {
         executionStatus, status, context.id || job.executionContextId || null, json(context), json(plan), json(error),
         json(metadata), jobId, accountId],
     );
+    return this.getJob(jobId, { accountId });
+  }
+
+  async approvePlan({ jobId, accountId, planId, approverIdentityKey, approvedAt = new Date().toISOString() } = {}) {
+    const job = await this.getJob(jobId, { accountId });
+    if (!job || job.planId !== planId || job.plan?.planId !== planId) return null;
+    const approval = { planId, approverIdentityKey, approvedAt };
+    const plan = {
+      ...job.plan,
+      state: 'executable',
+      metadata: { ...(job.plan.metadata || {}), approval },
+    };
+    const context = {
+      ...(job.executionContext || {}),
+      executionMetadata: { ...(job.executionContext?.executionMetadata || {}), planApproval: approval },
+    };
+    const metadata = { ...(job.metadata || {}), planApproval: approval };
+    const [updated] = await this.db.query(
+      `UPDATE creative_jobs
+       SET plan_json = ?, execution_context_json = ?, metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE job_id = ? AND account_id = ? AND plan_id = ? AND status = 'pending' AND execution_status = 'planned'`,
+      [json(plan), json(context), json(metadata), jobId, accountId, planId],
+    );
+    if (updated.affectedRows !== 1) return null;
     return this.getJob(jobId, { accountId });
   }
 }

@@ -162,8 +162,15 @@ export class SkillAwarePlanCompiler {
 
   compile(input = {}) {
     const rawRequest = input.request || input.creativeRequest || input;
+    const explicitRecipeId = typeof rawRequest.recipeId === "string" && rawRequest.recipeId.trim()
+      ? rawRequest.recipeId.trim()
+      : null;
+    const defaultRecipeId = explicitRecipeId
+      ? null
+      : this.recipeResolver.defaultRecipeIdForOperation?.(rawRequest.operation) || null;
     const request = createCreativeRequest({
       ...rawRequest,
+      recipeId: explicitRecipeId || defaultRecipeId,
       inputs: {
         ...(rawRequest.inputs || {}),
         ...(input.inputs || {}),

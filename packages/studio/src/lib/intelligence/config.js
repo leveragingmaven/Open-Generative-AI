@@ -62,7 +62,7 @@ export const RECIPE_LIBRARY = Object.freeze({
     id: "image-edit",
     promptId: "plain",
     providerId: "muapi",
-    capabilityRequirements: ["image_editing"],
+    capabilityRequirements: ["image_editing", "reference_images"],
   }),
   aiInfluencer: Object.freeze({
     id: "ai-influencer",

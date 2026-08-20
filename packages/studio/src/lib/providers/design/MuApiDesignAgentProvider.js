@@ -34,11 +34,12 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
     this.basePath = basePath.replace(/\/+$/, "");
   }
 
-  async request(path, { method = "GET", body } = {}) {
+  async request(path, { method = "GET", body, signal } = {}) {
     const response = await this.fetchFn(`${this.basePath}${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      ...(signal ? { signal } : {}),
     });
     const data = await readJsonResponse(response);
     if (!response.ok) {
@@ -62,7 +63,7 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
 
   async getSession(sessionId, context = {}) {
     if (!sessionId) throw new DesignAgentRequestError("Design session ID is required", { status: 400 });
-    const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/messages`);
+    const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/messages`, { signal: context.signal });
     return normalizeDesignAgentSession({ id: sessionId, messages: data }, context);
   }
 
@@ -79,7 +80,7 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
 
   async getSessionAssets(sessionId, context = {}) {
     if (!sessionId) throw new DesignAgentRequestError("Design session ID is required", { status: 400 });
-    const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/assets`);
+    const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/assets`, { signal: context.signal });
     const assets = Array.isArray(data) ? data : data.assets || [];
     return assets.map((asset) => normalizeDesignAgentAsset(asset, { ...context, designSessionId: sessionId }));
   }

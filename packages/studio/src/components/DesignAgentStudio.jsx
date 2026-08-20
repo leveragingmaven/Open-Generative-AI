@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { CreativeCanvas } from 'design-agent';
 
 import { getUserBalance } from '../muapi';
 import { useMavenSyncIntegration } from '../lib/mavensync/useMavenSyncIntegration.js';
 import { TABS } from '../studioNavigation.js';
+import DesignAgentExecutionPanel from './DesignAgentExecutionPanel.jsx';
 
 // Home-state shortcut groups resolved from the existing Creator OS navigation
 // registry (TABS). ids reference real destinations; label/icon/route come from
@@ -35,6 +37,7 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
   const [userData, setUserData] = useState(null);
   const integration = useMavenSyncIntegration();
   const homeShortcuts = useMemo(resolveHomeShortcuts, []);
+  const sessionId = useSearchParams().get('session');
 
   useEffect(() => {
     sessionStorage.setItem("fromDesignAgent", "true");
@@ -75,7 +78,7 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
   }, [apiKey, integration.session?.authenticated, integration.session?.displayName, integration.session?.email]);
 
   return (
-    <div className="h-full w-full bg-black overflow-hidden design-agent-studio">
+    <div className="relative h-full w-full bg-black overflow-hidden design-agent-studio">
       <CreativeCanvas
         user={userData}
         isAuthorized={!!userData}
@@ -85,6 +88,9 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
         isHeaderVisible={isHeaderVisible}
         homeShortcuts={homeShortcuts}
       />
+      <div className="absolute right-4 top-20 z-30 w-[318px] max-w-[calc(100%-2rem)]">
+        <DesignAgentExecutionPanel sessionId={sessionId} />
+      </div>
     </div>
   );
 }

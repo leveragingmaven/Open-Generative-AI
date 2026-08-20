@@ -1,6 +1,50 @@
 import { CreativeProvider } from "./CreativeProvider.js";
 import { PROVIDER_CAPABILITIES, PROVIDER_IDS, normalizeProviderError, normalizeProviderResponse } from "./providerTypes.js";
+import { getI2IModelById } from "../../models.js";
 import * as muapi from "../../muapi.js";
+
+function referenceValue(reference) {
+  if (typeof reference === "string") return reference.trim();
+  if (!reference || typeof reference !== "object") return "";
+  return [reference.url, reference.image_url, reference.assetUrl, reference.uri, reference.id, reference.assetId, reference.referenceId]
+    .find((value) => typeof value === "string" && value.trim())?.trim() || "";
+}
+
+function canonicalImageReferences(request) {
+  return [...(request.references || []), ...(request.attachments || [])]
+    .map(referenceValue)
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function hasExplicitImageReference(params, operation) {
+  if (params.image_url || (Array.isArray(params.images_list) && params.images_list.length > 0)) return true;
+  if (operation !== "image_editing") return false;
+  const model = getI2IModelById(params.model);
+  return Boolean(model?.imageField && params[model.imageField]);
+}
+
+function adaptImageReferences(request, operation, params) {
+  if (!["image_generation", "image_editing"].includes(operation)) return params;
+  if (hasExplicitImageReference(params, operation)) return params;
+  const modelId = params.model || request.routing?.model || request.routing?.modelId || request.routing?.endpoint;
+  if (operation === "image_generation" && modelId === "ideogram-v3-t2i") return params;
+  const references = canonicalImageReferences(request);
+  if (!references.length) return params;
+  if (operation === "image_editing") return { ...params, images_list: references };
+  return references.length === 1
+    ? { ...params, image_url: references[0] }
+    : { ...params, images_list: references };
+}
+
+function adaptImageEditingInputs(operation, params) {
+  if (operation !== "image_editing" || !("aspectRatio" in params)) return params;
+  const { aspectRatio, ...providerParams } = params;
+  if (providerParams.aspect_ratio !== undefined || aspectRatio === undefined || aspectRatio === null || aspectRatio === "") {
+    return providerParams;
+  }
+  return { ...providerParams, aspect_ratio: aspectRatio };
+}
 
 export class MuApiProvider extends CreativeProvider {
   constructor() {
@@ -14,7 +58,8 @@ export class MuApiProvider extends CreativeProvider {
   execute(request = {}) {
     const operation = request.operation || request.routing?.operation || request.capability?.operation || request.recipe?.operation;
     const apiKey = request.apiKey !== undefined ? request.apiKey : request.executionMetadata?.apiKey;
-    const params = request.params || request.payload || request.inputs || {};
+    const canonicalParams = request.params || request.payload || request.inputs || {};
+    const params = adaptImageReferences(request, operation, adaptImageEditingInputs(operation, canonicalParams));
     const methods = {
       image_generation: "generateImage",
       image_editing: "generateI2I",

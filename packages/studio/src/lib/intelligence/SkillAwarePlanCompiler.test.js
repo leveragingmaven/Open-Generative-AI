@@ -136,3 +136,57 @@ test("provenance traces request through skill and recipe", () => {
   assert.equal(plan.provenance[1].skillVersion, "1.2.0");
   assert.equal(plan.provenance[2].recipeVersion, 2);
 });
+
+test("canonical image operations receive defaults only when no explicit recipe exists", () => {
+  const recipeSet = {
+    image: { id: "image", version: 2, capabilityRequirements: ["image_generation"] },
+    imageEdit: { id: "image-edit", version: 2, capabilityRequirements: ["image_editing", "reference_images"] },
+  };
+  const imagePlan = compiler({ recipeSet }).compile({
+    request: { requestId: "request-image-default", operation: "image_generation", inputs: {} },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  const editPlan = compiler({ recipeSet }).compile({
+    request: { requestId: "request-edit-default", operation: "image_editing", inputs: {} },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(imagePlan.recipe.id, "image");
+  assert.deepEqual(imagePlan.capabilityRequirements.map(({ id }) => id), ["image_generation"]);
+  assert.equal(editPlan.recipe.id, "image-edit");
+  assert.deepEqual(editPlan.capabilityRequirements.map(({ id }) => id), ["image_editing", "reference_images"]);
+});
+
+test("an explicit valid recipe remains authoritative over an operation default", () => {
+  const recipeSet = {
+    image: { id: "image", version: 2, capabilityRequirements: ["image_generation"] },
+    imageEdit: { id: "image-edit", version: 2, capabilityRequirements: ["image_editing", "reference_images"] },
+  };
+  const plan = compiler({ recipeSet }).compile({
+    request: { requestId: "request-explicit-precedence", operation: "image_editing", recipeId: "image", inputs: {} },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(plan.recipe.id, "image");
+  assert.deepEqual(plan.capabilityRequirements.map(({ id }) => id), ["image_generation"]);
+});
+
+test("unknown operations preserve fallback behavior and missing configured defaults fail safely", () => {
+  const fallback = compiler().compile({
+    request: { requestId: "request-no-default", operation: "future_operation", inputs: {} },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(fallback.recipe.id, "image");
+
+  const missingResolver = new RecipeResolver({
+    recipes: { image: { id: "image" } },
+    operationDefaults: { image_editing: "missing-image-edit" },
+  });
+  const missingCompiler = compiler({ recipeSet: { image: { id: "image" } } });
+  missingCompiler.recipeResolver = missingResolver;
+  missingCompiler.intelligenceEngine.recipes = missingResolver;
+  const missing = missingCompiler.compile({
+    request: { requestId: "request-missing-default", operation: "image_editing", inputs: {} },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(missing.state, "non_executable");
+  assert.ok(missing.errors.some(({ code }) => code === "recipe_not_found"));
+});

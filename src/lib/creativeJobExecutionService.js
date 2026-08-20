@@ -2,10 +2,12 @@ import { CapabilityRouter } from '../../packages/studio/src/lib/intelligence/Cap
 import { ProviderRegistryExecutionAdapter } from '../../packages/studio/src/lib/intelligence/ProviderExecution.js';
 import { providerRegistry as defaultProviderRegistry } from '../../packages/studio/src/lib/providers/ProviderRegistry.js';
 import { EXECUTION_ATTEMPT_STATUS } from '../../packages/studio/src/lib/intelligence/ExecutionTypes.js';
+import { materializeExecutionInputs } from '../../packages/studio/src/lib/intelligence/ExecutionPromptMaterializer.js';
 import { MySqlCreativeJobRepository } from './creativeJobRepository.js';
 import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAttemptRepository.js';
 import { CreativeAssetPersistenceError, CreativeAssetPersistenceService } from './creativeAssetPersistence.js';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
+import { getExecutionReadinessErrorCode } from './creativeJobReadiness.js';
 
 export const DEFAULT_PROVIDER_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -43,6 +45,10 @@ function outputReferences(result) {
   if (Array.isArray(result?.outputs)) return result.outputs;
   if (result?.url) return [result.url];
   return [];
+}
+
+function mergeReferenceValues(...values) {
+  return values.flatMap((value) => Array.isArray(value) ? value : []).filter((value) => value != null && value !== '');
 }
 
 function terminalProviderResult(result) {
@@ -158,7 +164,8 @@ export class CreativeJobExecutionService {
     if (!job) throw new CreativeJobExecutionError('creative_job_not_found');
     if (job.creatorIdentityKey !== creatorIdentityKey) throw new CreativeJobExecutionError('creator_scope_mismatch');
     if (job.status !== 'queued' || job.executionStatus !== 'ready') throw new CreativeJobExecutionError('creative_job_not_execution_ready');
-    if (!job.plan?.planId || job.plan.valid === false || job.plan.state === 'non_executable') throw new CreativeJobExecutionError('compiled_plan_required');
+    const readinessError = getExecutionReadinessErrorCode(job.plan);
+    if (readinessError) throw new CreativeJobExecutionError(readinessError);
     if (!job.plan.recipe?.id && !job.recipe?.id) throw new CreativeJobExecutionError('persisted_recipe_required');
     if (!requiredCapabilities(job.plan).length) throw new CreativeJobExecutionError('capability_requirements_required');
     if (!job.authorizationId || !job.requestId || !job.agentId || !job.conversationId || !job.operation) throw new CreativeJobExecutionError('authorization_lineage_required');
@@ -206,6 +213,9 @@ export class CreativeJobExecutionService {
     const claimed = await this.claim(jobId, accountId, creatorIdentityKey, routing);
     const planRequest = claimed.job.plan?.request || {};
     const inputs = planRequest.inputs || claimed.job.executionContext?.recipe?.input || {};
+    const originalRequest = claimed.job.executionContext?.executionMetadata?.agentExecutionRequest || {};
+    const references = mergeReferenceValues(planRequest.references, originalRequest.references);
+    const attachments = mergeReferenceValues(planRequest.attachments, planRequest.metadata?.attachments, originalRequest.attachments);
     const startedAt = Date.now();
     let acceptedRemote = null;
     const onProviderJobAccepted = (providerJobId, providerStatus = 'accepted') => {
@@ -213,6 +223,12 @@ export class CreativeJobExecutionService {
       if (normalized) acceptedRemote = { providerJobId: normalized, providerStatus: String(providerStatus || 'accepted') };
     };
     try {
+      const materialized = materializeExecutionInputs({
+        plan: claimed.job.plan,
+        request: originalRequest,
+        inputs,
+        references,
+      });
       await this.authorizeFunding({ job: claimed.job, accountId, creatorIdentityKey, routing });
       const apiKey = await this.credentialResolver({
         job: claimed.job,
@@ -222,8 +238,14 @@ export class CreativeJobExecutionService {
         operation: claimed.job.operation,
         routing,
       });
-      const executionMetadata = { source: 'mavensync-agent-execution', ...(apiKey !== undefined ? { apiKey } : {}) };
-      const providerInputs = routing?.model && inputs?.model == null ? { ...inputs, model: routing.model } : inputs;
+      const executionMetadata = {
+        source: 'mavensync-agent-execution',
+        promptMaterialization: materialized.metadata,
+        ...(apiKey !== undefined ? { apiKey } : {}),
+      };
+      const providerInputs = routing?.model && materialized.inputs?.model == null
+        ? { ...materialized.inputs, model: routing.model }
+        : materialized.inputs;
       const raw = await this.executeProvider({
         job: claimed.job,
         context: claimed.job.executionContext,
@@ -231,8 +253,8 @@ export class CreativeJobExecutionService {
         operation: claimed.job.operation,
         recipe: claimed.job.plan?.recipe || claimed.job.recipe,
         inputs: providerInputs,
-        references: planRequest.references || [],
-        attachments: planRequest.metadata?.attachments || [],
+        references,
+        attachments,
         executionMetadata,
         apiKey,
       }, onProviderJobAccepted);

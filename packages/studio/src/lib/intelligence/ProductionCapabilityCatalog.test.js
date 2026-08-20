@@ -5,6 +5,7 @@ import { CapabilityRouter } from "./CapabilityRouter.js";
 import { ProviderCapabilityRegistry } from "./ProviderCapabilityRegistry.js";
 import { registerProductionCapabilities, PRODUCTION_DEPLOYMENTS, MUAPI_MODEL_FIXTURES } from "./ProductionCapabilityCatalog.js";
 import { RecipeResolver } from "./RecipeResolver.js";
+import { providerRegistry } from "../providers/ProviderRegistry.js";
 
 test("production catalog registers MuAPI image deployments and recipes declare capabilities", () => {
   const capabilities = new CapabilityRegistry([]);
@@ -48,6 +49,42 @@ test("normalized MuAPI model records represent specialist tools, families, varia
   assert.equal(seedance.pricing.rule.values["1080p"], 4.25);
   assert.equal(seedance.source.document, "MUAPI_MODEL_INTELLIGENCE_CATALOG.md");
   assert.equal(seedance.verification.status, "verified");
+});
+
+test("registers the canonical Nano Banana generation and reference-edit models", () => {
+  const capabilities = new CapabilityRegistry([]);
+  const deployments = new ProviderCapabilityRegistry();
+  registerProductionCapabilities({ capabilities, deployments });
+
+  const nanoGeneration = deployments.getModel("muapi-nano-banana-pro");
+  const nanoEdit = deployments.getModel("muapi-nano-banana-pro-edit");
+
+  assert.equal(nanoGeneration.modelId, "nano-banana-pro");
+  assert.equal(nanoGeneration.endpointId, "nano-banana-pro");
+  assert.equal(nanoGeneration.operation, "image_generation");
+  assert.deepEqual(nanoGeneration.capabilities, ["image_generation", "commercial_license"]);
+  assert.equal(nanoGeneration.pricing.unitPrice, null);
+
+  assert.equal(nanoEdit.modelId, "nano-banana-pro-edit");
+  assert.equal(nanoEdit.endpointId, "nano-banana-pro-edit");
+  assert.equal(nanoEdit.operation, "image_editing");
+  assert.deepEqual(nanoEdit.capabilities, ["image_editing", "reference_images", "commercial_license"]);
+  assert.deepEqual(nanoEdit.referenceLimits, { max: 8 });
+  assert.deepEqual(nanoEdit.inputLimits, { required: ["image"] });
+});
+
+test("keeps Nano Banana provider ownership server-side and preserves Flux image routes", () => {
+  const capabilities = new CapabilityRegistry([]);
+  const deployments = new ProviderCapabilityRegistry();
+  registerProductionCapabilities({ capabilities, deployments });
+  const imageModels = deployments.listModels().filter((model) => model.operation === "image_generation");
+  const referenceModels = deployments.listModels().filter((model) => model.operation === "image_editing");
+
+  assert.equal(providerRegistry.get("muapi").id, "muapi");
+  assert.deepEqual(imageModels.filter((model) => model.logicalFamily === "flux-kontext-t2i").map((model) => model.modelId), [
+    "flux-kontext-dev-t2i", "flux-kontext-pro-t2i", "flux-kontext-max-t2i",
+  ]);
+  assert.deepEqual(referenceModels.map((model) => model.modelId), ["nano-banana-pro-edit"]);
 });
 
 test("model catalog records remain separate from router deployments", () => {

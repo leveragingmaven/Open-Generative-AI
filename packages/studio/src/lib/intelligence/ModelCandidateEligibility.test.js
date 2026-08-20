@@ -26,8 +26,23 @@ function candidate(overrides = {}) {
 test("legacy requirements remain compatible", () => {
   const models = catalogModels();
   const eligible = getEligibleModelCandidates(models, ["image_generation"]);
-  assert.equal(eligible.length, 3);
-  assert.ok(eligible.every((model) => model.logicalFamily === "flux-kontext-t2i"));
+  assert.equal(eligible.length, 4);
+  assert.deepEqual(eligible.filter((model) => model.logicalFamily === "flux-kontext-t2i").map((model) => model.modelId), [
+    "flux-kontext-dev-t2i", "flux-kontext-pro-t2i", "flux-kontext-max-t2i",
+  ]);
+  assert.ok(eligible.some((model) => model.modelId === "nano-banana-pro"));
+});
+
+test("reference-image requirements select the canonical Nano Banana edit model", () => {
+  const models = catalogModels();
+  const eligible = getEligibleModelCandidates(models, [{
+    id: "reference_images",
+    operation: "image_editing",
+    modality: "image",
+    referenceCount: 1,
+  }]);
+
+  assert.deepEqual(eligible.map((model) => model.modelId), ["nano-banana-pro-edit"]);
 });
 
 test("specialist capability identifies the background-removal candidate", () => {

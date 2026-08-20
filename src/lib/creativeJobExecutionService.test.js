@@ -114,6 +114,122 @@ test('execution-ready job routes, invokes Provider Registry, and persists comple
   assert.equal(JSON.parse(db.jobs.get('job-1').result_json).assetId, 'asset-1');
 });
 
+test('execution handoff preserves plan references and attachments for the provider', async () => {
+  const db = new FakeDb();
+  const plan = JSON.parse(db.jobs.get('job-1').plan_json);
+  plan.request.references = [{ url: 'https://cdn.example.test/avatar.png' }];
+  plan.request.attachments = ['https://cdn.example.test/site.png'];
+  db.jobs.get('job-1').plan_json = JSON.stringify(plan);
+  await service(db).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.deepEqual(db.providerRequest.references, [{ url: 'https://cdn.example.test/avatar.png' }]);
+  assert.deepEqual(db.providerRequest.attachments, ['https://cdn.example.test/site.png']);
+});
+
+test('native reference-driven prompt is materialized before the provider adapter while Nano routing and references remain unchanged', async () => {
+  const db = new FakeDb();
+  const row = db.jobs.get('job-1');
+  row.operation = 'image_editing';
+  const plan = JSON.parse(row.plan_json);
+  plan.request = {
+    operation: 'image_editing',
+    intent: 'Create one professional creator profile image using my uploaded reference',
+    inputs: {
+      subject: 'the referenced creator',
+      constraints: ['natural expression', 'clean neutral background'],
+      aspectRatio: '1:1',
+    },
+    references: [{ id: 'portrait-1', role: 'character_reference', url: 'https://cdn.example.test/portrait.png' }],
+  };
+  plan.capabilityRequirements = [{ id: 'image_editing' }, { id: 'reference_images' }];
+  row.plan_json = JSON.stringify(plan);
+  row.execution_context_json = JSON.stringify({
+    routing: null,
+    executionMetadata: {
+      agentExecutionRequest: {
+        userIntent: plan.request.intent,
+        referenceRoles: [{ attachmentId: 'portrait-1', role: 'character_reference' }],
+      },
+    },
+  });
+
+  await service(db, {
+    persistedRouting: {
+      providerId: 'muapi',
+      deploymentId: 'muapi-image-editing',
+      model: 'nano-banana-pro-edit',
+    },
+  }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+
+  assert.equal(db.calls, 1);
+  assert.match(db.providerRequest.inputs.prompt, /Create one professional creator profile image using my uploaded reference\./);
+  assert.match(db.providerRequest.inputs.prompt, /Preserve the subject's recognizable identity\./);
+  assert.equal(db.providerRequest.inputs.model, 'nano-banana-pro-edit');
+  assert.equal(db.providerRequest.routing.providerId, 'muapi');
+  assert.equal(db.providerRequest.routing.deploymentId, 'muapi-image-editing');
+  assert.deepEqual(db.providerRequest.references, plan.request.references);
+  assert.equal('image_url' in db.providerRequest.inputs, false);
+  assert.equal('images_list' in db.providerRequest.inputs, false);
+});
+
+test('native generic image-generation prompt materialization leaves Flux routing unchanged', async () => {
+  const db = new FakeDb();
+  const plan = JSON.parse(db.jobs.get('job-1').plan_json);
+  plan.request = { operation: 'image_generation', intent: 'Create a square product launch image', inputs: { platform: 'Instagram', aspectRatio: '1:1' }, references: [] };
+  db.jobs.get('job-1').plan_json = JSON.stringify(plan);
+
+  await service(db, {
+    persistedRouting: { providerId: 'replicate', deploymentId: 'flux-image', model: 'flux-1.1-pro' },
+  }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+
+  assert.equal(db.calls, 1);
+  assert.equal(db.providerRequest.routing.providerId, 'replicate');
+  assert.equal(db.providerRequest.routing.deploymentId, 'flux-image');
+  assert.equal(db.providerRequest.inputs.model, 'flux-1.1-pro');
+  assert.equal(db.providerRequest.inputs.prompt, 'Create a square product launch image. Aspect ratio: 1:1. Platform: Instagram.');
+});
+
+test('missing meaningful execution instruction fails before funding, credentials, or provider dispatch', async () => {
+  const db = new FakeDb();
+  const plan = JSON.parse(db.jobs.get('job-1').plan_json);
+  plan.request = { operation: 'image_generation', intent: '', inputs: {}, references: [] };
+  db.jobs.get('job-1').plan_json = JSON.stringify(plan);
+  let fundingCalls = 0;
+  let credentialCalls = 0;
+
+  const result = await service(db, {
+    persistedRouting: { providerId: 'replicate', deploymentId: 'flux-image' },
+    costAuthorization: { authorize: async () => { fundingCalls += 1; return { authorized: true }; } },
+    credentialResolver: async () => { credentialCalls += 1; return 'credential'; },
+  }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+
+  assert.equal(result.completed, false);
+  assert.equal(db.calls, 0);
+  assert.equal(fundingCalls, 0);
+  assert.equal(credentialCalls, 0);
+  assert.equal(JSON.parse(db.jobs.get('job-1').error_json).code, 'execution_prompt_required');
+  assert.equal(db.attempts.get('attempt-1').status, 'failed');
+});
+
+test('execution blocks non-ready plan states before provider or credential work', async () => {
+  for (const state of ['non_executable', 'requires_input', 'requires_approval']) {
+    const db = new FakeDb();
+    const plan = JSON.parse(db.jobs.get('job-1').plan_json);
+    plan.state = state;
+    plan.valid = state !== 'non_executable';
+    db.jobs.get('job-1').plan_json = JSON.stringify(plan);
+    let credentialsResolved = false;
+    await assert.rejects(
+      service(db, { credentialResolver: async () => { credentialsResolved = true; return 'credential'; } }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' }),
+      new RegExp(state === 'non_executable' ? 'compiled_plan_not_executable' : `creative_plan_${state}`),
+    );
+    assert.equal(db.calls, 0);
+    assert.equal(credentialsResolved, false);
+    assert.equal(db.jobs.get('job-1').status, 'queued');
+    assert.equal(db.jobs.get('job-1').execution_status, 'ready');
+    assert.equal(db.attempts.get('attempt-1').status, 'created');
+  }
+});
+
 test('synchronous provider completes before the configured deadline', async () => {
   const db = new FakeDb();
   const result = await service(db, { providerDelayMs: 1 }).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });

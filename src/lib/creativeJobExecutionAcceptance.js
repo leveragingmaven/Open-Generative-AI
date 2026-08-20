@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { EXECUTION_ATTEMPT_STATUS } from '../../packages/studio/src/lib/intelligence/ExecutionTypes.js';
 import { MySqlCreativeJobRepository } from './creativeJobRepository.js';
 import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAttemptRepository.js';
+import { getExecutionReadinessErrorCode } from './creativeJobReadiness.js';
 
 export class CreativeJobExecutionAcceptanceError extends Error {
   constructor(code, message = code) {
@@ -19,8 +20,8 @@ function validatePlannedJob(job, creatorIdentityKey) {
   if (!job) throw new CreativeJobExecutionAcceptanceError('creative_job_not_found');
   if (job.creatorIdentityKey !== creatorIdentityKey) throw new CreativeJobExecutionAcceptanceError('creator_scope_mismatch');
   if (job.status !== 'pending' || job.executionStatus !== 'planned') throw new CreativeJobExecutionAcceptanceError('creative_job_not_planned');
-  if (!job.plan || !job.plan.planId) throw new CreativeJobExecutionAcceptanceError('compiled_plan_required');
-  if (job.plan.valid === false || job.plan.state === 'non_executable') throw new CreativeJobExecutionAcceptanceError('compiled_plan_not_executable');
+  const readinessError = getExecutionReadinessErrorCode(job.plan);
+  if (readinessError) throw new CreativeJobExecutionAcceptanceError(readinessError);
   if (!job.recipe?.id && !job.plan.recipe?.id) throw new CreativeJobExecutionAcceptanceError('persisted_recipe_required');
   if (!Array.isArray(job.plan.capabilityRequirements) || !job.plan.capabilityRequirements.length) {
     throw new CreativeJobExecutionAcceptanceError('capability_requirements_required');

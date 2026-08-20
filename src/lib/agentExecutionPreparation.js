@@ -19,6 +19,25 @@ function responseState(job, attempt) {
   return { ok: true, status: 'ready', jobId: job.id, attemptId: attempt.id, executionStarted: false };
 }
 
+function responseForPlanningState(job, plan) {
+  return {
+    ok: true,
+    status: plan.state,
+    planState: plan.state,
+    jobId: job.id,
+    planId: plan.planId || job.planId || null,
+    requiredInputs: plan.unresolvedRequiredInputs || [],
+    approvalRequirements: plan.approvalRequirements || [],
+    review: {
+      recipe: plan.recipe ? { id: plan.recipe.id || null, version: plan.recipe.version || null } : null,
+      requiredInputs: plan.requiredInputs || [],
+      warnings: plan.warnings || [],
+      assumptions: plan.assumptions || [],
+    },
+    executionStarted: false,
+  };
+}
+
 export class AgentExecutionPreparationService {
   constructor({ jobRepository = new MySqlCreativeJobRepository(), planningService, acceptanceService, capabilityRouter = new CapabilityRouter() } = {}) {
     this.jobRepository = jobRepository;
@@ -50,6 +69,12 @@ export class AgentExecutionPreparationService {
       }),
     };
     await this.jobRepository.updatePlanningResult({ jobId, accountId: request.authenticatedIdentity.accountId, plan: routedPlan });
+    if (routedPlan.state !== 'executable') {
+      if (routedPlan.state === 'non_executable' || routedPlan.valid === false) {
+        throw new AgentExecutionPreparationError('planning_failed', routedPlan.errors?.[0]?.message || 'Planning failed.');
+      }
+      return responseForPlanningState({ ...accepted.job, planId: routedPlan.planId }, routedPlan);
+    }
     const ready = await this.acceptanceService.acceptPlannedJobForExecution({ jobId, accountId: request.authenticatedIdentity.accountId, creatorIdentityKey: request.authenticatedIdentity.identityKey });
     return responseState(ready.job, ready.attempt);
   }

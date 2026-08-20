@@ -58,7 +58,10 @@ function jobRepository(sourceRequest) {
 }
 
 test('accepted job compiles and persists a skill-aware plan with context lineage', async () => {
-  const repository = jobRepository(request());
+  const repository = jobRepository(request({
+    references: [{ url: 'https://cdn.example.test/avatar.png' }],
+    attachments: ['https://cdn.example.test/site.png'],
+  }));
   const result = await new AgentExecutionPlanningService({
     jobRepository: repository,
     skillResolver: { getSkill: (id) => skills[id] || (() => { throw new Error('skill_not_found'); })() },
@@ -70,6 +73,8 @@ test('accepted job compiles and persists a skill-aware plan with context lineage
   assert.equal(result.plan.request.accountId, 'account-1');
   assert.equal(result.plan.request.metadata.agentExecution.agentId, 'remote-template-1');
   assert.equal(result.plan.request.metadata.agentExecution.creatorIdentityKey, 'creator-1');
+  assert.deepEqual(result.plan.request.references, [{ url: 'https://cdn.example.test/avatar.png' }]);
+  assert.deepEqual(result.plan.request.attachments, ['https://cdn.example.test/site.png']);
   assert.equal(result.plan.campaignContext.twinContext.twinId, 'twin-1');
   assert.equal(repository.job.plan.planId, result.plan.planId);
 });

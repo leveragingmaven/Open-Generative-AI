@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateImage } from "./muapi.js";
+import { generateI2I, generateImage } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -57,6 +57,22 @@ async function generateAndCaptureBody(params = imageParams()) {
   return { submissionUrl, submissionBody };
 }
 
+async function generateI2IAndCaptureBody(params) {
+  let submissionUrl;
+  let submissionBody;
+  globalThis.fetch = mockSubmissionAndPolling({
+    polls: [response({ status: 'completed' })],
+    onFetch: (url, options) => {
+      if (options?.method === 'POST') {
+        submissionUrl = url;
+        submissionBody = JSON.parse(options.body);
+      }
+    },
+  });
+  await generateI2I('test-key', params);
+  return { submissionUrl, submissionBody };
+}
+
 async function rejectsWith(fetchImpl, expected, params = imageParams()) {
   globalThis.fetch = fetchImpl;
   await assert.rejects(() => generateImage('test-key', params), expected);
@@ -105,6 +121,22 @@ test('reference-image models continue receiving their image field', async () => 
 
   assert.equal(submissionBody.image_url, 'https://test/reference.png');
   assert.equal(submissionBody.strength, 0.75);
+});
+
+test('Nano Banana Pro Edit submits prompt, provider aspect ratio, and canonical references', async () => {
+  const { submissionUrl, submissionBody } = await generateI2IAndCaptureBody({
+    model: 'nano-banana-pro-edit',
+    prompt: 'Edit the avatar',
+    aspect_ratio: '1:1',
+    images_list: ['https://test/avatar.png'],
+  });
+
+  assert.equal(submissionUrl, 'https://api.muapi.ai/api/v1/nano-banana-pro-edit');
+  assert.deepEqual(submissionBody, {
+    prompt: 'Edit the avatar',
+    images_list: ['https://test/avatar.png'],
+    aspect_ratio: '1:1',
+  });
 });
 
 test('completed returns immediately', async () => {
@@ -233,7 +265,7 @@ for (const submission of [{ request_id: 'request-id-field' }, { id: 'id-field' }
 }
 
 test('polling URL uses the exact returned request ID', async () => {
-  const requestId = '29893303-1b66-4a9e-94e7-a5cfe14307fc';
+  const requestId = 'returned-request-id-with-hyphens';
   const urls = [];
   globalThis.fetch = mockSubmissionAndPolling({
     submission: { request_id: requestId },
