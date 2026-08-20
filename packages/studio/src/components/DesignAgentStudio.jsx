@@ -35,6 +35,7 @@ function resolveHomeShortcuts() {
 
 export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHeader }) {
   const [userData, setUserData] = useState(null);
+  const [controlledMode, setControlledMode] = useState(false);
   const integration = useMavenSyncIntegration();
   const homeShortcuts = useMemo(resolveHomeShortcuts, []);
   const sessionId = useSearchParams().get('session');
@@ -47,6 +48,14 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
     // value before the canvas mounts and let same-origin server routes attach
     // the configured MuAPI credential.
     localStorage.removeItem("token");
+
+    // Discover whether the server has enabled the Creator OS controlled
+    // conversation boundary. This is read-only from the browser; the server
+    // owns the decision and the route refuses to change mode via client input.
+    fetch('/api/design-agent/config')
+      .then((res) => res.ok ? res.json() : { controlledExecution: false })
+      .then((data) => setControlledMode(Boolean(data?.controlledExecution)))
+      .catch(() => setControlledMode(false));
 
     if (!apiKey) return;
 
@@ -88,6 +97,7 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
           onToggleHeader={onToggleHeader}
           isHeaderVisible={isHeaderVisible}
           homeShortcuts={homeShortcuts}
+          controlledMode={controlledMode}
         />
       </div>
       <aside className="max-h-[42%] w-full shrink-0 border-t border-divider bg-bg-page lg:h-full lg:max-h-none lg:w-[340px] lg:border-l lg:border-t-0" aria-label="Creator OS creative work panel">
