@@ -227,6 +227,75 @@ test('owned Design Agent image asset becomes the canonical image-editing referen
   assert.equal(setupResult.preparation.state.executions, 0);
 });
 
+test('completed external edit activity is excluded while portrait intent and trusted provenance prepare an executable image edit', async () => {
+  const trustedUrl = 'https://cdn.test/session-1/portrait-reference.png';
+  const provider = designProvider({
+    messages: [
+      { role: 'system', content: 'Private runtime instructions.' },
+      {
+        role: 'user',
+        content: 'Using @asset_1 as the reference, create a professional 1:1 portrait with polished studio lighting.',
+        attachments: [{ asset_label: 'asset_1', kind: 'image' }],
+      },
+      {
+        role: 'assistant',
+        content: 'I created the professional portrait using your reference.',
+        events: [
+          { type: 'tool_call', name: 'edit_image', args: { model: 'external-runtime-model', prompt: 'provider prompt' } },
+          { type: 'tool_result', name: 'edit_image', result: { url: 'https://provider.test/generated.png', provider_secret: 'hidden' } },
+        ],
+      },
+      { role: 'tool', content: '{"provider_payload":"hidden"}' },
+    ],
+    assets: [{ asset_label: 'asset_1', url: trustedUrl, kind: 'image', session_id: 'session-1' }],
+  });
+  const setupResult = await setup({
+    provider,
+    extracted: extraction({
+      operation: 'image_editing',
+      userIntent: 'Create a professional square portrait using the trusted portrait reference.',
+      inputs: {
+        ...semanticInputs,
+        subject: 'the person in the trusted portrait reference',
+        requestedChanges: ['professional studio lighting', 'polished portrait finish'],
+      },
+      referenceRoles: [{ attachmentId: 'asset_1', role: 'source_image' }],
+    }),
+  });
+
+  const result = await response(await handleAgentExecutionFromConversationPost(request({
+    agentId: 'design-agent', conversationId: 'session-1',
+  }), { identity, service: setupResult.service }));
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.status, 'ready');
+  assert.equal(result.body.executionStarted, false);
+  for (const field of ['provider', 'model', 'credential', 'apiKey', 'endpoint', 'authorizationProof']) {
+    assert.equal(JSON.stringify(result.body).includes(field), false);
+  }
+  assert.deepEqual(setupResult.state.extractionInput.messages, [
+    { role: 'user', content: 'Using @asset_1 as the reference, create a professional 1:1 portrait with polished studio lighting.' },
+    { role: 'assistant', content: 'I created the professional portrait using your reference.' },
+  ]);
+  assert.deepEqual(setupResult.state.extractionInput.attachments, [{
+    attachmentId: 'asset_1', kind: 'image', url: trustedUrl,
+  }]);
+  assert.equal(JSON.stringify(setupResult.state.extractionInput).includes('tool_call'), false);
+  assert.equal(JSON.stringify(setupResult.state.extractionInput).includes('provider_secret'), false);
+  assert.equal(JSON.stringify(setupResult.state.extractionInput).includes('external-runtime-model'), false);
+  const plan = setupResult.preparation.state.job.plan;
+  assert.equal(plan.state, 'executable');
+  assert.equal(plan.recipe.id, 'image-edit');
+  assert.deepEqual(plan.capabilityRequirements.map(({ id }) => id), ['image_editing', 'reference_images']);
+  assert.equal(plan.routing.operation, 'image_editing');
+  assert.equal(typeof plan.routing.model, 'string');
+  assert.ok(plan.routing.model);
+  assert.deepEqual(setupResult.state.approvedProposal.references, [
+    { id: 'asset_1', url: trustedUrl, role: 'source_image' },
+  ]);
+  assert.equal(setupResult.preparation.state.executions, 0);
+});
+
 test('unbound, wrong-account, and wrong-creator sessions fail before extraction, authorization, or preparation', async (t) => {
   for (const [name, options, requestIdentity, code] of [
     ['unbound', { bind: false }, identity, 'design_session_ownership_unverified'],

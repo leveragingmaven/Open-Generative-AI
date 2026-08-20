@@ -78,19 +78,21 @@ export default function DesignAgentStudio({ apiKey, isHeaderVisible, onToggleHea
   }, [apiKey, integration.session?.authenticated, integration.session?.displayName, integration.session?.email]);
 
   return (
-    <div className="relative h-full w-full bg-black overflow-hidden design-agent-studio">
-      <CreativeCanvas
-        user={userData}
-        isAuthorized={!!userData}
-        creditConversionRate={200}
-        theme="dark"
-        onToggleHeader={onToggleHeader}
-        isHeaderVisible={isHeaderVisible}
-        homeShortcuts={homeShortcuts}
-      />
-      <div className="absolute right-4 top-20 z-30 w-[318px] max-w-[calc(100%-2rem)]">
-        <DesignAgentExecutionPanel sessionId={sessionId} />
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black lg:flex-row design-agent-studio">
+      <div className="min-h-0 min-w-0 flex-1">
+        <CreativeCanvas
+          user={userData}
+          isAuthorized={!!userData}
+          creditConversionRate={200}
+          theme="dark"
+          onToggleHeader={onToggleHeader}
+          isHeaderVisible={isHeaderVisible}
+          homeShortcuts={homeShortcuts}
+        />
       </div>
+      <aside className="max-h-[42%] w-full shrink-0 border-t border-divider bg-bg-page lg:h-full lg:max-h-none lg:w-[340px] lg:border-l lg:border-t-0" aria-label="Creator OS creative work panel">
+        <DesignAgentExecutionPanel sessionId={sessionId} />
+      </aside>
     </div>
   );
 }

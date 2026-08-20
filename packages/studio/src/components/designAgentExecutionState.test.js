@@ -58,6 +58,20 @@ test('historical unbound sessions receive safe new-session guidance', () => {
   assert.doesNotMatch(designAgentPreparationError({ code: 'provider_secret_detail' }), /provider_secret_detail/);
 });
 
+test('safe preparation failures remain actionable without exposing internal messages', () => {
+  for (const [code, expected] of [
+    ['creative_intelligence_not_configured', /not configured/],
+    ['provider_execution_failed', /No media was created/],
+    ['creative_intent_result_invalid', /safe creative request/],
+    ['authorization_not_active', /expired/],
+    ['planning_failed', /executable creative plan/],
+  ]) {
+    const message = designAgentPreparationError({ code, message: 'raw provider payload secret-key account-123' });
+    assert.match(message, expected);
+    assert.doesNotMatch(message, /raw provider payload|secret-key|account-123/);
+  }
+});
+
 test('Design Agent UI adapter cannot invoke the execution endpoint', async () => {
   const source = await readFile(new URL('./DesignAgentExecutionPanel.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /executeAgentCreativeJob|agent-execution\/execute/);
@@ -65,4 +79,16 @@ test('Design Agent UI adapter cannot invoke the execution endpoint', async () =>
   assert.match(source, /approveAgentExecutionPlan/);
   assert.match(source, /onApprove=\{handleApproval\}/);
   assert.doesNotMatch(source, /onCreate=/);
+});
+
+test('Creative Work is a non-overlay host section and replaces its initial action with one preparation state', async () => {
+  const panel = await readFile(new URL('./DesignAgentExecutionPanel.jsx', import.meta.url), 'utf8');
+  const studio = await readFile(new URL('./DesignAgentStudio.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /Ready to turn this conversation into content\?/);
+  assert.match(panel, /Preparation does not create media\./);
+  assert.match(panel, /!state \? \(/);
+  assert.doesNotMatch(panel, /absolute|shadow-xl|top-20|right-4/);
+  assert.match(studio, /<aside/);
+  assert.match(studio, /min-w-0 flex-1/);
+  assert.doesNotMatch(studio, /absolute right-4 top-20/);
 });

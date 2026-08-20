@@ -11,13 +11,71 @@ import { DesignAgentSessionOwnershipService } from '../../../../src/lib/designAg
 import { getMuApiBaseUrl, getServerMuApiKey } from '../../../../src/lib/agencyMode.js';
 import { CreativeIntentExtractionService } from '../../../../packages/studio/src/lib/intelligence/CreativeIntentExtractionService.js';
 import { ProviderStructuredTextIntelligence } from '../../../../packages/studio/src/lib/intelligence/StructuredTextIntelligence.js';
-import { openAICompatibleProvider } from '../../../../packages/studio/src/lib/providers/OpenAICompatibleProvider.js';
+import { OpenAICompatibleProvider } from '../../../../packages/studio/src/lib/providers/OpenAICompatibleProvider.js';
 import { MuApiDesignAgentProvider } from '../../../../packages/studio/src/lib/providers/design/MuApiDesignAgentProvider.js';
 
 const REQUEST_FIELDS = new Set(['agentId', 'conversationId']);
 
+const SAFE_PREPARATION_ERRORS = new Map([
+  ['creative_intelligence_not_configured', {
+    status: 503,
+    message: 'Creative intent preparation is not configured for this Creator OS deployment.',
+  }],
+  ['provider_execution_failed', {
+    status: 502,
+    message: 'Creative intent analysis could not be completed. No media was created.',
+  }],
+  ['creative_intent_result_invalid', {
+    status: 422,
+    message: 'The conversation could not be converted into a safe creative request.',
+  }],
+  ['authorization_not_active', {
+    status: 409,
+    message: 'Creative work authorization is no longer active. Start creative work again.',
+  }],
+  ['planning_failed', {
+    status: 422,
+    message: 'Creator OS could not build an executable creative plan from this conversation.',
+  }],
+]);
+
+function serverTextIntelligenceConfig(env = process.env) {
+  return {
+    endpoint: String(env.OPENAI_COMPATIBLE_BASE_URL || env.OPENAI_BASE_URL || '').trim(),
+    model: String(env.MAVENSYNC_OPENAI_MODEL || env.OPENAI_MODEL || '').trim(),
+    serverKey: String(env.OPENAI_API_KEY || env.MAVENSYNC_OPENAI_API_KEY || '').trim() || null,
+  };
+}
+
+function validHttpEndpoint(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function createServerTextIntelligence({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const config = serverTextIntelligenceConfig(env);
+  if (!validHttpEndpoint(config.endpoint) || !config.model || !config.serverKey) {
+    return {
+      async extract() {
+        throw Object.assign(new Error('Creative intent preparation is not configured.'), {
+          code: 'creative_intelligence_not_configured',
+          status: 503,
+        });
+      },
+    };
+  }
+  return new ProviderStructuredTextIntelligence({
+    provider: new OpenAICompatibleProvider({ fetchImpl, config }),
+  });
+}
+
 function errorResponse(error) {
-  const status = error?.status || (error?.code === 'creator_os_auth_required' ? 401 : 422);
+  const safePreparationError = SAFE_PREPARATION_ERRORS.get(error?.code);
+  const status = error?.status || safePreparationError?.status || (error?.code === 'creator_os_auth_required' ? 401 : 422);
   const safeCodes = new Set([
     'creator_os_auth_required', 'invalid_json', 'invalid_request_payload',
     'unsupported_conversation_execution_fields', 'agentId_required', 'conversationId_required',
@@ -28,7 +86,8 @@ function errorResponse(error) {
     'unsupported_design_attachment_kind', 'fabricated_design_asset_reference',
   ]);
   return Response.json({
-    error: safeCodes.has(error?.code) ? error.message : 'Unable to prepare creative work from this conversation.',
+    error: safePreparationError?.message
+      || (safeCodes.has(error?.code) ? error.message : 'Unable to prepare creative work from this conversation.'),
     code: error?.code || 'conversation_execution_preparation_failed',
   }, { status });
 }
@@ -58,7 +117,7 @@ export function createConversationExecutionService({
   designAgentProvider = createServerDesignAgentProvider(),
   designAgentOwnershipService = new DesignAgentSessionOwnershipService(),
   intentExtractionService,
-  textIntelligence = new ProviderStructuredTextIntelligence({ provider: openAICompatibleProvider }),
+  textIntelligence = createServerTextIntelligence(),
   preparationService,
   issueApproval,
   normalizeAuthorizedRequest,
@@ -131,3 +190,9 @@ export async function handleAgentExecutionFromConversationRoute(
 export async function POST(request) {
   return handleAgentExecutionFromConversationRoute(request);
 }
+
+export const agentExecutionFromConversationInternals = {
+  createServerTextIntelligence,
+  serverTextIntelligenceConfig,
+  validHttpEndpoint,
+};

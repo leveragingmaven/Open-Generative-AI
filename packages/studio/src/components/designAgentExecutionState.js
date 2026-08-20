@@ -19,6 +19,21 @@ export function designAgentPreparationError(error) {
   if (error?.code === 'design_session_ownership_schema_missing') {
     return 'Creator OS creative execution is temporarily unavailable.';
   }
+  if (error?.code === 'creative_intelligence_not_configured') {
+    return 'Creative intent preparation is not configured for this Creator OS deployment.';
+  }
+  if (error?.code === 'provider_execution_failed') {
+    return 'Creative intent analysis could not be completed. No media was created.';
+  }
+  if (error?.code === 'creative_intent_result_invalid') {
+    return 'This conversation could not be converted into a safe creative request.';
+  }
+  if (error?.code === 'authorization_not_active') {
+    return 'Creative work authorization expired. Start creative work again.';
+  }
+  if (error?.code === 'planning_failed') {
+    return 'Creator OS could not build an executable creative plan from this conversation.';
+  }
   return 'Unable to prepare creative work. Please try again.';
 }
 

@@ -10,7 +10,6 @@ import {
 import {
   createSingleFlightGuard,
   designAgentPreparationError,
-  designAgentPreparationPresentation,
   designAgentStartRequest,
 } from './designAgentExecutionState.js';
 
@@ -25,7 +24,6 @@ export default function DesignAgentExecutionPanel({
   const [state, setState] = useState(null);
   const [startPending, setStartPending] = useState(false);
   const [approvalPending, setApprovalPending] = useState(false);
-  const presentation = designAgentPreparationPresentation(state);
 
   useEffect(() => {
     startGuardRef.current = createSingleFlightGuard();
@@ -75,25 +73,29 @@ export default function DesignAgentExecutionPanel({
   }, [approve, state]);
 
   return (
-    <div className="max-h-[calc(100vh-8rem)] overflow-y-auto rounded-xl border border-divider bg-bg-page/95 p-3 shadow-xl" data-creator-os-execution="design-agent">
-      <button
-        type="button"
-        onClick={handleStart}
-        disabled={!request || startPending}
-        title={request ? 'Use this conversation and its session assets to prepare creative work' : 'Start a Design Agent session before preparing creative work'}
-        className="w-full rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {startPending ? 'Preparing Creative Work…' : 'Start Creative Work'}
-      </button>
-      <p className="mt-2 text-[10px] leading-relaxed text-secondary-text">Preparation reviews this conversation. It does not spend credits or create media.</p>
-      <AgentExecutionCard
-        state={state}
-        onApprove={handleApproval}
-        approvalPending={approvalPending}
-      />
-      {presentation && ['requires_input', 'requires_approval', 'ready'].includes(state?.status) && (
-        <p className="mt-2 text-[10px] text-secondary-text">{presentation.detail}</p>
+    <section className="h-full overflow-y-auto bg-bg-page p-4" data-creator-os-execution="design-agent" aria-label="Creator OS creative work">
+      {!state ? (
+        <div className="rounded-xl border border-divider bg-bg-card p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Creative work</p>
+          <h2 className="mt-2 text-sm font-semibold text-primary-text">Ready to turn this conversation into content?</h2>
+          <button
+            type="button"
+            onClick={handleStart}
+            disabled={!request || startPending}
+            title={request ? 'Use this conversation and its session assets to prepare creative work' : 'Start a Design Agent session before preparing creative work'}
+            className="mt-4 w-full rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Start Creative Work
+          </button>
+          <p className="mt-2 text-[10px] leading-relaxed text-secondary-text">Preparation does not create media.</p>
+        </div>
+      ) : (
+        <AgentExecutionCard
+          state={state}
+          onApprove={handleApproval}
+          approvalPending={approvalPending}
+        />
       )}
-    </div>
+    </section>
   );
 }
