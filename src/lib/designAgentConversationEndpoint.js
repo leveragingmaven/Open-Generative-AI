@@ -10,6 +10,8 @@
  */
 import { requireCreatorIdentity } from './creatorOsAuth.js';
 import { isDesignAgentControlledExecution } from './designAgentControlledMode.js';
+import { getMuApiBaseUrl, getServerMuApiKey } from './agencyMode.js';
+import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } from './serverTextIntelligence.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -58,30 +60,53 @@ export function sanitizeDesignAgentMessages(messages) {
     .filter(Boolean);
 }
 
-async function loadEndpointServices() {
+export async function loadEndpointServices() {
   const [
     { DesignAgentSessionOwnershipService },
     { DesignAgentConversationReader },
     { MuApiDesignAgentProvider },
-    { OpenAICompatibleProvider },
     { DesignAgentConversationIntelligenceService },
   ] = await Promise.all([
     import('./designAgentSessionOwnership.js'),
     import('./designAgentConversationReader.js'),
     import('../../packages/studio/src/lib/providers/design/index.js'),
-    import('../../packages/studio/src/lib/providers/OpenAICompatibleProvider.js'),
     import('./designAgentConversationIntelligence.js'),
   ]);
 
   const ownershipService = new DesignAgentSessionOwnershipService();
-  const designAgentProvider = new MuApiDesignAgentProvider();
+
+  // Mirror the server-owned Design Agent provider construction used by the
+  // working /api/agent-execution/from-conversation preparation path: an
+  // absolute MuAPI base path plus an injected x-api-key. A relative base path
+  // cannot be fetched from the Node.js server runtime.
+  const baseUrl = String(getMuApiBaseUrl() || '').replace(/\/+$/, '');
+  const muApiKey = getServerMuApiKey();
+  const designAgentProvider = new MuApiDesignAgentProvider({
+    basePath: `${baseUrl}/api/v1/creative-agent`,
+    fetchFn: async (url, options = {}) => {
+      if (!muApiKey) {
+        throw Object.assign(new Error('Design Agent history is unavailable.'), {
+          code: 'muapi_server_key_required',
+          status: 503,
+        });
+      }
+      const headers = new Headers(options.headers);
+      headers.set('x-api-key', muApiKey);
+      return globalThis.fetch(url, { ...options, headers });
+    },
+  });
   const conversationReader = new DesignAgentConversationReader({ designAgentProvider, ownershipService });
 
   return {
     ownershipService,
     conversationReader,
     createTextProvider() {
-      return new OpenAICompatibleProvider({ fetchImpl: globalThis.fetch });
+      // Reuse the exact validated configuration factory shared with the
+      // preparation path; fail closed with a typed, sanitized error when the
+      // deployment has no complete server-side text intelligence config.
+      const provider = serverOpenAICompatibleProvider({ fetchImpl: globalThis.fetch });
+      if (!provider) throw notConfiguredTextIntelligenceError();
+      return provider;
     },
     createConversationIntelligence(textProvider) {
       return new DesignAgentConversationIntelligenceService({
@@ -115,6 +140,52 @@ const forbiddenFields = [
   'attachmentUrls', 'executionSettings', 'toolSettings',
 ];
 
+// Error codes whose messages are safe to surface verbatim. Everything else is
+// replaced with a generic sanitized message; codes are always safe to expose.
+const SAFE_ERROR_CODES = new Set([
+  'conversation_not_found', 'conversation_scope_mismatch',
+  'agentId_required', 'conversationId_required',
+  'design_agent_scope_mismatch', 'design_session_scope_mismatch',
+  'design_session_ownership_unverified', 'design_session_ownership_schema_missing',
+  'design_session_asset_invalid', 'design_session_assets_invalid',
+  'unsupported_design_attachment_kind', 'fabricated_design_asset_reference',
+  'muapi_server_key_required', 'creative_intelligence_not_configured',
+]);
+
+const PROVIDER_FAILURE_CODES = new Set([
+  'provider_execution_failed', 'provider_timeout', 'provider_execution_timeout',
+  'provider_credential_unavailable',
+]);
+
+function conversationErrorResponse(error) {
+  const code = error?.code || 'design_agent_conversation_failed';
+  if (code === 'creative_intelligence_not_configured') {
+    return {
+      error: 'Controlled conversation intelligence is not configured for this Creator OS deployment.',
+      code,
+      status: 503,
+    };
+  }
+  if (code === 'muapi_server_key_required') {
+    return { error: 'Design Agent history is unavailable.', code, status: 503 };
+  }
+  const status = Number.isInteger(error?.status) ? error.status : undefined;
+  if (PROVIDER_FAILURE_CODES.has(code)) {
+    return {
+      error: 'Conversation intelligence is temporarily unavailable. No media was created.',
+      code,
+      status: status && status >= 400 && status < 600 ? status : 502,
+    };
+  }
+  return {
+    error: SAFE_ERROR_CODES.has(code) && typeof error?.message === 'string' && error.message
+      ? error.message
+      : 'Unable to continue this conversation right now. Please try again.',
+    code,
+    status: status && status >= 400 && status < 600 ? status : 502,
+  };
+}
+
 export async function handleDesignAgentConversationPost(request, deps = {}) {
   const controlledExecution = deps.controlledExecution === undefined ? isDesignAgentControlledExecution() : deps.controlledExecution;
   if (!controlledExecution) {
@@ -142,67 +213,91 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     }
   }
 
-  const identity = deps.identity === undefined ? await requireCreatorIdentity(request) : deps.identity;
+  // requireCreatorIdentity resolves to { identity, response } — unwrap it the
+  // same way every other Creator OS route does. Passing the wrapper through as
+  // identity made every authenticated request fail inside ownership scope
+  // validation and surface as an opaque HTTP 500.
+  let identity = deps.identity;
+  if (identity === undefined) {
+    const authenticate = deps.authenticate === undefined ? requireCreatorIdentity : deps.authenticate;
+    const auth = await authenticate(request);
+    if (auth?.response) {
+      let code = 'unauthenticated';
+      try {
+        const body = await auth.response.json();
+        if (body?.code) code = body.code;
+      } catch { /* keep the generic unauthenticated code */ }
+      return { error: code, status: auth.response.status || 401 };
+    }
+    identity = auth?.identity || null;
+  }
   if (!identity) {
     return { error: 'unauthenticated', status: 401 };
   }
 
-  const services = deps.ownershipService === undefined
-    ? await loadEndpointServices()
-    : null;
+  let services = null;
+  const getService = async (name) => {
+    if (deps[name] !== undefined) return deps[name];
+    services = services || await loadEndpointServices();
+    return services[name];
+  };
 
-  const ownership = deps.ownershipService === undefined
-    ? services.ownershipService
-    : deps.ownershipService;
-  const owned = await ownership.verifyOwnedSession({
-    designSessionId: conversationId,
-    identity,
-  });
-  if (!owned.ok) {
-    return { error: owned.error || 'session_ownership_failed', status: 403 };
+  const ownershipService = await getService('ownershipService');
+
+  // The real DesignAgentSessionOwnershipService signals failure by throwing a
+  // typed error and success by returning the ownership record; injected test
+  // doubles may instead return { ok }. Both contracts are honored here.
+  try {
+    const owned = await ownershipService.verifyOwnedSession({
+      designSessionId: conversationId,
+      identity,
+    });
+    if (owned && owned.ok === false) {
+      return { error: owned.error || 'session_ownership_failed', status: 403 };
+    }
+  } catch (error) {
+    return conversationErrorResponse(error);
   }
 
-  const reader = deps.conversationReader === undefined
-    ? services.conversationReader
-    : deps.conversationReader;
-  const sessionReadResult = await reader.read({
-    agentId: 'design-agent',
-    conversationId,
-    identity,
-  });
+  try {
+    const reader = await getService('conversationReader');
+    const sessionReadResult = await reader.read({
+      agentId: 'design-agent',
+      conversationId,
+      identity,
+    });
 
-  const textProviderFactory = deps.createTextProvider === undefined
-    ? services.createTextProvider
-    : deps.createTextProvider;
-  const conversationServiceFactory = deps.createConversationIntelligence === undefined
-    ? services.createConversationIntelligence
-    : deps.createConversationIntelligence;
+    const textProviderFactory = await getService('createTextProvider');
+    const conversationServiceFactory = await getService('createConversationIntelligence');
 
-  const service = conversationServiceFactory(textProviderFactory());
-  const { reply } = await service.respond({
-    sessionReadResult,
-    newMessage: message,
-  });
+    const service = conversationServiceFactory(textProviderFactory());
+    const { reply } = await service.respond({
+      sessionReadResult,
+      newMessage: message,
+    });
 
-  const now = new Date().toISOString();
-  const sanitizedUserMessage = sanitizeDesignAgentMessage({
-    role: 'user',
-    content: message,
-    timestamp: now,
-  });
-  const sanitizedAssistantMessage = sanitizeDesignAgentMessage({
-    role: 'assistant',
-    content: reply,
-    timestamp: now,
-  });
+    const now = new Date().toISOString();
+    const sanitizedUserMessage = sanitizeDesignAgentMessage({
+      role: 'user',
+      content: message,
+      timestamp: now,
+    });
+    const sanitizedAssistantMessage = sanitizeDesignAgentMessage({
+      role: 'assistant',
+      content: reply,
+      timestamp: now,
+    });
 
-  return {
-    reply,
-    role: 'assistant',
-    status: 200,
-    persistedMessages: [
-      sanitizedUserMessage,
-      sanitizedAssistantMessage,
-    ].filter(Boolean),
-  };
+    return {
+      reply,
+      role: 'assistant',
+      status: 200,
+      persistedMessages: [
+        sanitizedUserMessage,
+        sanitizedAssistantMessage,
+      ].filter(Boolean),
+    };
+  } catch (error) {
+    return conversationErrorResponse(error);
+  }
 }

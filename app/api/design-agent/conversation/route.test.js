@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   handleDesignAgentConversationPost,
+  loadEndpointServices,
   sanitizeDesignAgentMessage,
   sanitizeDesignAgentMessages,
   CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH,
 } from '../../../../src/lib/designAgentConversationEndpoint.js';
+import { DesignAgentSessionOwnershipError } from '../../../../src/lib/designAgentSessionOwnership.js';
+import { ConversationProposalError } from '../../../../src/lib/conversationProposalBuilder.js';
 
 function makeRequest(payload) {
   return {
@@ -378,4 +381,271 @@ test('sanitized messages are readable by a transcript consumer', async () => {
     assert.ok(!('jobId' in m));
     assert.ok(!('operation' in m));
   }
+});
+
+// --- Production 500 regression: requireCreatorIdentity wrapper contract ---
+
+function withEnv(changes, fn) {
+  const managedKeys = [
+    ...Object.keys(changes),
+    'OPENAI_COMPATIBLE_BASE_URL', 'OPENAI_BASE_URL',
+    'MAVENSYNC_OPENAI_MODEL', 'OPENAI_MODEL',
+    'OPENAI_API_KEY', 'MAVENSYNC_OPENAI_API_KEY',
+    'MUAPI_BASE_URL', 'MUAPI_API_KEY',
+    'DB_HOST', 'DB_USER', 'DB_NAME',
+  ];
+  const saved = new Map(managedKeys.map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+}
+
+// Dummy database coordinates: mysql2 pool creation is lazy (no connection is
+// opened until the first query), so these only satisfy configuration checks
+// while constructing default endpoint services in tests.
+const TEST_DB_ENV = { DB_HOST: 'db.test', DB_USER: 'tester', DB_NAME: 'testdb' };
+
+test('unwraps the { identity, response } auth contract instead of passing the wrapper as identity', async () => {
+  // Production regression: requireCreatorIdentity resolves to
+  // { identity, response }. The endpoint previously treated the whole wrapper
+  // as the identity, so ownership scope validation threw accountId_required
+  // and every authenticated request surfaced as an opaque HTTP 500.
+  const seenIdentities = [];
+  const deps = makeDeps({
+    identity: undefined,
+    authenticate: async () => ({
+      identity: { creatorId: 'creator-123', accountId: 'acc-123', identityKey: 'ai-gency:abc' },
+      response: null,
+    }),
+    ownershipService: {
+      async verifyOwnedSession({ designSessionId, identity }) {
+        seenIdentities.push(identity);
+        if (designSessionId === 'owned-session' && identity?.accountId === 'acc-123') return { ok: true };
+        return { ok: false, error: 'wrong_owner' };
+      },
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.reply, 'Mocked assistant reply');
+  assert.equal(seenIdentities.length, 1);
+  assert.equal(seenIdentities[0].accountId, 'acc-123');
+  assert.equal(seenIdentities[0].creatorId, 'creator-123');
+});
+
+test('maps an auth response (401/503) to a sanitized status instead of crashing', async () => {
+  for (const [status, code] of [[401, 'creator_os_auth_required'], [503, 'creator_account_schema_missing']]) {
+    const deps = makeDeps({
+      identity: undefined,
+      authenticate: async () => ({
+        identity: null,
+        response: Response.json({ error: 'denied', code }, { status }),
+      }),
+    });
+    const result = await handleDesignAgentConversationPost(
+      makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+      deps
+    );
+    assert.equal(result.status, status);
+    assert.equal(result.error, code);
+  }
+});
+
+// --- Ownership service real-world contracts ---
+
+test('maps a typed ownership rejection to its sanitized status instead of a 500', async () => {
+  const deps = makeDeps({
+    ownershipService: {
+      async verifyOwnedSession() {
+        throw new DesignAgentSessionOwnershipError('design_session_ownership_unverified', 403);
+      },
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 403);
+  assert.equal(result.code, 'design_session_ownership_unverified');
+});
+
+test('proceeds when the real ownership service returns an ownership record without { ok }', async () => {
+  // Regression: the real service returns the raw ownership record on success.
+  // The previous `if (!owned.ok)` check rejected rightful owners with 403.
+  const deps = makeDeps({
+    ownershipService: {
+      async verifyOwnedSession() {
+        return {
+          designSessionId: 'owned-session',
+          accountId: 'acc-123',
+          creatorIdentityKey: 'ai-gency:abc',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+      },
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 200);
+});
+
+// --- Reader / provider failure sanitization ---
+
+test('returns a sanitized error when session reading fails', async () => {
+  const deps = makeDeps({
+    conversationReader: {
+      async read() {
+        throw new ConversationProposalError(
+          'fabricated_design_asset_reference',
+          'The Design Agent conversation references an unavailable session asset.',
+          422,
+        );
+      },
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 422);
+  assert.equal(result.code, 'fabricated_design_asset_reference');
+  assert.match(result.error, /unavailable session asset/);
+});
+
+test('returns a sanitized 502 when text intelligence execution fails', async () => {
+  const deps = makeDeps({
+    createTextProvider: () => ({
+      async execute() {
+        const failure = new Error('Provider execution failed.');
+        failure.code = 'provider_execution_failed';
+        throw failure;
+      },
+    }),
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 502);
+  assert.equal(result.code, 'provider_execution_failed');
+  assert.doesNotMatch(result.error, /https?:\/\//);
+  assert.doesNotMatch(result.error, /sk-/);
+});
+
+// --- Server-owned configuration reuse (preparation-path factory) ---
+
+test('default services build an absolute MuAPI base path and inject the x-api-key', async () => {
+  await withEnv({ MUAPI_BASE_URL: 'https://muapi.example.test', MUAPI_API_KEY: 'k-test', ...TEST_DB_ENV }, async () => {
+    const services = await loadEndpointServices();
+    const reader = services.conversationReader;
+    const provider = reader.designAgentProvider;
+
+    assert.match(provider.basePath, /^https:\/\/muapi\.example\.test\/api\/v1\/creative-agent$/);
+
+    const seen = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options) => {
+      seen.push([String(url), options]);
+      return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+    };
+    try {
+      await provider.getSession('session-1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.match(seen[0][0], /^https:\/\/muapi\.example\.test\/api\/v1\/creative-agent\/sessions\/session-1\/messages$/);
+    assert.equal(seen[0][1].headers.get('x-api-key'), 'k-test');
+  });
+});
+
+test('default services fail closed with muapi_server_key_required when no MuAPI key is configured', async () => {
+  await withEnv({ MUAPI_BASE_URL: 'https://muapi.example.test', MUAPI_API_KEY: undefined, ...TEST_DB_ENV }, async () => {
+    const services = await loadEndpointServices();
+    const provider = services.conversationReader.designAgentProvider;
+
+    await assert.rejects(
+      () => provider.getSession('session-1'),
+      (error) => error.code === 'muapi_server_key_required'
+    );
+  });
+});
+
+test('default text provider reuses the validated preparation config and fails closed when unconfigured', async () => {
+  await withEnv({
+    OPENAI_COMPATIBLE_BASE_URL: undefined,
+    OPENAI_BASE_URL: undefined,
+    MAVENSYNC_OPENAI_MODEL: undefined,
+    OPENAI_MODEL: undefined,
+    OPENAI_API_KEY: undefined,
+    MAVENSYNC_OPENAI_API_KEY: undefined,
+  }, async () => {
+    const services = await loadEndpointServices();
+    assert.throws(() => services.createTextProvider(), (error) => error.code === 'creative_intelligence_not_configured');
+  });
+});
+
+test('default text provider is configured from the same environment variables as preparation', async () => {
+  await withEnv({
+    OPENAI_COMPATIBLE_BASE_URL: 'https://llm.example.test/v1',
+    MAVENSYNC_OPENAI_MODEL: 'mavensync-model-x',
+    OPENAI_API_KEY: 'sk-test',
+  }, async () => {
+    const services = await loadEndpointServices();
+    const provider = services.createTextProvider();
+    assert.equal(provider.config.endpoint, 'https://llm.example.test/v1');
+    assert.equal(provider.config.model, 'mavensync-model-x');
+    assert.equal(provider.config.serverKey, 'sk-test');
+  });
+});
+
+test('end-to-end default wiring returns a sanitized 503 instead of an opaque 500 when intelligence is unconfigured', async () => {
+  await withEnv({
+    OPENAI_COMPATIBLE_BASE_URL: undefined,
+    OPENAI_BASE_URL: undefined,
+    MAVENSYNC_OPENAI_MODEL: undefined,
+    OPENAI_MODEL: undefined,
+    OPENAI_API_KEY: undefined,
+    MAVENSYNC_OPENAI_API_KEY: undefined,
+    MUAPI_BASE_URL: 'https://muapi.example.test',
+    MUAPI_API_KEY: 'k-test',
+    ...TEST_DB_ENV,
+  }, async () => {
+    const deps = makeDeps({
+      createTextProvider: undefined,
+      createConversationIntelligence: undefined,
+    });
+
+    const result = await handleDesignAgentConversationPost(
+      makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+      deps
+    );
+
+    assert.equal(result.status, 503);
+    assert.equal(result.code, 'creative_intelligence_not_configured');
+  });
 });

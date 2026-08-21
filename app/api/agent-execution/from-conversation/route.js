@@ -10,8 +10,11 @@ import { DesignAgentConversationReader } from '../../../../src/lib/designAgentCo
 import { DesignAgentSessionOwnershipService } from '../../../../src/lib/designAgentSessionOwnership.js';
 import { getMuApiBaseUrl, getServerMuApiKey } from '../../../../src/lib/agencyMode.js';
 import { CreativeIntentExtractionService } from '../../../../packages/studio/src/lib/intelligence/CreativeIntentExtractionService.js';
-import { ProviderStructuredTextIntelligence } from '../../../../packages/studio/src/lib/intelligence/StructuredTextIntelligence.js';
-import { OpenAICompatibleProvider } from '../../../../packages/studio/src/lib/providers/OpenAICompatibleProvider.js';
+import {
+  createServerTextIntelligence,
+  serverTextIntelligenceConfig,
+  validHttpEndpoint,
+} from '../../../../src/lib/serverTextIntelligence.js';
 import { MuApiDesignAgentProvider } from '../../../../packages/studio/src/lib/providers/design/MuApiDesignAgentProvider.js';
 
 const REQUEST_FIELDS = new Set(['agentId', 'conversationId']);
@@ -38,40 +41,6 @@ const SAFE_PREPARATION_ERRORS = new Map([
     message: 'Creator OS could not build an executable creative plan from this conversation.',
   }],
 ]);
-
-function serverTextIntelligenceConfig(env = process.env) {
-  return {
-    endpoint: String(env.OPENAI_COMPATIBLE_BASE_URL || env.OPENAI_BASE_URL || '').trim(),
-    model: String(env.MAVENSYNC_OPENAI_MODEL || env.OPENAI_MODEL || '').trim(),
-    serverKey: String(env.OPENAI_API_KEY || env.MAVENSYNC_OPENAI_API_KEY || '').trim() || null,
-  };
-}
-
-function validHttpEndpoint(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
-  } catch {
-    return false;
-  }
-}
-
-function createServerTextIntelligence({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
-  const config = serverTextIntelligenceConfig(env);
-  if (!validHttpEndpoint(config.endpoint) || !config.model || !config.serverKey) {
-    return {
-      async extract() {
-        throw Object.assign(new Error('Creative intent preparation is not configured.'), {
-          code: 'creative_intelligence_not_configured',
-          status: 503,
-        });
-      },
-    };
-  }
-  return new ProviderStructuredTextIntelligence({
-    provider: new OpenAICompatibleProvider({ fetchImpl, config }),
-  });
-}
 
 function errorResponse(error) {
   const safePreparationError = SAFE_PREPARATION_ERRORS.get(error?.code);
