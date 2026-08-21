@@ -4,12 +4,34 @@ import test from "node:test";
 
 const shellSource = readFileSync(new URL("../components/StandaloneShell.js", import.meta.url), "utf8");
 const errorSource = readFileSync(new URL("../app/studio/error.js", import.meta.url), "utf8");
+const navigationSource = readFileSync(new URL("../packages/studio/src/studioNavigation.js", import.meta.url), "utf8");
 
 test("Studio startup does not retain the unbounded global spinner gate", () => {
   assert.doesNotMatch(shellSource, /if \(!hasMounted\)/);
   assert.doesNotMatch(shellSource, /setHasMounted/);
   assert.match(shellSource, /<MavenSyncDashboard \/>/);
   assert.match(shellSource, /<RecoverableErrorBoundary/);
+});
+
+test("Studio home mounts the simple Dashboard and /studio/overview preserves the Workspace overview", () => {
+  assert.match(shellSource, /import MavenHomeDashboard from '\.\.\/packages\/studio\/src\/components\/experience\/MavenHomeDashboard\.jsx'/);
+  const mountBlock = shellSource.match(/let activeWorkspaceContent = null;[\s\S]*?} else if \(isCreateWorkspace\)/);
+  assert.ok(mountBlock, "expected the workspace content mount block");
+  const homeIndex = mountBlock[0].indexOf("<MavenHomeDashboard />");
+  const overviewIndex = mountBlock[0].indexOf("<MavenSyncDashboard />");
+  assert.ok(homeIndex !== -1, "expected MavenHomeDashboard on the slugless studio home");
+  assert.ok(overviewIndex !== -1, "expected MavenSyncDashboard preserved for the overview workspace");
+  assert.ok(homeIndex < overviewIndex, "home must map to the Dashboard and overview to the Workspace overview");
+});
+
+test("Workspace overview owns a dedicated route in the navigation registry", () => {
+  assert.match(navigationSource, /\{ id: 'dashboard', label: 'Dashboard', route: '\/studio', tabIds: \[\] \}/);
+  assert.match(navigationSource, /\{ id: 'workspace-overview', label: 'Workspace overview', route: '\/studio\/overview', tabIds: \[\] \}/);
+});
+
+test("Slugless routes do not conceptually fall back to asset-library", () => {
+  assert.doesNotMatch(shellSource, /slug\.length === 0 \? 'asset-library'/);
+  assert.doesNotMatch(shellSource, /\(segments\[1\] \|\| 'asset-library'\)/);
 });
 
 test("Studio retains active-workspace-only mounting", () => {

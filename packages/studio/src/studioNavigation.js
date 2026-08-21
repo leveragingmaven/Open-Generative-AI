@@ -309,8 +309,8 @@ export const EXPLORE_APPS_TAB = TABS.find((tab) => tab.id === 'apps');
 export const WORKSPACE_MENU_GROUPS = [
   {
     id: 'home',
-    label: 'Workspace',
-    workspaceIds: ['dashboard'],
+    label: 'Home',
+    workspaceIds: ['dashboard', 'workspace-overview'],
   },
   {
     id: 'create',
@@ -348,6 +348,7 @@ export const AI_WORKSPACE_IDS = ['ai-twin', 'design-agent', 'agents', 'workflows
 // unchanged; this registry changes discovery hierarchy only.
 export const EXPERIENCE_WORKSPACES = [
   { id: 'dashboard', label: 'Dashboard', route: '/studio', tabIds: [] },
+  { id: 'workspace-overview', label: 'Workspace overview', route: '/studio/overview', tabIds: [] },
   {
     id: 'create',
     label: 'Create',

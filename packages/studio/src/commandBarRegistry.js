@@ -22,9 +22,15 @@ export const COMMAND_SECTIONS = [
     items: [
       {
         id: 'home',
-        label: 'Home',
-        keywords: ['home', 'start', 'dashboard', 'studio'],
+        label: 'Dashboard',
+        keywords: ['home', 'start', 'maven', 'studio'],
         route: '/studio',
+      },
+      {
+        id: 'workspace-overview',
+        label: 'Workspace overview',
+        keywords: ['overview', 'workspaces', 'manage', 'all workspaces', 'dashboard'],
+        route: '/studio/overview',
       },
     ],
   },

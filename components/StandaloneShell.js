@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { CampaignProvider, useActiveCampaign } from '../packages/studio/src/lib/campaigns/CampaignContext.js';
 import { TABS, WORKSPACE_MENU_GROUPS, EXPERIENCE_WORKSPACES } from '../packages/studio/src/studioNavigation.js';
 import MavenSyncDashboard from '../packages/studio/src/components/experience/MavenSyncDashboard.jsx';
+import MavenHomeDashboard from '../packages/studio/src/components/experience/MavenHomeDashboard.jsx';
 import CommandBar from '../packages/studio/src/components/CommandBar.jsx';
 import RecoverableErrorBoundary, { RecoverableErrorFallback } from '../packages/studio/src/components/RecoverableErrorBoundary.jsx';
 import axios from 'axios';
@@ -75,6 +76,17 @@ function CampaignHeaderLabel() {
 const TAB_BY_ID = Object.fromEntries(TABS.map((tab) => [tab.id, tab]));
 const EXPERIENCE_WORKSPACE_BY_ID = Object.fromEntries(EXPERIENCE_WORKSPACES.map((workspace) => [workspace.id, workspace]));
 
+// Fallback icon for workspace destinations that have no backing tab (Dashboard,
+// Workspace Overview). Rendered inside the Workspaces picker launcher cards.
+const WORKSPACE_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
 // Workspaces picker — grouped destination menu built from WORKSPACE_MENU_GROUPS
 // (which references TABS ids). Icons, labels, and routes all resolve from TABS;
 // there is no second hand-maintained route list.
@@ -90,7 +102,7 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = 
           ...(group.workspaceIds || [])
             .map((id) => EXPERIENCE_WORKSPACE_BY_ID[id])
             .filter(Boolean)
-            .map((workspace) => ({ id: workspace.id, label: workspace.label, route: workspace.route, icon: TAB_BY_ID[workspace.tabIds?.[0]]?.icon })),
+            .map((workspace) => ({ id: workspace.id, label: workspace.label, route: workspace.route, icon: TAB_BY_ID[workspace.tabIds?.[0]]?.icon || WORKSPACE_ICON })),
           ...(group.tabIds || [])
             .map((id) => TAB_BY_ID[id])
             .filter(Boolean)
@@ -193,6 +205,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   const visibleTabs = useMemo(() => TABS.filter((tab) => tab.id !== 'apps'), []);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
 const isStudioHome = slug.length === 0;
+  const isOverviewWorkspace = !idFromParams && slug[0] === 'overview';
   const isCreateWorkspace = !idFromParams && slug[0] === 'create';
   const isIntelligenceWorkspace = !idFromParams && slug[0] === 'intelligence';
   const effectiveVisibleTabIds = useMemo(() => {
@@ -221,9 +234,11 @@ const isStudioHome = slug.length === 0;
     if (name) setComingSoonName(name);
   }, [isComingSoonRoute]);
 
-  // The no-slug Studio entry point is the Creative OS home; explicit slugs keep their existing tabs.
+  // The no-slug Studio entry point is the Dashboard; explicit slugs keep their
+  // existing tabs. Slugless routes never mount a studio tab (the Dashboard owns
+  // the viewport), so activeTab just holds a valid default here.
   const getInitialTab = () => {
-    let candidate = slug.length === 0 ? 'asset-library' : 'image';
+    let candidate = 'image';
     if (idFromParams || slug.includes('workflow')) candidate = 'workflows';
     else if (slug.includes('agents')) candidate = 'agents';
     else if (slug.includes('design-agent')) candidate = 'design-agent';
@@ -243,7 +258,9 @@ const isStudioHome = slug.length === 0;
   const activeWorkspaceTab = (slug.includes('mcp-cli') || slug.includes('apps')) ? 'mcp-cli' : activeTab;
   const activeWorkspaceId = isStudioHome
     ? 'dashboard'
-    : isCreateWorkspace
+    : isOverviewWorkspace
+      ? 'workspace-overview'
+      : isCreateWorkspace
       ? 'create'
       : isIntelligenceWorkspace
         ? 'intelligence'
@@ -318,12 +335,16 @@ const [characterTarget, setCharacterTarget] = useState(null);
     pushNotification({ type: 'error', tabId, label: tab?.label || tabId, message });
   }, [pushNotification, visibleTabs]);
 
-  // Popstate event listener to sync tab state with URL on back/forward navigation
+  // Popstate event listener to sync tab state with URL on back/forward navigation.
+  // Pseudo-workspaces (Dashboard '', Workspace Overview 'overview', Create,
+  // Intelligence) own the viewport directly — there is no studio tab to sync.
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
       const segments = path.split('/').filter(Boolean);
-      const tabId = segments[1] === 'apps' ? 'mcp-cli' : (segments[1] || 'asset-library');
+      const firstSegment = segments[1];
+      if (!firstSegment || firstSegment === 'overview' || firstSegment === 'create' || firstSegment === 'intelligence') return;
+      const tabId = firstSegment === 'apps' ? 'mcp-cli' : firstSegment;
       if (visibleTabs.find(t => t.id === tabId)) {
         setActiveTab(tabId);
       }
@@ -531,7 +552,7 @@ const handleTabChange = (tabId) => {
     setDroppedFiles(null);
   }, []);
 
-  if (!agencyMode && !apiKey && !isStudioHome && !isCreateWorkspace && !isIntelligenceWorkspace) {
+  if (!agencyMode && !apiKey && !isStudioHome && !isOverviewWorkspace && !isCreateWorkspace && !isIntelligenceWorkspace) {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
 
@@ -542,6 +563,8 @@ const handleTabChange = (tabId) => {
 
   let activeWorkspaceContent = null;
   if (isStudioHome) {
+    activeWorkspaceContent = <MavenHomeDashboard />;
+  } else if (isOverviewWorkspace) {
     activeWorkspaceContent = <MavenSyncDashboard />;
   } else if (isCreateWorkspace) {
     activeWorkspaceContent = <MavenSyncCreateWorkspace />;
@@ -624,7 +647,7 @@ const handleTabChange = (tabId) => {
     'image', 'video', 'clipping', 'vibe-motion', 'lipsync', 'body-swap',
     'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer',
   ]).has(activeWorkspaceTab);
-  const studioContent = (isStudioHome || isCreateWorkspace || isIntelligenceWorkspace)
+  const studioContent = (isStudioHome || isOverviewWorkspace || isCreateWorkspace || isIntelligenceWorkspace)
     ? activeWorkspaceContent
     : (
       <div className={usesCreativeStudioFrame ? creativeStudioFrameClass(Boolean(activeWorkspaceContent)) : "h-full w-full"}>
@@ -794,7 +817,7 @@ const handleTabChange = (tabId) => {
               )}
 <div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
-                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard')))))}</p>
+                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isOverviewWorkspace ? 'Workspace overview' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard'))))))}</p>
                 <CampaignHeaderLabel />
               </div>
             </div>

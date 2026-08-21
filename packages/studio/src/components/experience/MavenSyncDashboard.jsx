@@ -8,6 +8,7 @@ import { readPublishingDrafts, readPublishingHistory } from "../../lib/publishin
 import { SKILL_LIBRARY } from "../../lib/skills/index.js";
 import { listTwins } from "../../lib/twin/TwinStore.js";
 import { TABS, WORKSPACE_MENU_GROUPS, AI_WORKSPACE_IDS } from "../../studioNavigation.js";
+import { assetCampaignId, assetLabel, assetPreview, assetRoute, assetTimestamp, relativeTime, timestamp, titleCase } from "./experienceAssetUtils.js";
 import {
   PrimaryButton,
   SecondaryButton,
@@ -37,58 +38,6 @@ function Icon({ type, size = 18 }) {
     arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
   };
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
-}
-
-function timestamp(value) {
-  if (typeof value === "number") return value;
-  const parsed = value ? Date.parse(value) : 0;
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function assetTimestamp(asset) {
-  return timestamp(asset?.updatedAt || asset?.createdAt || asset?.timestamp || asset?.ts);
-}
-
-function relativeTime(value) {
-  const time = timestamp(value);
-  if (!time) return "Recently updated";
-  const minutes = Math.max(0, Math.floor((Date.now() - time) / 60000));
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function titleCase(value) {
-  return String(value || "").replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function assetRoute(asset) {
-  const value = `${asset?.metadata?.studio || ""} ${asset?.metadata?.legacyHistoryKey || ""} ${asset?.kind || ""} ${asset?.recipeId || ""}`.toLowerCase();
-  if (value.includes("video")) return "/studio/video";
-  if (value.includes("marketing")) return "/studio/marketing";
-  if (value.includes("audio")) return "/studio/audio";
-  if (value.includes("lip")) return "/studio/lipsync";
-  if (value.includes("recast") || value.includes("body")) return "/studio/body-swap";
-  if (value.includes("motion")) return "/studio/vibe-motion";
-  if (value.includes("workflow")) return "/studio/workflows";
-  return "/studio/image";
-}
-
-function assetLabel(asset) {
-  return asset?.title || asset?.name || asset?.metadata?.title || asset?.prompt || asset?.metadata?.prompt || "Untitled creative asset";
-}
-
-function assetPreview(asset) {
-  return asset?.generatedFiles?.[0] || asset?.url || null;
-}
-
-function assetCampaignId(asset) {
-  const value = asset?.campaignId || asset?.campaign || asset?.metadata?.campaignId || asset?.metadata?.campaign;
-  if (typeof value === "object") return value?.id || value?._id || null;
-  return value == null ? null : String(value);
 }
 
 const QUICK_CREATE = [
@@ -232,7 +181,7 @@ export default function MavenSyncDashboard() {
   return (
     <ExperiencePage>
       <WorkspaceHeader
-        eyebrow="Dashboard"
+        eyebrow="Workspace overview"
         title={<>Welcome back. <span className="text-[var(--ms-color-pink-primary)]">Let’s make something remarkable.</span></>}
         description="A focused view of what is active, what is ready, and what needs your attention across Creative OS."
         actions={featuredCampaign ? (
