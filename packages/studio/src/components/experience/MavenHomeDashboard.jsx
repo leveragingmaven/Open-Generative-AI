@@ -24,24 +24,20 @@ function Icon({ type, size = 18 }) {
 }
 
 const QUICK_ACTIONS = [
-  { title: "Create Content", detail: "Briefs, copy, and campaign content", icon: "content", href: "/studio/marketing" },
-  { title: "Create Image", detail: "Generate a visual", icon: "image", href: "/studio/image" },
-  { title: "Create Video", detail: "Generate motion", icon: "video", href: "/studio/video" },
-  { title: "Repurpose", detail: "Turn existing work into clips", icon: "repurpose", href: "/studio/clipping" },
+  { title: "Content", icon: "content", href: "/studio/marketing" },
+  { title: "Image", icon: "image", href: "/studio/image" },
+  { title: "Video", icon: "video", href: "/studio/video" },
+  { title: "Repurpose", icon: "repurpose", href: "/studio/clipping" },
 ];
 
-function QuickActionCard({ item }) {
+function QuickActionButton({ item }) {
   return (
     <a
       href={item.href}
-      className="group flex min-h-20 flex-col justify-between rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-3.5 transition-[border-color,background-color,transform] duration-[var(--ms-motion-card)] hover:-translate-y-px hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)]"
+      className="inline-flex h-11 items-center justify-center gap-2 rounded-full border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-4 text-xs font-semibold transition-[border-color,background-color,color] duration-[var(--ms-motion-hover)] hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)] hover:text-white"
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(232,32,112,0.1)] text-[var(--ms-color-pink-primary)] [&>svg]:w-4 [&>svg]:h-4"><Icon type={item.icon} size={16} /></span>
-      <span className="mt-3 flex items-baseline justify-between gap-2">
-        <span className="truncate text-sm font-semibold">{item.title}</span>
-        <span aria-hidden="true" className="text-[var(--ms-color-gold-muted)] transition-transform duration-[var(--ms-motion-hover)] group-hover:translate-x-0.5">→</span>
-      </span>
-      <span className="mt-0.5 block truncate text-[10px] text-[var(--ms-color-text-muted)]">{item.detail}</span>
+      <span className="[&>svg]:h-3.5 [&>svg]:w-3.5 text-[var(--ms-color-pink-primary)]"><Icon type={item.icon} size={14} /></span>
+      <span className="truncate">{item.title}</span>
     </a>
   );
 }
@@ -84,33 +80,39 @@ export default function MavenHomeDashboard() {
 
   return (
     <ExperiencePage>
+      {/* Wide Maven hero */}
       <section
-        aria-label="Talk to MavenSync"
-        className="grid gap-4 lg:grid-cols-[minmax(260px,380px)_minmax(0,1fr)]"
+        aria-label="Hey, I'm Maven"
+        className="relative flex min-h-[300px] items-stretch overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-emphasized)] bg-[linear-gradient(120deg,rgba(212,168,88,0.12),#191714_48%,rgba(232,32,112,0.08))] shadow-[var(--ms-shadow-gold)] lg:min-h-[340px]"
       >
-        <div
-          aria-hidden="true"
-          className="relative flex min-h-52 flex-col items-center justify-center overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-emphasized)] bg-[radial-gradient(circle_at_50%_35%,rgba(212,168,88,0.14),transparent_60%),var(--ms-color-panel)] p-6 shadow-[var(--ms-shadow-gold)] lg:min-h-full"
-        >
-          <span className="flex h-24 w-24 items-center justify-center rounded-full border border-[var(--ms-color-border-emphasized)] bg-black/20 text-[var(--ms-color-gold-primary)]">
-            <Icon type="maven" size={44} />
-          </span>
-          <p className="mt-4 text-[10px] uppercase tracking-[0.28em] text-[var(--ms-color-gold-muted)]">Maven · portrait placeholder</p>
-        </div>
+        <img
+          src="/assets/maven-dashboard-hero.png"
+          alt="Hey, I'm Maven. Let's create something AMAZING."
+          draggable={false}
+          className="h-full w-full select-none object-contain object-center"
+        />
+      </section>
 
-        <div className="flex min-h-52 flex-col justify-center rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-emphasized)] bg-[linear-gradient(135deg,rgba(212,168,88,0.09),var(--ms-color-panel)_55%,rgba(232,32,112,0.05))] p-6 shadow-[var(--ms-shadow-gold)] sm:p-8">
-          <h1 className="text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">
-            Hey, I&apos;m Maven.
-          </h1>
-          <p className="mt-3 text-xl font-semibold tracking-[-0.02em] text-[var(--ms-color-text-primary)] sm:text-2xl">
-            What are you making today?
-          </p>
-          <p className="mt-2 max-w-xl text-sm leading-5 text-[var(--ms-color-text-secondary)]">
-            Tell me what you want to create and I&apos;ll help you get it done.
-          </p>
+      {/* Compact creation shortcuts */}
+      <section aria-label="Quick actions" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {QUICK_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
+      </section>
+
+      {/* Conversation workspace */}
+      <section aria-label="What are you working on?" className="mt-6">
+        <h2 className="text-sm font-semibold tracking-[-0.01em]">What are you working on?</h2>
+        <WorkspaceCard className="mt-3 flex flex-col overflow-hidden p-0">
+          <div className="flex min-h-[300px] flex-1 items-center justify-center px-6 py-10 lg:min-h-[400px]">
+            <div className="flex max-w-md flex-col items-center text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--ms-color-border-emphasized)] bg-black/20 text-[var(--ms-color-gold-primary)]">
+                <Icon type="maven" size={26} />
+              </span>
+              <p className="mt-4 text-sm font-medium leading-6">Tell me what you&apos;re working on and we&apos;ll figure out what to create.</p>
+            </div>
+          </div>
 
           <form
-            className="mt-6 flex max-w-xl flex-col gap-2.5 sm:flex-row"
+            className="flex items-center gap-2 border-t border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background-elevated)] p-3"
             onSubmit={(event) => {
               event.preventDefault();
               setMavenMessage("");
@@ -120,24 +122,22 @@ export default function MavenHomeDashboard() {
               type="text"
               value={mavenMessage}
               onChange={(event) => setMavenMessage(event.target.value)}
-              placeholder="Describe what you want to make…"
-              aria-label="Talk to MavenSync"
-              className="h-11 min-w-0 flex-1 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background-elevated)] px-4 text-sm text-[var(--ms-color-text-primary)] outline-none transition-colors placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-border-emphasized)]"
+              placeholder="Message Maven…"
+              aria-label="Message MavenSync"
+              className="h-11 min-w-0 flex-1 rounded-full border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-4 text-sm text-[var(--ms-color-text-primary)] outline-none transition-colors placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-border-emphasized)]"
             />
             <button
               type="submit"
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--ms-radius-button)] bg-[var(--ms-color-pink-primary)] px-5 text-sm font-semibold text-white shadow-[var(--ms-shadow-pink)] transition-[background-color,transform] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:bg-[var(--ms-color-pink-hover)]"
+              aria-label="Send message to MavenSync"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--ms-color-pink-primary)] text-white shadow-[var(--ms-shadow-pink)] transition-[background-color,transform] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:bg-[var(--ms-color-pink-hover)] [&>svg]:h-4 [&>svg]:w-4"
             >
-              Talk to MavenSync
+              <Icon type="arrow" size={16} />
             </button>
           </form>
-        </div>
+        </WorkspaceCard>
       </section>
 
-      <section aria-label="Quick creation paths" className="mt-6 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        {QUICK_ACTIONS.map((item) => <QuickActionCard key={item.href} item={item} />)}
-      </section>
-
+      {/* Operational information */}
       <section aria-label="Needs your attention" className="mt-6">
         <h2 className="text-sm font-semibold tracking-[-0.01em]">Needs Your Attention</h2>
         <p className="mt-1 text-xs text-[var(--ms-color-text-muted)]">Production state across your work.</p>
