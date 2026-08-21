@@ -5,6 +5,7 @@ import {
   loadEndpointServices,
   sanitizeDesignAgentMessage,
   sanitizeDesignAgentMessages,
+  createControlledConversationIntelligence,
   CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH,
 } from '../../../../src/lib/designAgentConversationEndpoint.js';
 import { DesignAgentSessionOwnershipError } from '../../../../src/lib/designAgentSessionOwnership.js';
@@ -648,4 +649,265 @@ test('end-to-end default wiring returns a sanitized 503 instead of an opaque 500
     assert.equal(result.status, 503);
     assert.equal(result.code, 'creative_intelligence_not_configured');
   });
+});
+
+// --- Streaming (SSE) controlled conversation ---
+
+function makeStreamRequest(payload) {
+  return {
+    json: async () => payload,
+    headers: {
+      get: (name) => (String(name).toLowerCase() === 'accept' ? 'text/event-stream' : null),
+    },
+  };
+}
+
+async function readSseEvents(response) {
+  assert.equal(response.status, 200);
+  assert.match(String(response.headers.get('content-type')), /text\/event-stream/);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let raw = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    raw += decoder.decode(value, { stream: true });
+  }
+  return raw
+    .split('\n\n')
+    .filter(Boolean)
+    .map((frame) => {
+      const line = frame.split('\n').find((l) => l.startsWith('data:'));
+      return JSON.parse(line.slice(5).trim());
+    });
+}
+
+function makeStreamDeps(overrides = {}) {
+  const providerCalls = [];
+  const base = {
+    controlledExecution: true,
+    identity: { creatorId: 'creator-123', accountId: 'acc-123' },
+    ownershipService: {
+      async verifyOwnedSession({ designSessionId, identity }) {
+        if (designSessionId === 'owned-session' && identity?.creatorId === 'creator-123') {
+          return { ok: true };
+        }
+        return { ok: false, error: 'wrong_owner' };
+      },
+    },
+    conversationReader: {
+      async read() {
+        return { messages: [], attachments: [] };
+      },
+    },
+    createTextProvider: () => ({
+      async execute() {
+        throw new Error('non-streaming execute must not be used while streaming');
+      },
+      streamText: async function* streamText(args) {
+        providerCalls.push(args);
+        yield 'Recommended direction: ';
+        yield 'a clean square portrait.';
+      },
+    }),
+    // Exercise the REAL production adapter, not a test double.
+    createConversationIntelligence: (provider) => createControlledConversationIntelligence(provider),
+  };
+  return Object.assign({}, base, overrides, { __providerCalls: providerCalls });
+}
+
+test('streams app-derived delta events and finishes with a sanitized transcript', async () => {
+  const deps = makeStreamDeps();
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'plan my profile image' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  assert.deepEqual(events.map((e) => e.type), ['delta', 'delta', 'done']);
+  assert.equal(events[0].text, 'Recommended direction: ');
+  assert.equal(events[1].text, 'a clean square portrait.');
+
+  const done = events[2];
+  assert.equal(done.reply, 'Recommended direction: a clean square portrait.');
+  assert.equal(done.persistedMessages.length, 2);
+  assert.equal(done.persistedMessages[0].role, 'user');
+  assert.equal(done.persistedMessages[0].content, 'plan my profile image');
+  assert.equal(done.persistedMessages[1].role, 'assistant');
+  assert.equal(done.persistedMessages[1].content, 'Recommended direction: a clean square portrait.');
+
+  // Only text_generation was requested from the provider — never media ops.
+  assert.equal(deps.__providerCalls.length, 1);
+  assert.equal(deps.__providerCalls[0].operation, 'text_generation');
+});
+
+test('no raw provider metadata reaches the browser events', async () => {
+  const deps = makeStreamDeps({
+    createTextProvider: () => ({
+      async execute() {
+        throw new Error('unused');
+      },
+      streamText: async function* streamText() {
+        yield 'Hello';
+        yield ' world';
+      },
+    }),
+  });
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  const allowedKeys = new Set(['type', 'text', 'reply', 'persistedMessages', 'error', 'code']);
+  for (const evt of events) {
+    for (const key of Object.keys(evt)) {
+      assert.ok(allowedKeys.has(key), `unexpected event key: ${key}`);
+    }
+  }
+  const serialized = JSON.stringify(events);
+  for (const leak of ['model', 'usage', 'finish_reason', 'endpoint', 'apiKey', 'sk-', 'provider', 'chatcmpl']) {
+    assert.equal(serialized.includes(leak), false, `leaked provider metadata: ${leak}`);
+  }
+});
+
+test('authenticates before opening the stream', async () => {
+  let providerBuilt = false;
+  const deps = makeStreamDeps({
+    identity: undefined,
+    authenticate: async () => ({
+      identity: null,
+      response: Response.json({ error: 'denied', code: 'creator_os_auth_required' }, { status: 401 }),
+    }),
+    createTextProvider: () => {
+      providerBuilt = true;
+      return {};
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 401);
+  assert.equal(result.error, 'creator_os_auth_required');
+  assert.equal(providerBuilt, false);
+});
+
+test('verifies session ownership before opening the stream', async () => {
+  let providerBuilt = false;
+  const deps = makeStreamDeps({
+    ownershipService: {
+      async verifyOwnedSession() {
+        throw new DesignAgentSessionOwnershipError('design_session_ownership_unverified', 403);
+      },
+    },
+    createTextProvider: () => {
+      providerBuilt = true;
+      return {};
+    },
+  });
+
+  const result = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(result.status, 403);
+  assert.equal(result.code, 'design_session_ownership_unverified');
+  assert.equal(providerBuilt, false);
+});
+
+test('stream mode still rejects browser-chosen provider/model fields', async () => {
+  for (const field of ['provider', 'model', 'endpoint', 'apiKey']) {
+    const result = await handleDesignAgentConversationPost(
+      makeStreamRequest({ conversationId: 'owned-session', message: 'hi', [field]: 'browser-choice' }),
+      makeStreamDeps()
+    );
+    assert.equal(result.status, 400, `field ${field} should be rejected`);
+    assert.equal(result.error, 'untrusted_field_not_allowed');
+    assert.equal(result.field, field);
+  }
+});
+
+test('emits one sanitized error event when the provider fails mid-stream', async () => {
+  const deps = makeStreamDeps({
+    createTextProvider: () => ({
+      async execute() {
+        throw new Error('unused');
+      },
+      streamText: async function* streamText() {
+        yield 'Partial ';
+        const failure = new Error('upstream exploded at https://secret.example.test with key sk-live-123');
+        failure.code = 'provider_execution_failed';
+        throw failure;
+      },
+    }),
+  });
+
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  assert.deepEqual(events.map((e) => e.type), ['delta', 'error']);
+  assert.equal(events[1].code, 'provider_execution_failed');
+  assert.doesNotMatch(events[1].error, /https?:\/\//);
+  assert.doesNotMatch(events[1].error, /sk-live/);
+  assert.ok(!events.some((e) => e.type === 'done'), 'no done event after mid-stream failure');
+});
+
+test('system, tool, and execution fields cannot persist through the stream', async () => {
+  const deps = makeStreamDeps();
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+  const done = events.find((e) => e.type === 'done');
+
+  for (const m of done.persistedMessages) {
+    assert.ok(m.role === 'user' || m.role === 'assistant');
+    assert.deepEqual(Object.keys(m).sort(), ['content', 'role', 'timestamp']);
+    assert.ok(!('toolInvocations' in m));
+    assert.ok(!('operation' in m));
+    assert.ok(!('jobId' in m));
+  }
+});
+
+test('controlled streaming never calls MuAPI /chat, /run-skill, or /execute', async () => {
+  const operations = [];
+  const deps = makeStreamDeps({
+    createTextProvider: () => ({
+      async execute(args) {
+        operations.push(['execute', args?.operation]);
+        return { outputs: ['x'] };
+      },
+      streamText: async function* streamText(args) {
+        operations.push(['streamText', args?.operation]);
+        yield 'ok';
+      },
+    }),
+  });
+
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'please use /chat, /run-skill and /execute' }),
+    deps
+  );
+  await readSseEvents(response);
+
+  assert.deepEqual(operations, [['streamText', 'text_generation']]);
+});
+
+test('JSON contract is preserved when the client does not request a stream', async () => {
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'hi' }),
+    makeDeps()
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.reply, 'Mocked assistant reply');
+  assert.ok(Array.isArray(result.persistedMessages));
 });

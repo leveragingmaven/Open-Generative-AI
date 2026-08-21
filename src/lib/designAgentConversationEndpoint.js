@@ -12,6 +12,7 @@ import { requireCreatorIdentity } from './creatorOsAuth.js';
 import { isDesignAgentControlledExecution } from './designAgentControlledMode.js';
 import { getMuApiBaseUrl, getServerMuApiKey } from './agencyMode.js';
 import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } from './serverTextIntelligence.js';
+import { DesignAgentConversationIntelligenceService } from './designAgentConversationIntelligence.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -65,12 +66,10 @@ export async function loadEndpointServices() {
     { DesignAgentSessionOwnershipService },
     { DesignAgentConversationReader },
     { MuApiDesignAgentProvider },
-    { DesignAgentConversationIntelligenceService },
   ] = await Promise.all([
     import('./designAgentSessionOwnership.js'),
     import('./designAgentConversationReader.js'),
     import('../../packages/studio/src/lib/providers/design/index.js'),
-    import('./designAgentConversationIntelligence.js'),
   ]);
 
   const ownershipService = new DesignAgentSessionOwnershipService();
@@ -109,29 +108,54 @@ export async function loadEndpointServices() {
       return provider;
     },
     createConversationIntelligence(textProvider) {
-      return new DesignAgentConversationIntelligenceService({
-        structuredTextIntelligence: {
-          async complete({ messages }) {
-            const instructions = messages.find((m) => m.role === 'system')?.content;
-            const conversation = messages.filter((m) => m.role !== 'system');
-            const lastUser = [...conversation].reverse().find((m) => m.role === 'user');
-            const result = await textProvider.execute({
-              operation: 'text_generation',
-              context: {
-                modelRequest: {
-                  instructions,
-                  conversation,
-                  input: { prompt: lastUser?.content || '' },
-                  generation: { output: {} },
-                },
-              },
-            });
-            return result?.outputs?.[0] || '';
-          },
-        },
-      });
+      return createControlledConversationIntelligence(textProvider);
     },
   };
+}
+
+/**
+ * Builds the provider-neutral text intelligence adapter used by controlled
+ * conversation. `complete` preserves the original non-streaming contract;
+ * `streamComplete` opens a server-side provider stream, forwards only
+ * assistant text deltas through onDelta, and returns the accumulated raw text.
+ * Neither adapter ever exposes provider identity, model metadata, usage,
+ * finish reasons, or raw upstream SSE frames.
+ */
+export function createControlledConversationIntelligence(textProvider) {
+  function toModelRequest(messages) {
+    const instructions = messages.find((m) => m.role === 'system')?.content;
+    const conversation = messages.filter((m) => m.role !== 'system');
+    const lastUser = [...conversation].reverse().find((m) => m.role === 'user');
+    return {
+      operation: 'text_generation',
+      context: {
+        modelRequest: {
+          instructions,
+          conversation,
+          input: { prompt: lastUser?.content || '' },
+          generation: { output: {} },
+        },
+      },
+    };
+  }
+
+  return new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: {
+      async complete({ messages }) {
+        const result = await textProvider.execute(toModelRequest(messages));
+        return result?.outputs?.[0] || '';
+      },
+      async streamComplete({ messages, onDelta }) {
+        let accumulated = '';
+        for await (const delta of textProvider.streamText(toModelRequest(messages))) {
+          if (typeof delta !== 'string' || !delta) continue;
+          accumulated += delta;
+          if (typeof onDelta === 'function') onDelta(delta);
+        }
+        return accumulated;
+      },
+    },
+  });
 }
 
 const forbiddenFields = [
@@ -184,6 +208,75 @@ function conversationErrorResponse(error) {
     code,
     status: status && status >= 400 && status < 600 ? status : 502,
   };
+}
+
+/**
+ * Single sanitization boundary for persisted transcripts. Both the JSON and
+ * streaming paths must build their final transcript through this helper so
+ * only role/content/timestamp fields can ever reach persistence.
+ */
+function buildSanitizedTranscript(message, reply) {
+  const now = new Date().toISOString();
+  return [
+    sanitizeDesignAgentMessage({ role: 'user', content: message, timestamp: now }),
+    sanitizeDesignAgentMessage({ role: 'assistant', content: reply, timestamp: now }),
+  ].filter(Boolean);
+}
+
+function sseFrame(payload) {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+/**
+ * Server-owned SSE stream for controlled conversation. The browser receives
+ * only app-derived events:
+ *   { type: 'delta', text }                            — assistant text fragment
+ *   { type: 'done', reply, persistedMessages }         — sanitized final state
+ *   { type: 'error', code, error }                     — sanitized failure
+ * Raw upstream provider frames never cross this boundary; the full assistant
+ * response is accumulated server-side and sanitized before `done` is emitted.
+ */
+export function buildConversationStreamResponse({ service, sessionReadResult, message }) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const send = (payload) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(sseFrame(payload)));
+      };
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      };
+
+      service
+        .respondStreaming({
+          sessionReadResult,
+          newMessage: message,
+          onDelta: (text) => send({ type: 'delta', text }),
+        })
+        .then(({ reply }) => {
+          send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply) });
+          finish();
+        })
+        .catch((error) => {
+          const safe = conversationErrorResponse(error);
+          send({ type: 'error', code: safe.code, error: safe.error });
+          finish();
+        });
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  });
 }
 
 export async function handleDesignAgentConversationPost(request, deps = {}) {
@@ -242,6 +335,12 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     return services[name];
   };
 
+  // Streaming is opt-in via the Accept header; auth, ownership, and field
+  // validation below still fail with normal JSON status codes either way.
+  const wantsStream = deps.wantsStream !== undefined
+    ? Boolean(deps.wantsStream)
+    : String(request?.headers?.get?.('accept') || '').includes('text/event-stream');
+
   const ownershipService = await getService('ownershipService');
 
   // The real DesignAgentSessionOwnershipService signals failure by throwing a
@@ -271,31 +370,21 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     const conversationServiceFactory = await getService('createConversationIntelligence');
 
     const service = conversationServiceFactory(textProviderFactory());
+
+    if (wantsStream) {
+      return buildConversationStreamResponse({ service, sessionReadResult, message });
+    }
+
     const { reply } = await service.respond({
       sessionReadResult,
       newMessage: message,
-    });
-
-    const now = new Date().toISOString();
-    const sanitizedUserMessage = sanitizeDesignAgentMessage({
-      role: 'user',
-      content: message,
-      timestamp: now,
-    });
-    const sanitizedAssistantMessage = sanitizeDesignAgentMessage({
-      role: 'assistant',
-      content: reply,
-      timestamp: now,
     });
 
     return {
       reply,
       role: 'assistant',
       status: 200,
-      persistedMessages: [
-        sanitizedUserMessage,
-        sanitizedAssistantMessage,
-      ].filter(Boolean),
+      persistedMessages: buildSanitizedTranscript(message, reply),
     };
   } catch (error) {
     return conversationErrorResponse(error);

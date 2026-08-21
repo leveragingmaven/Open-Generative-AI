@@ -196,3 +196,97 @@ test("legacy text requests do not emit a response format", async () => {
   await provider.execute({ operation: "text_generation", inputs: { prompt: "plain text" } });
   assert.equal(Object.prototype.hasOwnProperty.call(calls[0].body, "response_format"), false);
 });
+
+// --- Streaming (SSE) ---
+
+function streamingProvider(bodyText, capture) {
+  return new OpenAICompatibleProvider({
+    config: { endpoint: "https://provider.test", model: "configured-model", serverKey: "sk-server" },
+    fetchImpl: async (url, options) => {
+      if (capture) capture.push({ url, options, body: JSON.parse(options.body) });
+      return new Response(bodyText, { status: 200 });
+    },
+  });
+}
+
+async function collectStream(provider, request) {
+  const chunks = [];
+  for await (const delta of provider.streamText(request)) {
+    chunks.push(delta);
+  }
+  return chunks;
+}
+
+test("streamText yields only assistant text deltas across multiple chunks", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"lo wo"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"rld"}}]}\n\n',
+    "data: [DONE]\n\n",
+  ].join("");
+  const provider = streamingProvider(sse);
+
+  const chunks = await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.deepEqual(chunks, ["Hel", "lo wo", "rld"]);
+  assert.equal(chunks.join(""), "Hello world");
+});
+
+test("streamText sends stream:true and reuses the validated endpoint/model/key configuration", async () => {
+  const captured = [];
+  const provider = streamingProvider("data: [DONE]\n\n", captured);
+
+  await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.equal(captured[0].url, "https://provider.test/chat/completions");
+  assert.equal(captured[0].body.stream, true);
+  assert.equal(captured[0].body.model, "configured-model");
+  assert.equal(captured[0].options.headers.Authorization, "Bearer sk-server");
+});
+
+test("streamText stops at [DONE] even when more frames follow", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"kept"}}]}\n\n',
+    "data: [DONE]\n\n",
+    'data: {"choices":[{"delta":{"content":"dropped"}}]}\n\n',
+  ].join("");
+  const provider = streamingProvider(sse);
+
+  const chunks = await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.equal(chunks.join(""), "kept");
+});
+
+test("streamText skips malformed and non-data frames without leaking provider data", async () => {
+  const sse = [
+    ": keep-alive comment\n",
+    "event: ping\n\n",
+    'data: not-json-at-all {"model":"secret-model"}\n\n',
+    'data: {"choices":[{"delta":{}}],"model":"secret-model","usage":{"total_tokens":42}}\n\n',
+    'data: {"choices":[{"delta":{"content":"visible"}}]}\n\n',
+    "data: [DONE]\n\n",
+  ].join("");
+  const provider = streamingProvider(sse);
+
+  const chunks = await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.deepEqual(chunks, ["visible"]);
+  assert.equal(chunks.join("").includes("secret-model"), false);
+});
+
+test("streamText emits no usage, finish reasons, ids, or model metadata", async () => {
+  const sse = [
+    'data: {"id":"chatcmpl-1","model":"secret-model","choices":[{"delta":{"content":"text"},"finish_reason":null}],"usage":{"prompt_tokens":9}}\n\n',
+    'data: {"id":"chatcmpl-1","model":"secret-model","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":4}}\n\n',
+    "data: [DONE]\n\n",
+  ].join("");
+  const provider = streamingProvider(sse);
+
+  const chunks = await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.deepEqual(chunks, ["text"]);
+  const serialized = JSON.stringify(chunks);
+  for (const leak of ["secret-model", "chatcmpl", "usage", "finish_reason"]) {
+    assert.equal(serialized.includes(leak), false, `leaked provider metadata: ${leak}`);
+  }
+});

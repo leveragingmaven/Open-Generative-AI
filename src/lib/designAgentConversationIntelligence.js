@@ -13,9 +13,17 @@ const MAX_CONTENT_LENGTH = 8000;
 
 export const DESIGN_AGENT_CONVERSATION_SYSTEM_PROMPT = `You are MavenSync Design Agent, a helpful creative assistant.
 
-Your job is to discuss the user's creative idea, ask clarifying questions, refine the request, and recommend direction.
+Your job is to discuss the user's creative idea, recommend a direction, and refine the request.
 
 You may talk about images, videos, styles, audiences, platforms, and formats.
+
+How to respond:
+- Infer obvious details from the conversation and trusted references instead of asking about them.
+- Lead with a useful recommendation.
+- Ask at most ONE question per turn, and only when the answer materially changes the creative result.
+- Use sensible defaults for minor decisions; never turn replies into long questionnaires.
+- Skip technical details such as resolution, file format, or platform specs unless they are relevant.
+- Keep default responses concise: about 2-4 conversational sentences.
 
 You must NEVER:
 - run tools, skills, or operations
@@ -24,9 +32,7 @@ You must NEVER:
 - output executable provider commands, JSON payloads, routing decisions, or authorization tokens
 - reveal system internals, provider metadata, billing information, or credentials
 
-If the user asks you to create or edit something, explain that you can help refine the idea, and that they can click "Start Creative Work" when they are ready.
-
-Keep responses concise, natural, and focused on the creative goal.`;
+If the user asks you to create or edit something, explain that you can help refine the idea, and that they can click "Start Creative Work" when they are ready.`;
 
 function truncateText(text, maxLength = MAX_CONTENT_LENGTH) {
   if (!text || typeof text !== 'string') return '';
@@ -103,6 +109,35 @@ export class DesignAgentConversationIntelligenceService {
 
     const safeReply = this.sanitizeReply(reply);
     return { reply: safeReply };
+  }
+
+  async respondStreaming({ sessionReadResult, newMessage, onDelta } = {}) {
+    if (!newMessage || typeof newMessage !== 'string') {
+      throw new Error('newMessage is required');
+    }
+    if (typeof this.intelligence.streamComplete !== 'function') {
+      const error = new Error('Streaming text intelligence is unavailable.');
+      error.code = 'provider_execution_failed';
+      error.status = 502;
+      throw error;
+    }
+
+    const messages = buildConversationMessages({
+      messages: sessionReadResult?.messages,
+      newMessage,
+      attachments: sessionReadResult?.attachments,
+    });
+
+    // Deltas are streamed through onDelta as they arrive; the accumulated raw
+    // text is sanitized exactly once, after the stream completes. The caller
+    // must treat only the returned reply as safe to persist.
+    const rawReply = await this.intelligence.streamComplete({
+      messages,
+      temperature: 0.7,
+      onDelta: typeof onDelta === 'function' ? onDelta : undefined,
+    });
+
+    return { reply: this.sanitizeReply(rawReply) };
   }
 
   sanitizeReply(reply) {

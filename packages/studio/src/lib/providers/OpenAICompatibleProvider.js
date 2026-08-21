@@ -103,6 +103,18 @@ function structuredResponseFormat(request, params) {
   };
 }
 
+function extractStreamDeltaText(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
+  if (!choice || typeof choice !== "object") return "";
+  const delta = choice.delta;
+  if (delta && typeof delta.content === "string") return delta.content;
+  // Some OpenAI-compatible providers deliver the full message in the final chunk.
+  const message = choice.message;
+  if (message && typeof message.content === "string") return message.content;
+  return "";
+}
+
 export class OpenAICompatibleProvider extends CreativeProvider {
   constructor({ fetchImpl = globalThis.fetch, config = runtimeConfig() } = {}) {
     super({ id: PROVIDER_IDS.OPENAI, name: "OpenAI-compatible", capabilities: ["text", "llm", "streaming"] });
@@ -152,6 +164,69 @@ export class OpenAICompatibleProvider extends CreativeProvider {
       outputReferences: [text],
       providerMetadata: { provider: this.id, model, ...(data.usage ? { usage: data.usage } : {}) },
     }, { provider: this.id });
+  }
+
+  async *streamText(request = {}) {
+    try {
+      yield* this.streamTextInternal(request);
+    } catch (error) {
+      throw normalizeProviderError(error);
+    }
+  }
+
+  async *streamTextInternal(request = {}) {
+    const operation = request.operation || request.routing?.operation;
+    if (!operation || !["text_generation", "prompt_enhancement"].includes(operation)) {
+      this.notImplemented(`streamText:${operation || "unknown"}`);
+    }
+    if (typeof this.fetchImpl !== "function") throw new Error("OpenAI-compatible provider requires fetch");
+    const params = request.inputs || request.payload || {};
+    const apiKey = request.apiKey !== undefined ? request.apiKey : request.executionMetadata?.apiKey;
+    const model = requestModel(request, params) || request.routing?.logicalModel || this.config.model;
+    if (!model) throw new Error("OpenAI-compatible deployment requires a configured model or user-selected model");
+    const headers = { "Content-Type": "application/json" };
+    const credential = apiKey || this.config.serverKey;
+    if (credential) headers.Authorization = `Bearer ${credential}`;
+    const response = await this.fetchImpl(`${this.config.endpoint.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers,
+      ...(request.signal ? { signal: request.signal } : {}),
+      body: JSON.stringify({
+        model,
+        messages: requestMessages(request, params),
+        temperature: requestGenerationValue(request, params, "temperature"),
+        max_tokens: requestGenerationValue(request, params, "max_tokens"),
+        response_format: structuredResponseFormat(request, params),
+        stream: true,
+      }),
+    });
+    if (!response.ok) throw new Error(`OpenAI-compatible request failed: ${response.status} ${response.statusText || ""}`.trim());
+    if (!response.body) throw new Error("OpenAI-compatible streaming response requires a body");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex;
+      while ((separatorIndex = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, separatorIndex).replace(/\r$/, "");
+        buffer = buffer.slice(separatorIndex + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        if (data === "[DONE]") return;
+        let parsed;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        const text = extractStreamDeltaText(parsed);
+        if (text) yield text;
+      }
+    }
   }
 }
 

@@ -111,3 +111,74 @@ test('system prompt forbids tools, execution, and media claims', () => {
   assert.ok(prompt.includes('tools'));
   assert.ok(prompt.includes('created'));
 });
+
+// --- Minimum-necessary clarification / verbosity policy ---
+
+test('system prompt enforces the minimum-necessary clarification policy', () => {
+  const prompt = DESIGN_AGENT_CONVERSATION_SYSTEM_PROMPT.toLowerCase();
+  assert.ok(prompt.includes('infer obvious details'), 'should infer obvious details');
+  assert.ok(prompt.includes('lead with a useful recommendation'), 'should lead with a recommendation');
+  assert.ok(prompt.includes('one question'), 'at most one question per turn');
+  assert.ok(prompt.includes('materially'), 'questions must materially change the result');
+  assert.ok(prompt.includes('sensible defaults'), 'sensible defaults for minor decisions');
+  assert.ok(prompt.includes('2-4'), 'default length about 2-4 sentences');
+});
+
+// --- Streaming response path ---
+
+test('respondStreaming forwards deltas and sanitizes only the final reply', async () => {
+  const deltas = [];
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: {
+      async streamComplete({ messages, onDelta }) {
+        onDelta('I have generated your image. ');
+        onDelta('But first, a recommendation.');
+        return 'I have generated your image. But first, a recommendation.';
+      },
+    },
+  });
+
+  const result = await service.respondStreaming({
+    sessionReadResult: { messages: [], attachments: [] },
+    newMessage: 'make it',
+    onDelta: (t) => deltas.push(t),
+  });
+
+  assert.deepEqual(deltas, ['I have generated your image. ', 'But first, a recommendation.']);
+  assert.ok(result.reply.includes('Start Creative Work'));
+  assert.ok(!result.reply.toLowerCase().includes('generated'));
+});
+
+test('respondStreaming requires streaming intelligence support', async () => {
+  const service = makeService('ok');
+  await assert.rejects(
+    () => service.respondStreaming({ sessionReadResult: { messages: [], attachments: [] }, newMessage: 'hi' }),
+    (error) => error.code === 'provider_execution_failed'
+  );
+});
+
+test('respondStreaming bounds conversation history like the non-streaming path', async () => {
+  let capturedMessages;
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: {
+      async streamComplete({ messages }) {
+        capturedMessages = messages;
+        return 'ok';
+      },
+    },
+  });
+
+  const longHistory = [];
+  for (let i = 0; i < 40; i++) {
+    longHistory.push({ role: 'user', content: `msg ${i}` });
+    longHistory.push({ role: 'assistant', content: `reply ${i}` });
+  }
+
+  await service.respondStreaming({
+    sessionReadResult: { messages: longHistory, attachments: [] },
+    newMessage: 'hello',
+  });
+
+  const nonSystem = capturedMessages.filter((m) => m.role !== 'system');
+  assert.ok(nonSystem.length <= 25, 'recent history plus current user message is bounded');
+});
