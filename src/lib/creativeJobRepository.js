@@ -170,6 +170,16 @@ export class MySqlCreativeJobRepository {
     return result.affectedRows === 1;
   }
 
+  async transitionToRetryReady(connection, { jobId, accountId } = {}) {
+    const [result] = await connection.query(
+      `UPDATE creative_jobs
+       SET status = 'queued', execution_status = 'ready', error_json = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE job_id = ? AND account_id = ? AND status = 'failed' AND execution_status = 'failed'`,
+      [jobId, accountId],
+    );
+    return result.affectedRows === 1;
+  }
+
   async finalizeExecutionOnConnection(connection, { jobId, accountId, status, executionStatus, result, error } = {}) {
     const [updated] = await connection.query(
       `UPDATE creative_jobs

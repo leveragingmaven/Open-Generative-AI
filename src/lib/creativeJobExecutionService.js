@@ -178,7 +178,8 @@ export class CreativeJobExecutionService {
       const job = await this.jobRepository.getJobOnConnection(connection, jobId, { accountId });
       this.validateJob(job, creatorIdentityKey);
       const attempts = await this.attemptRepository.listAttemptsOnConnection(connection, jobId, { accountId });
-      const attempt = attempts.find((item) => item.attemptNumber === 1);
+      // Claim the newest CREATED attempt (attempt 1 for first execution, N+1 for retries).
+      const attempt = attempts.filter((item) => item.status === EXECUTION_ATTEMPT_STATUS.CREATED).sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
       if (!attempt) throw new CreativeJobExecutionError('execution_attempt_required');
       if (attempt.status !== EXECUTION_ATTEMPT_STATUS.CREATED) throw new CreativeJobExecutionError('execution_attempt_not_created');
       if (attempts.some((item) => item.status === EXECUTION_ATTEMPT_STATUS.RUNNING || item.status === EXECUTION_ATTEMPT_STATUS.COMPLETED)) {
