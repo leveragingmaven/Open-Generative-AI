@@ -1,0 +1,32 @@
+# --- Local artifacts that must never enter the Docker build context ---
+node_modules
+**/node_modules
+
+# Build outputs (Next.js / Vite / tsc)
+.next
+**/.next
+dist
+**/dist
+build
+**/build
+out
+**/out
+*.tsbuildinfo
+
+# Git / tooling
+.git
+.gitignore
+.opencode
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs / coverage / temp
+*.log
+npm-debug.log*
+coverage
+**/coverage
+.tmp
+temp
