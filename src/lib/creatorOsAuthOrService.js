@@ -16,17 +16,24 @@ function bearerToken(authorization) {
   return match ? match[1] : null;
 }
 
+function headerValue(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function headerValueFrom(headers, name) {
+  if (headers && typeof headers.get === 'function') {
+    return headerValue(headers.get(name)) ?? undefined;
+  }
+  return headerValue(headers ? headers[name] : undefined);
+}
+
 function hasServiceAuthHeaders(request) {
   const headers = request?.headers || {};
   return (
-    headers[SERVICE_HEADERS.authorization] !== undefined ||
-    headers[SERVICE_HEADERS.service] !== undefined ||
-    headers[SERVICE_HEADERS.user] !== undefined
+    headerValueFrom(headers, SERVICE_HEADERS.authorization) !== undefined ||
+    headerValueFrom(headers, SERVICE_HEADERS.service) !== undefined ||
+    headerValueFrom(headers, SERVICE_HEADERS.user) !== undefined
   );
-}
-
-function headerValue(value) {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 function errorResponse(message, code, status) {
@@ -42,7 +49,7 @@ function logServiceAuth(request, result) {
     serviceId: result.serviceId ?? null,
     accountId: result.accountId ?? null,
     email: result.email ?? null,
-    requestId: headerValue(headers[SERVICE_HEADERS.requestId]) ?? null,
+    requestId: headerValueFrom(headers, SERVICE_HEADERS.requestId) ?? null,
     code: result.code ?? null,
   });
   console.info(`[service-auth] ${line}`);
@@ -71,9 +78,9 @@ export async function requireCreatorIdentityOrService(request, {
     return authenticate(request);
   }
 
-  const authorization = headerValue(headers[SERVICE_HEADERS.authorization]);
-  const serviceHeader = headerValue(headers[SERVICE_HEADERS.service]);
-  const userHeader = headerValue(headers[SERVICE_HEADERS.user]);
+  const authorization = headerValueFrom(headers, SERVICE_HEADERS.authorization);
+  const serviceHeader = headerValueFrom(headers, SERVICE_HEADERS.service);
+  const userHeader = headerValueFrom(headers, SERVICE_HEADERS.user);
 
   const token = bearerToken(authorization);
   if (!token) {

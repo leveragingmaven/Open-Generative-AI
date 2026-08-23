@@ -48,6 +48,20 @@ function makeRequest(headers) {
   };
 }
 
+// Production-shaped request: Next.js Request.headers is a WHATWG Headers
+// instance whose values are only reachable via .get().
+function makeWhatwgRequest(headers) {
+  const h = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    h.set(key, value);
+  }
+  return {
+    headers: h,
+    url: 'http://localhost/api/agent-execution/jobs/job-1',
+    cookies: { get: () => undefined },
+  };
+}
+
 test('requireCreatorIdentityOrService delegates to session auth when no service headers', async () => {
   let sessionCalled = false;
   const result = await requireCreatorIdentityOrService(makeRequest({}), {
@@ -122,6 +136,65 @@ test('errors never leak token or secret', async () => {
   const body = JSON.stringify(result.response);
   assert.ok(!body.includes('wrong-secret'));
   assert.ok(!body.includes(token));
+});
+
+test('WHATWG Headers: service header present without token -> service_auth_required', async () => {
+  let sessionCalled = false;
+  const result = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({ 'X-MavenSync-Service': 'test' }),
+    {
+      authenticate: async () => {
+        sessionCalled = true;
+        return { identity: null, response: null };
+      },
+    },
+  );
+  assert.equal(sessionCalled, false);
+  assert.equal(result.response.status, 401);
+  const body = await result.response.json();
+  assert.equal(body.code, 'service_auth_required');
+});
+
+test('WHATWG Headers: valid service token uses service-auth path', async () => {
+  const result = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({
+      Authorization: `Bearer ${craftToken()}`,
+      'X-MavenSync-Service': SERVICE_ID,
+      'X-MavenSync-User': SUBJECT,
+    }),
+    { resolveAccountId: async (identityKey) => `acc-for-${identityKey}` },
+  );
+  assert.equal(result.response, null);
+  assert.equal(result.identity.accountId, `acc-for-ai-gency:${sha256hex(SUBJECT)}`);
+});
+
+test('WHATWG Headers: mismatched X-MavenSync-User is rejected', async () => {
+  const result = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({
+      Authorization: `Bearer ${craftToken()}`,
+      'X-MavenSync-Service': SERVICE_ID,
+      'X-MavenSync-User': 'other@example.com',
+    }),
+    { resolveAccountId: async () => 'acc-1' },
+  );
+  assert.equal(result.response.status, 401);
+  const body = await result.response.json();
+  assert.equal(body.code, 'user_mismatch');
+});
+
+test('WHATWG Headers: no service headers still uses session path', async () => {
+  let sessionCalled = false;
+  const result = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({}),
+    {
+      authenticate: async () => {
+        sessionCalled = true;
+        return { identity: { email: SUBJECT, identityKey: 'ai-gency:xyz', accountId: 'acc-1' }, response: null };
+      },
+    },
+  );
+  assert.equal(sessionCalled, true);
+  assert.equal(result.identity.accountId, 'acc-1');
 });
 
 function sha256hex(value) {
