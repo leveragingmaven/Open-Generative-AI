@@ -137,6 +137,7 @@ export function createAgentExecutionRequest(input = {}) {
     requestedSkillIds: normalizeStringArray(input.requestedSkillIds || input.skillIds),
     requestedRecipeId: normalizeOptionalString(input.requestedRecipeId || input.recipeId),
     requestedWorkflowId: normalizeOptionalString(input.requestedWorkflowId || input.workflowId),
+    idempotencyKey: normalizeOptionalString(input.idempotencyKey) || null,
     authorization: {
       authorizationId: normalizeOptionalString(authorization.authorizationId),
       status: normalizeOptionalString(authorization.status),

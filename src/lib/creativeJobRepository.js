@@ -198,6 +198,14 @@ export class MySqlCreativeJobRepository {
     return rowToJob(rows[0]);
   }
 
+  async getJobByIdempotencyKey(idempotencyKey, { accountId } = {}) {
+    const [rows] = await this.db.query(
+      'SELECT * FROM creative_jobs WHERE idempotency_key = ? AND account_id = ? LIMIT 1',
+      [idempotencyKey, accountId],
+    );
+    return rowToJob(rows[0]);
+  }
+
   async createJob({ request, authorizationId, requestFingerprint, executionContext, jobId, now } = {}) {
     const accepted = createAcceptedCreativeJob({ request, authorizationId, requestFingerprint, executionContext, jobId, now });
     await this.insertJob(this.db, accepted);
