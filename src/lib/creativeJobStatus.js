@@ -1,5 +1,6 @@
 import { MySqlCreativeJobRepository } from './creativeJobRepository.js';
 import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAttemptRepository.js';
+import { CreativeJobRecoveryService } from './creativeJobRecoveryService.js';
 
 export class CreativeJobStatusError extends Error {
   constructor(code, message, status) {
@@ -44,21 +45,23 @@ export class CreativeJobStatusService {
   constructor({
     jobRepository = new MySqlCreativeJobRepository(),
     attemptRepository,
+    recoveryService,
     db,
   } = {}) {
     this.jobRepository = jobRepository;
     this.db = db || jobRepository.db;
     this.attemptRepository = attemptRepository || new MySqlCreativeExecutionAttemptRepository({ db: this.db });
+    this.recoveryService = recoveryService || new CreativeJobRecoveryService({ jobRepository: this.jobRepository, attemptRepository: this.attemptRepository, db: this.db });
   }
 
-  async getJobStatus({ jobId, accountId } = {}) {
+  async getJobStatus({ jobId, accountId, creatorIdentityKey } = {}) {
     if (typeof jobId !== 'string' || jobId.trim() === '') {
       throw new CreativeJobStatusError('job_id_required', 'Creative job id is required.', 400);
     }
     if (typeof accountId !== 'string' || accountId.trim() === '') {
       throw new CreativeJobStatusError('account_id_required', 'Account identity is required.', 401);
     }
-    const job = await this.jobRepository.getJob(jobId.trim(), { accountId });
+    let job = await this.jobRepository.getJob(jobId.trim(), { accountId });
     if (!job) throw jobNotFound();
     if (String(job.accountId) !== String(accountId)) throw scopeMismatch();
 
@@ -68,6 +71,19 @@ export class CreativeJobStatusService {
       latestAttempt = attempts?.[0] || null;
     } catch {
       latestAttempt = null;
+    }
+
+    if (creatorIdentityKey && (job.error?.code === 'provider_recovery_required' || job.result?.recoveryRequired === true)) {
+      try {
+        const recovered = await this.recoveryService.reconcile({ jobId: job.id, accountId, creatorIdentityKey });
+        if (recovered?.job) job = recovered.job;
+        if (recovered?.attempt) latestAttempt = recovered.attempt;
+      } catch (error) {
+        if (error?.code === 'creator_scope_mismatch' || error?.code === 'creative_job_not_found') throw error;
+        // Observation must remain available while provider status or the BYOK
+        // credential is temporarily unavailable. The persisted recovery state
+        // remains authoritative and a later bounded status read can reconcile.
+      }
     }
 
     return publicJobView(job, latestAttempt);

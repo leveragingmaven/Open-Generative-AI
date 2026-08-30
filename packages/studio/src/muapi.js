@@ -112,6 +112,31 @@ async function pollForResult(requestId, key, maxAttempts = 900, interval = 2000,
     throw new Error('Generation timed out after polling.');
 }
 
+export async function getPredictionResult(apiKey, requestId, { signal } = {}) {
+    const id = String(requestId || '').trim();
+    if (!id) {
+        const error = new Error('Provider job id is required.');
+        error.code = 'provider_job_id_required';
+        error.retryable = false;
+        throw error;
+    }
+    const response = await fetch(`${BASE_URL}/api/v1/predictions/${encodeURIComponent(id)}/result`, {
+        headers: jsonHeaders(apiKey),
+        ...(signal ? { signal } : {}),
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = JSON.parse(text || '{}'); } catch {}
+    if (!response.ok) {
+        const error = new Error('Provider status could not be read.');
+        error.code = response.status === 401 || response.status === 403 ? 'provider_credential_rejected' : 'provider_status_unavailable';
+        error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+        error.status = response.status;
+        throw error;
+    }
+    return data;
+}
+
 async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 60, signal) {
     const url = `${BASE_URL}/api/v1/${endpoint}`;
     const response = await fetch(url, {

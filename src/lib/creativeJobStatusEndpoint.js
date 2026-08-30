@@ -16,7 +16,11 @@ export async function handleCreativeJobStatusGet(request, { identity, statusServ
   }
   try {
     const service = statusService || new CreativeJobStatusService();
-    const view = await service.getJobStatus({ jobId, accountId: identity.accountId });
+    const view = await service.getJobStatus({
+      jobId,
+      accountId: identity.accountId,
+      creatorIdentityKey: identity.identityKey || identity.creatorId || identity.userId,
+    });
     return Response.json({ ok: true, job: view });
   } catch (error) {
     const status = error?.status || 500;

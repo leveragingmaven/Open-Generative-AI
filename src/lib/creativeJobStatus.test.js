@@ -24,10 +24,11 @@ class FakeAttemptRepository {
   }
 }
 
-function makeService({ jobs = {}, attempts = {} } = {}) {
+function makeService({ jobs = {}, attempts = {}, recoveryService } = {}) {
   return new CreativeJobStatusService({
     jobRepository: new FakeJobRepository(jobs),
     attemptRepository: new FakeAttemptRepository(attempts),
+    ...(recoveryService ? { recoveryService } : {}),
     db: {},
   });
 }
@@ -62,6 +63,28 @@ test('job status exposes only orchestrator fields with current attempt', async (
   assert.equal(view.attemptStatus, 'running');
   assert.equal(view.resultRef, null);
   assert.equal(view.failure, null);
+});
+
+test('status observation reconciles recovery-required work by the existing provider job', async () => {
+  const calls = [];
+  const service = makeService({
+    jobs: { 'job-1': sampleJob({ result: { recoveryRequired: true, providerJobId: 'prov-1' }, error: { code: 'provider_recovery_required' } }) },
+    attempts: { 'job-1': [{ attemptId: 'attempt-1', status: 'running', providerJobId: 'prov-1' }] },
+    recoveryService: {
+      async reconcile(input) {
+        calls.push(input);
+        return {
+          job: sampleJob({ status: 'completed', executionStatus: 'completed', result: { providerResponseRef: 'https://cdn.example.test/result.png', assetId: 'asset-1' }, error: null }),
+          attempt: { attemptId: 'attempt-1', status: 'completed', providerJobId: 'prov-1' },
+        };
+      },
+    },
+  });
+  const view = await service.getJobStatus({ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:abc' });
+  assert.equal(view.status, 'completed');
+  assert.equal(view.resultRef, 'https://cdn.example.test/result.png');
+  assert.equal(view.recoveryRequired, false);
+  assert.deepEqual(calls, [{ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:abc' }]);
 });
 
 test('jobStatusService exposes result/asset reference and recovery state when completed', async () => {
