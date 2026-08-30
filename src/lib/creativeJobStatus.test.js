@@ -71,7 +71,7 @@ test('completed status verifies owner-scoped job/attempt/modality lineage and re
   const job = sampleJob({
     status: 'completed', executionStatus: 'completed',
     plan: { recipe: { outputModality: 'image' } },
-    result: { assetId: 'asset-1', providerResponseRef: 'https://cdn.example.test/result.png', outputReferences: ['https://cdn.example.test/result.png'] },
+    result: { assetId: 'asset-1', providerResponseRef: 'provider-job-1', outputReferences: ['https://cdn.example.test/result.png'] },
   });
   const service = makeService({
     jobs: { 'job-1': job },
@@ -111,6 +111,7 @@ test('status observation reconciles recovery-required work by the existing provi
     reachabilityChecker: async () => true,
   });
   const view = await service.getJobStatus({ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:abc' });
+  assert.equal(view.resultRef, 'https://cdn.example.test/result.png');
   assert.equal(view.status, 'completed');
   assert.equal(view.resultRef, 'https://cdn.example.test/result.png');
   assert.equal(view.recoveryRequired, false);
@@ -130,7 +131,7 @@ test('jobStatusService exposes result/asset reference and recovery state when co
     attempts: { 'job-1': [{ attemptId: 'attempt-1', status: 'running', providerJobId: 'prov-1' }] },
   });
   const view = await service.getJobStatus({ jobId: 'job-1', accountId: 'acc-1' });
-  assert.equal(view.resultRef, 'asset-ref-1');
+  assert.equal(view.resultRef, 'out-1');
   assert.equal(view.recoveryRequired, true);
   assert.deepEqual(view.failure, { code: 'provider_recovery_required', message: 'recover' });
 });

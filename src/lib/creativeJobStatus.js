@@ -30,7 +30,7 @@ function publicJobView(job, latestAttempt, verification = {}) {
     planId: job.planId || null,
     attemptId: latestAttempt?.attemptId || latestAttempt?.id || null,
     attemptStatus: latestAttempt?.status || null,
-    resultRef: result?.providerResponseRef || result?.outputReferences?.[0] || null,
+    resultRef: result?.outputReferences?.[0] || result?.providerResponseRef || null,
     assetId: result?.assetId || null,
     assetVerified: verification.assetVerified === true,
     modality: verification.modality || null,
@@ -68,7 +68,7 @@ export class CreativeJobStatusService {
   async verifyCompletedAsset(job, latestAttempt, accountId) {
     const expectedModality = job.plan?.recipe?.outputModality || job.recipe?.outputModality || job.executionContext?.recipe?.outputModality || null;
     const assetId = job.result?.assetId;
-    const resultRef = job.result?.providerResponseRef || job.result?.outputReferences?.[0] || null;
+    const resultRef = job.result?.outputReferences?.[0] || job.result?.providerResponseRef || null;
     const attemptId = latestAttempt?.id || latestAttempt?.attemptId;
     if (!assetId || !attemptId || !resultRef) return { assetVerified: false, expectedModality, resultReachable: false };
     const asset = await this.assetRepository.get(assetId, { accountId });
