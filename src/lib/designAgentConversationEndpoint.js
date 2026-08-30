@@ -258,6 +258,19 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
           onDelta: (text) => send({ type: 'delta', text }),
         })
         .then(({ reply }) => {
+          // Server invariant: a normal upstream completion with zero usable
+          // assistant text must fail safely instead of emitting an empty done.
+          if (!reply || typeof reply !== 'string') {
+            send({
+              type: 'error',
+              code: 'conversation_empty_response',
+              error: 'The assistant returned no content for this turn. Please try again.',
+            });
+            finish();
+            return;
+          }
+          // Exactly one application-level done event is emitted per stream,
+          // always after final sanitization, and always before close.
           send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply) });
           finish();
         })
@@ -275,6 +288,9 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      // Ask reverse proxies (nginx/Traefik fronting Coolify) not to buffer the
+      // event stream, so delta frames flush as they are produced.
+      'X-Accel-Buffering': 'no',
     },
   });
 }

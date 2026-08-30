@@ -257,6 +257,19 @@ test("streamText stops at [DONE] even when more frames follow", async () => {
   assert.equal(chunks.join(""), "kept");
 });
 
+test("streamText finalizes accumulated text when the connection closes without [DONE]", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"partial one"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":" partial two"}}]}\n\n',
+    // No [DONE]: the upstream simply closes the stream.
+  ].join("");
+  const provider = streamingProvider(sse);
+
+  const chunks = await collectStream(provider, { operation: "text_generation", inputs: { prompt: "hi" } });
+
+  assert.equal(chunks.join(""), "partial one partial two");
+});
+
 test("streamText skips malformed and non-data frames without leaking provider data", async () => {
   const sse = [
     ": keep-alive comment\n",

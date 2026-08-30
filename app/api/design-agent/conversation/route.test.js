@@ -911,3 +911,113 @@ test('JSON contract is preserved when the client does not request a stream', asy
   assert.equal(result.reply, 'Mocked assistant reply');
   assert.ok(Array.isArray(result.persistedMessages));
 });
+
+// --- Streaming completion guarantees (production failure regressions) ---
+
+test('exactly one app-level done event is emitted per successful stream', async () => {
+  const deps = makeStreamDeps();
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  assert.equal(events.filter((e) => e.type === 'done').length, 1);
+  assert.ok(!events.some((e) => e.type === 'error'));
+});
+
+test('zero-text upstream completion emits a sanitized error instead of an empty done', async () => {
+  const deps = makeStreamDeps({
+    createTextProvider: () => ({
+      async execute() {
+        throw new Error('unused');
+      },
+      // Provider completes normally but yields no usable text deltas
+      // (e.g. non-SSE JSON body or empty choices).
+      streamText: async function* streamText() {
+        /* no deltas */
+      },
+    }),
+  });
+
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  assert.deepEqual(events.map((e) => e.type), ['error']);
+  assert.equal(events[0].code, 'conversation_empty_response');
+  assert.doesNotMatch(events[0].error, /https?:\/\//);
+  assert.ok(!events.some((e) => e.type === 'done'), 'no done event without content');
+});
+
+test('upstream close without [DONE] still finalizes accumulated text into app-level done', async () => {
+  const deps = makeStreamDeps({
+    createTextProvider: () => ({
+      async execute() {
+        throw new Error('unused');
+      },
+      // Generator ends when the connection closes — no [DONE] sentinel seen.
+      streamText: async function* streamText() {
+        yield 'Finalized ';
+        yield 'without DONE.';
+      },
+    }),
+  });
+
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+  const events = await readSseEvents(response);
+
+  assert.deepEqual(events.map((e) => e.type), ['delta', 'delta', 'done']);
+  assert.equal(events[2].reply, 'Finalized without DONE.');
+});
+
+test('done frame survives degraded network chunking via the real client parser', async () => {
+  const { createSseFrameParser } = await import(
+    '../../../../packages/Open-AI-Design-Agent/packages/design-agent/src/sseFrameParser.js'
+  );
+
+  const deps = makeStreamDeps();
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  // Simulate production transport: arbitrary byte splits, a truncated final
+  // write (no trailing blank line), and CRLF translation.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSseFrameParser();
+  const events = [];
+  let raw = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    raw += decoder.decode(value, { stream: true });
+  }
+  raw += decoder.decode();
+  const truncated = raw.replace(/\n\n$/, ''); // lost trailing blank line
+  const crlf = truncated.replace(/\n\n/g, '\r\n\r\n');
+  for (let i = 0; i < crlf.length; i += 7) {
+    events.push(...parser.push(crlf.slice(i, i + 7)));
+  }
+  events.push(...parser.flush());
+
+  assert.deepEqual(events.map((e) => e.type), ['delta', 'delta', 'done']);
+  assert.equal(events[2].reply, 'Recommended direction: a clean square portrait.');
+  assert.equal(events.filter((e) => e.type === 'done').length, 1);
+});
+
+test('stream response asks reverse proxies not to buffer', async () => {
+  const deps = makeStreamDeps();
+  const response = await handleDesignAgentConversationPost(
+    makeStreamRequest({ conversationId: 'owned-session', message: 'hi' }),
+    deps
+  );
+
+  assert.equal(response.headers.get('x-accel-buffering'), 'no');
+});
