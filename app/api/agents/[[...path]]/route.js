@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
 import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
+import { createAgentChatResponseContext } from '@/src/lib/agentExecutionProposal';
+import { rememberAgentChatResponse } from '@/src/lib/agentChatResponseContext';
 
 const PUBLIC_CATALOG_PATHS = new Set(['templates/agents', 'featured/agents']);
 const CATALOG_CACHE_TTL_MS = 30 * 1000;
@@ -147,8 +149,22 @@ export async function POST(request, { params }) {
 
     try {
         const body = await request.arrayBuffer();
+        let chatRequest = null;
+        try { chatRequest = JSON.parse(new TextDecoder().decode(body)); } catch { /* forward the original body unchanged */ }
         const response = await fetch(targetUrl, { method: 'POST', headers, body });
-        return (await forwardJson(response)).response;
+        const forwarded = await forwardJson(response);
+        if (response.ok && pathSegments.at(-1) === 'chat' && forwarded.body?.request_id) {
+            rememberAgentChatResponse(forwarded.body.request_id, {
+                ...createAgentChatResponseContext({
+                    agentId: pathSegments[1] || pathSegments[0],
+                    conversationId: chatRequest?.conversation_id,
+                    attachments: chatRequest?.attachments,
+                }),
+                accountId: auth.identity.accountId,
+                identityKey: auth.identity.identityKey,
+            });
+        }
+        return forwarded.response;
     } catch (error) {
         return jsonError(error.message || 'Agents proxy request failed.', 502);
     }

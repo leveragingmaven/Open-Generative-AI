@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '@/src/lib/agencyMode';
 import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
+import { enrichAgentPredictionResult } from '@/src/lib/agentExecutionProposal';
+import { getAgentChatResponseContext } from '@/src/lib/agentChatResponseContext';
 
 function cleanHeaders(request) {
     const headers = new Headers(request.headers);
@@ -37,13 +39,14 @@ function buildTargetUrl(request, pathSegments) {
     return `${baseUrl}/api/v1/${path}${search}`;
 }
 
-async function toNextResponse(response) {
+async function toNextResponse(response, { predictionContext = null, isPredictionResult = false } = {}) {
     const contentType = response.headers.get('content-type') || 'application/json';
     const text = await response.text();
 
     if (contentType.includes('application/json')) {
         try {
-            return NextResponse.json(JSON.parse(text || '{}'), { status: response.status });
+            const body = JSON.parse(text || '{}');
+            return NextResponse.json(isPredictionResult ? enrichAgentPredictionResult(body, predictionContext || {}) : body, { status: response.status });
         } catch {
             return NextResponse.json({ error: text || response.statusText }, { status: response.status });
         }
@@ -84,7 +87,11 @@ async function proxyMuApiRequest(request, { params }) {
             body,
         });
 
-        return toNextResponse(response);
+        const predictionId = slug.path?.[0] === 'predictions' && slug.path?.[2] === 'result' ? slug.path[1] : null;
+        return toNextResponse(response, {
+            predictionContext: predictionId ? getAgentChatResponseContext(predictionId) : null,
+            isPredictionResult: Boolean(predictionId),
+        });
     } catch (error) {
         return NextResponse.json(
             { error: error.message || 'MuAPI proxy request failed.' },

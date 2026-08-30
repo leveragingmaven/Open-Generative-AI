@@ -134,3 +134,38 @@ test('cross-account retry fails closed', async () => {
     (err) => err.code === 'creative_scope_mismatch' || err.code === 'creative_job_not_found',
   );
 });
+
+test('D: duplicate retry after transition is safe (no second attempt, no double spend)', async () => {
+  // First retry already transitioned the job to queued/ready and created
+  // attempt N+1; the response was lost. A duplicate retry must be rejected as
+  // not-retryable (job is no longer failed/failed) and must NOT create a
+  // second attempt or execute again.
+  const job = makeJob({ status: 'queued', executionStatus: 'ready' });
+  const attempts = [
+    { id: 'attempt-1', attemptId: 'attempt-1', jobId: 'job-1', attemptNumber: 1, status: 'failed', metadata: {} },
+    { id: 'attempt-2', attemptId: 'attempt-2', jobId: 'job-1', attemptNumber: 2, status: 'created', metadata: { retryOf: 'attempt-1' } },
+  ];
+  const jobRepo = new FakeJobRepository({ job, attempts });
+  const attemptRepo = new FakeAttemptRepository(attempts);
+  const service = new CreativeJobRetryService({ jobRepository: jobRepo, attemptRepository: attemptRepo, db: {} });
+  await assert.rejects(
+    () => service.retry({ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:creator@example.com' }),
+    (err) => err.code === 'creative_job_not_retryable',
+  );
+  // No new attempt created, no transition applied, no execution.
+  assert.equal(attemptRepo.created.length, 0);
+  assert.equal(jobRepo.transitions.length, 0);
+});
+
+test('H: job with a running retry attempt cannot be retried again', async () => {
+  const job = makeJob();
+  const attempts = [
+    { id: 'attempt-1', attemptId: 'attempt-1', jobId: 'job-1', attemptNumber: 1, status: 'failed', metadata: {} },
+    { id: 'attempt-2', attemptId: 'attempt-2', jobId: 'job-1', attemptNumber: 2, status: 'running', metadata: { retryOf: 'attempt-1' } },
+  ];
+  const service = new CreativeJobRetryService({ jobRepository: new FakeJobRepository({ job }), attemptRepository: new FakeAttemptRepository(attempts), db: {} });
+  await assert.rejects(
+    () => service.retry({ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:creator@example.com' }),
+    (err) => err.code === 'conflicting_execution_attempt',
+  );
+});
