@@ -39,6 +39,37 @@ function hasUnsafeField(payload) {
   return Object.keys(payload || {}).some((key) => UNSAFE_CLIENT_FIELDS.has(key));
 }
 
+function trustedServiceMetadata(payload) {
+  const metadata = payload?.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? payload.metadata
+    : {};
+  const candidate = metadata.knowledgePack;
+  const summary = candidate && typeof candidate === 'object' && !Array.isArray(candidate) && typeof candidate.summary === 'string'
+    ? candidate.summary.replace(/\s+/g, ' ').trim().slice(0, 6000)
+    : '';
+  return {
+    ...metadata,
+    ...(summary ? { knowledgePack: { summary, source: 'hub:creator-os-knowledge-pack', trustedBy: 'maven-harness-service' } } : { knowledgePack: undefined }),
+  };
+}
+
+function approvalPayload(payload, { agentId, conversationId, metadata }) {
+  return {
+    agentId,
+    conversationId,
+    operation: payload.operation,
+    userIntent: payload.userIntent,
+    inputs: payload.inputs,
+    references: payload.references,
+    attachments: payload.attachments,
+    requestedSkillIds: payload.requestedSkillIds,
+    requestedRecipeId: payload.requestedRecipeId,
+    requestedWorkflowId: payload.requestedWorkflowId,
+    campaignId: payload.campaignId,
+    metadata,
+  };
+}
+
 function publicResult(result) {
   return {
     jobId: result.job?.id,
@@ -95,6 +126,7 @@ function scheduleInProcess(task) {
 
 export async function handleServiceExecutePost(request, { identity, preparationService, executionService, issueApproval, normalizeAuthorizedRequest, jobRepository, attemptRepository, scheduleExecution = scheduleInProcess } = {}) {
   if (!identity) return errorResponse({ code: 'creator_os_auth_required' });
+  if (identity.authSource !== 'service') return errorResponse({ code: 'service_auth_required', status: 401 });
   let payload;
   try { payload = await request.json(); } catch { return errorResponse({ code: 'invalid_json' }); }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return errorResponse({ code: 'invalid_request_payload' });
@@ -126,6 +158,8 @@ export async function handleServiceExecutePost(request, { identity, preparationS
   const agentId = String(payload.agentId || 'maven-chat').trim();
   const conversationId = String(payload.conversationId || `chat:${idempotencyKey}`).trim();
   const requestId = `service-execution:${idempotencyKey}`;
+  const metadata = trustedServiceMetadata(payload);
+  const trustedPayload = { ...payload, metadata };
 
   const repo = jobRepository || new MySqlCreativeJobRepository();
   const attempts = attemptRepository || new MySqlCreativeExecutionAttemptRepository({ db: repo.db });
@@ -152,8 +186,8 @@ export async function handleServiceExecutePost(request, { identity, preparationS
 
     // Server-minted, immediately-consumed one-shot authorization (the existing
     // conversation-driven flow). Harness never sees or mints this proof.
-    const approval = await mintApproval({ payload: { ...payload, delegatedAuthority: undefined, agentId, conversationId, requestId }, identity });
-    const authorized = await normalize({ ...payload, agentId, conversationId, requestId, authorizationProof: approval.proof, idempotencyKey }, { identity });
+    const approval = await mintApproval({ payload: approvalPayload(payload, { agentId, conversationId, metadata }), identity });
+    const authorized = await normalize({ ...trustedPayload, agentId, conversationId, requestId, authorizationProof: approval.proof, idempotencyKey }, { identity });
 
     const prepared = await service.prepare({
       request: authorized.request,

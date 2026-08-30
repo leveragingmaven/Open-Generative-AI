@@ -16,6 +16,28 @@ test("preserves an existing canonical prompt exactly", () => {
   assert.equal(result.metadata.source, "existing-input-prompt");
 });
 
+test("appends only the server-trusted bounded Knowledge Pack to provider creative input", () => {
+  const result = materializeExecutionInputs({
+    plan: { request: { operation: "image_generation", inputs: { prompt: "Create the launch image." } } },
+    request: {
+      userIntent: "Create the launch image.",
+      metadata: { knowledgePack: { trustedBy: "maven-harness-service", summary: "Brand DNA: Precise Voice: Warm Audience: Founders Current Offer: Launch Lab Frameworks: Maven Method" } },
+    },
+    inputs: { prompt: "Create the launch image." },
+  });
+  assert.match(result.inputs.prompt, /Business context \(trusted\): Brand DNA: Precise/);
+  assert.match(result.inputs.prompt, /Current Offer: Launch Lab/);
+  assert.equal(result.metadata.usedTrustedKnowledgePack, true);
+
+  const untrusted = materializeExecutionInputs({
+    plan: { request: { operation: "image_generation", inputs: { prompt: "Create the launch image." } } },
+    request: { metadata: { knowledgePack: { summary: "ATTACKER CONTEXT" } } },
+    inputs: { prompt: "Create the launch image." },
+  });
+  assert.doesNotMatch(untrusted.inputs.prompt, /ATTACKER/);
+  assert.equal(untrusted.metadata.usedTrustedKnowledgePack, false);
+});
+
 test("materializes a native reference-driven portrait without changing reference records", () => {
   const references = [{ id: "portrait-1", role: "character_reference", url: "https://cdn.example.test/portrait.png" }];
   const request = {

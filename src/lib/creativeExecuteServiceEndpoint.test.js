@@ -109,6 +109,41 @@ test('execute: valid service auth + delegated handoff returns durable acknowledg
   assert.equal(body.result.completed, false);
 });
 
+test('execute: service-only Knowledge Pack is bounded, trusted, and survives authorization into the durable request', async () => {
+  let approvalFields;
+  let normalizedMetadata;
+  const deps = {
+    issueApproval: async ({ payload }) => {
+      approvalFields = Object.keys(payload).filter((key) => payload[key] !== undefined).sort();
+      return { proof: 'server-proof', authorizationId: 'auth-1', status: 'approved' };
+    },
+    normalizeAuthorizedRequest: async (payload, { identity }) => {
+      normalizedMetadata = payload.metadata;
+      return {
+        request: { ...payload, authenticatedIdentity: { accountId: identity.accountId, identityKey: identity.identityKey, creatorId: identity.identityKey, source: 'server' }, authorization: { authorizationId: 'auth-1', status: 'approved', source: 'server' } },
+        proof: { authorizationId: 'auth-1' },
+        context: { intentFingerprint: 'fp-1' },
+      };
+    },
+  };
+  const result = await run(makeProposal({
+    metadata: { knowledgePack: { summary: `Brand DNA: Precise Current Offer: Launch Lab ${'x'.repeat(7000)}`, source: 'caller-value' } },
+  }), { deps });
+  assert.equal(result.status, 202);
+  assert.equal(approvalFields.includes('idempotencyKey'), false);
+  assert.equal(approvalFields.includes('delegatedAuthority'), false);
+  assert.equal(normalizedMetadata.knowledgePack.trustedBy, 'maven-harness-service');
+  assert.equal(normalizedMetadata.knowledgePack.source, 'hub:creator-os-knowledge-pack');
+  assert.ok(normalizedMetadata.knowledgePack.summary.length <= 6000);
+  assert.match(normalizedMetadata.knowledgePack.summary, /Current Offer: Launch Lab/);
+});
+
+test('execute-service rejects browser/session authentication even with a valid-looking payload', async () => {
+  const result = await run(makeProposal(), { identity: { ...makeIdentity(), authSource: 'session' } });
+  assert.equal(result.status, 401);
+  assert.equal((await result.json()).code, 'service_auth_required');
+});
+
 test('execute: service auth WITHOUT delegated handoff cannot execute', async () => {
   const deps = { executionService: { executeReadyJob: async () => { throw new Error('should not run'); } } };
   const { delegatedAuthority, ...noHandoff } = makeProposal();

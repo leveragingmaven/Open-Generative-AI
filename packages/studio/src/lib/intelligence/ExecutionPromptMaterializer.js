@@ -56,6 +56,12 @@ function meaningfulText(value) {
   return normalized || null;
 }
 
+function trustedKnowledgePackSummary(request) {
+  const pack = request?.metadata?.knowledgePack;
+  if (pack?.trustedBy !== "maven-harness-service") return null;
+  return meaningfulText(pack.summary)?.slice(0, 6000) || null;
+}
+
 function sentence(value) {
   const text = meaningfulText(value);
   if (!text) return null;
@@ -148,11 +154,16 @@ export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {
     ? { prompt: existingPrompt, semanticFields: [], referenceRoles: referenceRoles({ references, originalRequest: request }), usedCreativeGuidance: false }
     : materializedPrompt({ plan, request, inputs: safeInputs, references });
 
-  if (!composed.prompt) throw new ExecutionPromptMaterializationError();
+  const knowledgePackSummary = trustedKnowledgePackSummary(request);
+  const providerPrompt = composed.prompt && knowledgePackSummary
+    ? `${composed.prompt} Business context (trusted): ${knowledgePackSummary}`
+    : composed.prompt;
+
+  if (!providerPrompt) throw new ExecutionPromptMaterializationError();
 
   const { modelRequest } = assembleModelRequest({
-    request: { ...plan.request, inputs: { ...safeInputs, prompt: composed.prompt } },
-    prompt: composed.prompt,
+    request: { ...plan.request, inputs: { ...safeInputs, prompt: providerPrompt } },
+    prompt: providerPrompt,
     references,
     selectedRecipe: plan.recipe || null,
     operation: plan.request?.operation || request.operation || null,
@@ -165,6 +176,7 @@ export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {
       semanticFields: composed.semanticFields,
       referenceRoles: composed.referenceRoles,
       usedCreativeGuidance: composed.usedCreativeGuidance,
+      usedTrustedKnowledgePack: Boolean(knowledgePackSummary),
     },
   };
 }
