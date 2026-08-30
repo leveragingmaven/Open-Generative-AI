@@ -24,11 +24,13 @@ class FakeAttemptRepository {
   }
 }
 
-function makeService({ jobs = {}, attempts = {}, recoveryService } = {}) {
+function makeService({ jobs = {}, attempts = {}, recoveryService, assetRepository, reachabilityChecker } = {}) {
   return new CreativeJobStatusService({
     jobRepository: new FakeJobRepository(jobs),
     attemptRepository: new FakeAttemptRepository(attempts),
     ...(recoveryService ? { recoveryService } : {}),
+    ...(assetRepository ? { assetRepository } : {}),
+    ...(reachabilityChecker ? { reachabilityChecker } : {}),
     db: {},
   });
 }
@@ -65,6 +67,32 @@ test('job status exposes only orchestrator fields with current attempt', async (
   assert.equal(view.failure, null);
 });
 
+test('completed status verifies owner-scoped job/attempt/modality lineage and reachable result', async () => {
+  const job = sampleJob({
+    status: 'completed', executionStatus: 'completed',
+    plan: { recipe: { outputModality: 'image' } },
+    result: { assetId: 'asset-1', providerResponseRef: 'https://cdn.example.test/result.png', outputReferences: ['https://cdn.example.test/result.png'] },
+  });
+  const service = makeService({
+    jobs: { 'job-1': job },
+    attempts: { 'job-1': [{ id: 'attempt-1', attemptId: 'attempt-1', status: 'completed' }] },
+    assetRepository: {
+      async get(assetId, { accountId }) {
+        assert.equal(assetId, 'asset-1');
+        assert.equal(accountId, 'acc-1');
+        return { id: assetId, accountId: 'acc-1', jobId: 'job-1', attemptId: 'attempt-1', providerOutputReference: 'https://cdn.example.test/result.png', generatedFiles: ['https://cdn.example.test/result.png'], metadata: { modality: 'image' } };
+      },
+    },
+    reachabilityChecker: async (ref) => ref === 'https://cdn.example.test/result.png',
+  });
+  const view = await service.getJobStatus({ jobId: 'job-1', accountId: 'acc-1' });
+  assert.equal(view.assetId, 'asset-1');
+  assert.equal(view.assetVerified, true);
+  assert.equal(view.modality, 'image');
+  assert.equal(view.expectedModality, 'image');
+  assert.equal(view.resultReachable, true);
+});
+
 test('status observation reconciles recovery-required work by the existing provider job', async () => {
   const calls = [];
   const service = makeService({
@@ -79,6 +107,8 @@ test('status observation reconciles recovery-required work by the existing provi
         };
       },
     },
+    assetRepository: { async get() { return { id: 'asset-1', accountId: 'acc-1', jobId: 'job-1', attemptId: 'attempt-1', providerOutputReference: 'https://cdn.example.test/result.png', metadata: { modality: 'image' } }; } },
+    reachabilityChecker: async () => true,
   });
   const view = await service.getJobStatus({ jobId: 'job-1', accountId: 'acc-1', creatorIdentityKey: 'ai-gency:abc' });
   assert.equal(view.status, 'completed');

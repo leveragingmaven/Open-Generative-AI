@@ -1,6 +1,8 @@
 import { MySqlCreativeJobRepository } from './creativeJobRepository.js';
 import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAttemptRepository.js';
 import { CreativeJobRecoveryService } from './creativeJobRecoveryService.js';
+import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
+import { checkResultReachability } from './resultReachability.js';
 
 export class CreativeJobStatusError extends Error {
   constructor(code, message, status) {
@@ -19,7 +21,7 @@ function scopeMismatch() {
   return new CreativeJobStatusError('creative_scope_mismatch', 'Creative job ownership mismatch.', 403);
 }
 
-function publicJobView(job, latestAttempt) {
+function publicJobView(job, latestAttempt, verification = {}) {
   const result = job?.result || {};
   return {
     jobId: job.id,
@@ -29,6 +31,11 @@ function publicJobView(job, latestAttempt) {
     attemptId: latestAttempt?.attemptId || latestAttempt?.id || null,
     attemptStatus: latestAttempt?.status || null,
     resultRef: result?.providerResponseRef || result?.outputReferences?.[0] || null,
+    assetId: result?.assetId || null,
+    assetVerified: verification.assetVerified === true,
+    modality: verification.modality || null,
+    expectedModality: verification.expectedModality || null,
+    resultReachable: verification.resultReachable === true,
     recoveryRequired: job.error?.code === 'provider_recovery_required' || result?.recoveryRequired === true,
     failure: job.error || null,
     createdAt: job.createdAt,
@@ -46,12 +53,34 @@ export class CreativeJobStatusService {
     jobRepository = new MySqlCreativeJobRepository(),
     attemptRepository,
     recoveryService,
+    assetRepository,
+    reachabilityChecker = checkResultReachability,
     db,
   } = {}) {
     this.jobRepository = jobRepository;
     this.db = db || jobRepository.db;
     this.attemptRepository = attemptRepository || new MySqlCreativeExecutionAttemptRepository({ db: this.db });
     this.recoveryService = recoveryService || new CreativeJobRecoveryService({ jobRepository: this.jobRepository, attemptRepository: this.attemptRepository, db: this.db });
+    this.assetRepository = assetRepository || new MySqlCreativeAssetRepository({ db: this.db });
+    this.reachabilityChecker = reachabilityChecker;
+  }
+
+  async verifyCompletedAsset(job, latestAttempt, accountId) {
+    const expectedModality = job.plan?.recipe?.outputModality || job.recipe?.outputModality || job.executionContext?.recipe?.outputModality || null;
+    const assetId = job.result?.assetId;
+    const resultRef = job.result?.providerResponseRef || job.result?.outputReferences?.[0] || null;
+    const attemptId = latestAttempt?.id || latestAttempt?.attemptId;
+    if (!assetId || !attemptId || !resultRef) return { assetVerified: false, expectedModality, resultReachable: false };
+    const asset = await this.assetRepository.get(assetId, { accountId });
+    if (!asset) return { assetVerified: false, expectedModality, resultReachable: false };
+    const modality = asset.metadata?.modality || null;
+    const references = [asset.providerOutputReference, asset.storageReference, ...(asset.generatedFiles || [])].filter(Boolean);
+    const lineageMatches = asset.accountId === String(accountId) && asset.jobId === job.id && asset.attemptId === attemptId;
+    const modalityMatches = !expectedModality || modality === expectedModality;
+    const referenceMatches = references.includes(resultRef);
+    const assetVerified = lineageMatches && modalityMatches && referenceMatches;
+    const resultReachable = assetVerified ? await this.reachabilityChecker(resultRef) : false;
+    return { assetVerified, modality, expectedModality, resultReachable };
   }
 
   async getJobStatus({ jobId, accountId, creatorIdentityKey } = {}) {
@@ -86,6 +115,9 @@ export class CreativeJobStatusService {
       }
     }
 
-    return publicJobView(job, latestAttempt);
+    const verification = job.status === 'completed' && job.executionStatus === 'completed'
+      ? await this.verifyCompletedAsset(job, latestAttempt, accountId)
+      : {};
+    return publicJobView(job, latestAttempt, verification);
   }
 }
