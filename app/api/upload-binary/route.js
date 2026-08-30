@@ -4,7 +4,7 @@ import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { invalidUploadTargetResponse, requestExceedsUploadLimit, uploadTooLargeResponse, unsupportedMediaTypeResponse, validateMultipartUpload } from '@/src/lib/uploadSecurity';
 
 export async function POST(request) {
-    const auth = requireCreatorIdentity(request);
+    const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
     if (requestExceedsUploadLimit(request)) return uploadTooLargeResponse();
     try {
