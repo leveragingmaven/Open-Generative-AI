@@ -11,6 +11,7 @@ import CommandBar from '../packages/studio/src/components/CommandBar.jsx';
 import RecoverableErrorBoundary, { RecoverableErrorFallback } from '../packages/studio/src/components/RecoverableErrorBoundary.jsx';
 import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
+import { readMuApiCredentialStatus, revokeMuApiCredential, saveMuApiCredential } from '../packages/studio/src/lib/providers/providerCredentialClient.js';
 
 const STORAGE_KEY = 'muapi_key';
 function WorkspaceLoading({ label }) {
@@ -274,6 +275,10 @@ const isStudioHome = slug.length === 0;
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [byokStatus, setByokStatus] = useState(null);
+  const [byokKey, setByokKey] = useState('');
+  const [byokBusy, setByokBusy] = useState(false);
+  const [byokError, setByokError] = useState(null);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
   const [twinTarget, setTwinTarget] = useState(null);
   const [repurposeTarget, setRepurposeTarget] = useState(null);
@@ -482,6 +487,45 @@ const handleTabChange = (tabId) => {
     setBalance(null);
     document.cookie = "muapi_key=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
   }, [agencyMode]);
+
+  const openSettings = useCallback(async () => {
+    setShowSettings(true);
+    setByokError(null);
+    setByokBusy(true);
+    try {
+      setByokStatus(await readMuApiCredentialStatus());
+    } catch (error) {
+      setByokError(error?.message || 'Unable to load MuAPI credential status.');
+    } finally {
+      setByokBusy(false);
+    }
+  }, []);
+
+  const saveAgentExecutionCredential = useCallback(async () => {
+    setByokError(null);
+    setByokBusy(true);
+    try {
+      setByokStatus(await saveMuApiCredential(byokKey));
+      setByokKey('');
+    } catch (error) {
+      setByokError(error?.message || 'Unable to save the MuAPI credential.');
+    } finally {
+      setByokBusy(false);
+    }
+  }, [byokKey]);
+
+  const revokeAgentExecutionCredential = useCallback(async () => {
+    setByokError(null);
+    setByokBusy(true);
+    try {
+      setByokStatus(await revokeMuApiCredential());
+      setByokKey('');
+    } catch (error) {
+      setByokError(error?.message || 'Unable to revoke the MuAPI credential.');
+    } finally {
+      setByokBusy(false);
+    }
+  }, []);
 
   // Inject API key into all outgoing Axios requests (prop-based approach)
   // We use an interceptor to be selective and NOT send the key to external domains like S3
@@ -736,33 +780,49 @@ const handleTabChange = (tabId) => {
     </div>
   );
 
-  const settingsModal = !agencyMode && showSettings && (
+  const settingsModal = showSettings && (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
       <div className="bg-[var(--ms-color-panel)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-modal)] p-8 w-full max-w-sm shadow-[var(--ms-shadow-card-hover)]">
         <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--ms-color-gold-primary)] mb-2">MavenSync Creative OS</p>
         <h2 className="text-[var(--ms-color-text-primary)] font-bold text-lg mb-2">Settings</h2>
         <p className="text-[var(--ms-color-text-secondary)] text-[13px] mb-8">
-          Manage the existing authentication used by your creative studios.
+          Manage the secure provider credential used by Agent Execution and Maven Harness.
         </p>
 
         <div className="space-y-4 mb-8">
-          <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4">
-            <label className="block text-xs font-bold text-[var(--ms-color-text-muted)] mb-2">
-               Active API Key
-            </label>
-            <div className="text-[13px] font-mono text-[var(--ms-color-text-primary)]">
-              {apiKey.slice(0, 8)}••••••••••••••••
+          <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor="agent-execution-muapi-key" className="block text-xs font-bold text-[var(--ms-color-text-muted)]">MuAPI BYOK</label>
+              <span className={`text-[10px] font-semibold ${byokStatus?.configured ? 'text-emerald-400' : 'text-amber-300'}`}>
+                {byokBusy && !byokStatus ? 'Checking…' : byokStatus?.configured ? 'Configured' : 'Not configured'}
+              </span>
+            </div>
+            <input
+              id="agent-execution-muapi-key"
+              type="password"
+              autoComplete="off"
+              value={byokKey}
+              onChange={(event) => setByokKey(event.target.value)}
+              placeholder={byokStatus?.configured ? 'Enter a new key to replace it' : 'Enter your MuAPI key'}
+              className="h-10 w-full rounded-md border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#D4A858]/60"
+            />
+            <p className="text-[10px] leading-4 text-[var(--ms-color-text-muted)]">Encrypted server-side and scoped to your account. The saved secret is never returned to this browser.</p>
+            {byokError && <p role="alert" className="text-[10px] text-red-400">{byokError}</p>}
+            <div className="flex gap-2">
+              <button type="button" disabled={byokBusy || !byokKey.trim()} onClick={saveAgentExecutionCredential} className="flex-1 h-9 rounded-md bg-[#D4A858] text-black text-xs font-semibold disabled:opacity-50">
+                {byokStatus?.configured ? 'Replace Key' : 'Save Key'}
+              </button>
+              {byokStatus?.configured && <button type="button" disabled={byokBusy} onClick={revokeAgentExecutionCredential} className="h-9 rounded-md border border-red-400/30 px-3 text-xs font-semibold text-red-300 disabled:opacity-50">Revoke</button>}
             </div>
           </div>
+          {!agencyMode && apiKey && <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4">
+            <label className="block text-xs font-bold text-[var(--ms-color-text-muted)] mb-2">Browser Studio Key</label>
+            <div className="text-[13px] font-mono text-[var(--ms-color-text-primary)]">{apiKey.slice(0, 8)}••••••••••••••••</div>
+          </div>}
         </div>
 
         <div className="flex gap-3">
-          <button
-            onClick={handleKeyChange}
-            className="flex-1 h-10 rounded-md bg-[#E82070]/10 text-[#f5a6c8] hover:bg-[#E82070]/20 text-xs font-semibold transition-all"
-          >
-            Change Key
-          </button>
+          {!agencyMode && apiKey && <button onClick={handleKeyChange} className="flex-1 h-10 rounded-md bg-[#E82070]/10 text-[#f5a6c8] hover:bg-[#E82070]/20 text-xs font-semibold transition-all">Remove Browser Key</button>}
           <button
             onClick={() => setShowSettings(false)}
             className="flex-1 h-10 rounded-md bg-white/5 text-[var(--ms-color-text-secondary)] hover:bg-white/10 text-xs font-semibold transition-all border border-white/5"
@@ -845,9 +905,8 @@ const handleTabChange = (tabId) => {
                   </span>
                 )}
               </div>
-              {!agencyMode && (
-                <button
-                  onClick={() => setShowSettings(true)}
+              <button
+                  onClick={openSettings}
                   aria-label="Settings"
                   className="flex items-center gap-2 px-3.5 py-2 rounded-full border border-white/10 bg-[#1B1B1B] text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
                 >
@@ -857,7 +916,6 @@ const handleTabChange = (tabId) => {
                   </svg>
                   <span className="hidden sm:inline">Settings</span>
                 </button>
-              )}
             </div>
           </header>
         )}
