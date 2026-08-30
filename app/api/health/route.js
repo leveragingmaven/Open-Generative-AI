@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
+import { creatorLiveness } from '@/src/lib/creatorHealth';
 
 export function GET() {
-  return NextResponse.json({ ok: true });
+  return Response.json(creatorLiveness());
 }

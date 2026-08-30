@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "dev": "next dev",
+    "test": "node scripts/run-source-tests.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -34,7 +35,9 @@
     "package:linux:deb": "node scripts/package-linux-deb.js",
     "package:linux:deb:arm64": "node scripts/package-linux-deb.js --arch arm64",
     "package:linux:deb:x64": "node scripts/package-linux-deb.js --arch x64",
-    "electron:build:all": "vite build && electron-builder --mac --win --linux"
+    "electron:build:all": "vite build && electron-builder --mac --win --linux",
+    "migrate": "node scripts/run-migrations.mjs apply",
+    "migrate:baseline": "node scripts/run-migrations.mjs baseline"
   },
   "build": {
     "appId": "ai.generative.open",
