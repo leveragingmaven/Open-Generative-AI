@@ -3,9 +3,10 @@ import { getMuApiBaseUrl, getServerMuApiKey } from '@/src/lib/agencyMode';
 import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
 import { isAgencyModeEnabled } from '@/src/lib/agencyMode';
+import { assertOwnedMuApiAccount, buildMuApiAccountScope, buildMuApiConnectPayload } from '@/src/lib/publishingIdentity';
 
 const ROUTES = {
-    'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', upstream: '/social/accounts' },
+    'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', handler: 'getConnectedAccounts' },
     'accounts/connect': { methods: ['POST'], capability: 'connectAccount', handler: 'connectAccount' },
     'drafts': { methods: ['POST'], capability: 'createDraft', localOnly: true },
     'schedule': { methods: ['POST'], capability: 'schedulePost', handler: 'publishMedia' },
@@ -116,7 +117,11 @@ async function proxyMuApi(request, upstream, options = {}) {
             ? undefined
             : await request.arrayBuffer();
     const method = options.method || request.method;
-    const suffix = method === 'GET' ? requestSearch(request) : '';
+    const suffix = method === 'GET'
+        ? options.searchParams instanceof URLSearchParams
+            ? `?${options.searchParams.toString()}`
+            : requestSearch(request)
+        : '';
 
     const response = await fetch(`${baseUrl}${upstream}${suffix}`, {
         method,
@@ -137,6 +142,34 @@ async function proxyMuApi(request, upstream, options = {}) {
         return NextResponse.json(JSON.parse(text || '{}'), { status: response.status });
     } catch {
         return NextResponse.json({ error: text || response.statusText }, { status: response.status });
+    }
+}
+
+async function getScopedMuApiAccounts(identity) {
+    const apiKey = getPublishingApiKey();
+    if (!apiKey) {
+        const error = new Error('MUAPI_API_KEY is not configured.');
+        error.code = 'missing_muapi_key';
+        throw error;
+    }
+
+    const baseUrl = getMuApiBaseUrl().replace(/\/+$/, '');
+    const response = await fetch(`${baseUrl}/api/v1/social/ext/accounts?${buildMuApiAccountScope(identity).toString()}`, {
+        method: 'GET',
+        headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+    });
+    const text = await response.text();
+    if (!response.ok) {
+        const error = new Error('Publishing account ownership could not be verified.');
+        error.code = response.status === 401 || response.status === 403 ? 'publishing_auth_error' : 'account_ownership_unverified';
+        throw error;
+    }
+    try {
+        return JSON.parse(text || '{}');
+    } catch {
+        const error = new Error('Publishing account ownership could not be verified.');
+        error.code = 'account_ownership_unverified';
+        throw error;
     }
 }
 
@@ -166,7 +199,7 @@ function pathParam(pathSegments, index) {
     return pathSegments?.[index] ? encodeURIComponent(pathSegments[index]) : null;
 }
 
-async function handleConnectAccount(request) {
+async function handleConnectAccount(request, identity) {
     const body = await readJsonBody(request);
     const platform = String(body.platform || '').toLowerCase();
     const upstream = PLATFORM_CONNECT_URL_UPSTREAMS[platform];
@@ -178,14 +211,17 @@ async function handleConnectAccount(request) {
 
     return proxyMuApi(request, upstream, {
         method: 'POST',
-        body: {
-            external_user_id: body.externalUserId || body.external_user_id || body.userId || 'creative-os-user',
-            redirect_to: body.redirectTo || body.redirect_to || '',
-        },
+        body: buildMuApiConnectPayload(identity, body),
     });
 }
 
-async function handlePublishMedia(request, definition) {
+async function handleGetConnectedAccounts(request, identity) {
+    return proxyMuApi(request, '/api/v1/social/ext/accounts', {
+        searchParams: buildMuApiAccountScope(identity),
+    });
+}
+
+async function handlePublishMedia(request, definition, identity) {
     const body = await readJsonBody(request);
     const platform = String(body.platform || '').toLowerCase();
     const payload = body.payload || {};
@@ -194,6 +230,14 @@ async function handlePublishMedia(request, definition) {
     }
     if (!payload.account_id || !payload.media_url) {
         return NextResponse.json({ error: 'Publishing requires an account and media URL.', code: 'invalid_publishing_payload' }, { status: 400 });
+    }
+
+    try {
+        const accounts = await getScopedMuApiAccounts(identity);
+        assertOwnedMuApiAccount(accounts, payload.account_id, identity);
+    } catch (error) {
+        const status = error.code === 'missing_muapi_key' ? 500 : error.code === 'publishing_auth_error' ? 502 : 403;
+        return normalizeError(error, status);
     }
 
     const upstream = body.action === 'schedule' || payload.scheduled_at
@@ -242,8 +286,9 @@ async function handlePublishingRequest(request, { params }) {
 
     if (definition.localOnly) return NextResponse.json({ ok: true, localOnly: true, capability: definition.capability });
 
-    if (definition.handler === 'connectAccount') return handleConnectAccount(request);
-    if (definition.handler === 'publishMedia') return handlePublishMedia(request, definition);
+    if (definition.handler === 'connectAccount') return handleConnectAccount(request, auth.identity);
+    if (definition.handler === 'getConnectedAccounts') return handleGetConnectedAccounts(request, auth.identity);
+    if (definition.handler === 'publishMedia') return handlePublishMedia(request, definition, auth.identity);
     if (definition.handler === 'accountById') return handleAccountById(request, slug.path || []);
     if (definition.handler === 'getPublishingJob') return handleGetPublishingJob(request, slug.path || []);
     if (definition.handler === 'cancelScheduledPost') return handleCancelScheduledPost(request, slug.path || []);

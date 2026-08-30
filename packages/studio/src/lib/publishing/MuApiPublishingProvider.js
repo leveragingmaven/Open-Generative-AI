@@ -38,7 +38,7 @@ function normalizePlatform(platform) {
 }
 
 function accountPlatform(account = {}) {
-  return normalizePlatform(account.platform || account.provider || account.network || account.type);
+  return normalizePlatform(account.platform || account.platform_name || account.provider || account.network || account.type);
 }
 
 export function normalizeConnectedAccount(input = {}) {

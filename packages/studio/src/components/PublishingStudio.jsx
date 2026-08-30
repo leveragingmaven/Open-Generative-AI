@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
-import { PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
+import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -50,7 +51,10 @@ function assetTitle(asset) { return asset?.title || asset?.name || asset?.descri
 function assetType(asset) { return asset?.type || asset?.kind || asset?.metadata?.assetType || "creative"; }
 function accountForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform && account.connected !== false) || null; }
 function accountsForPlatform(accounts, platform) { return accounts.filter((account) => account.platform === platform && account.connected !== false); }
+function accountRecordForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform) || null; }
+function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
 function connectionUrl(response) { return response?.url || response?.connect_url || response?.connectUrl || response?.authorization_url || response?.authorizationUrl || response?.data?.url || response?.data?.connect_url || null; }
+const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
 
 function parseHashtags(value) {
@@ -93,6 +97,8 @@ export default function PublishingStudio() {
   const [drafts, setDrafts] = useState([]);
   const [history, setHistory] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [providerId, setProviderId] = useState(PUBLISHING_PROVIDER_IDS.MUAPI);
+  const [accountsError, setAccountsError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [remoteHistoryError, setRemoteHistoryError] = useState(null);
@@ -100,7 +106,16 @@ export default function PublishingStudio() {
   const [notice, setNotice] = useState(null);
   const [draftEdits, setDraftEdits] = useState({});
   const [focusedDraftId, setFocusedDraftId] = useState(null);
+  const [activeView, setActiveView] = useState("create");
   const libraryPublishPath = "/studio/asset-library?mode=publish&returnTo=publishing";
+
+  const publishingViews = [
+    { id: "create", label: "Create", detail: "Choose creative work" },
+    { id: "calendar", label: "Calendar", detail: "See what is scheduled" },
+    { id: "queue", label: "Queue", detail: "Review drafts and actions" },
+    { id: "accounts", label: "Accounts", detail: "Manage destinations" },
+    { id: "history", label: "History", detail: "Review what went live" },
+  ];
 
   const reload = async (center = centerRef.current) => {
     if (!center) return;
@@ -122,8 +137,10 @@ export default function PublishingStudio() {
       setHistory([...byId.values()]);
       try {
         setAccounts(await center.getConnectedAccounts());
-      } catch {
+        setAccountsError(null);
+      } catch (error) {
         setAccounts([]);
+        setAccountsError(error);
       }
       setLoadError(null);
     } catch (error) {
@@ -133,9 +150,29 @@ export default function PublishingStudio() {
     }
   };
 
+  const refreshConnectedAccounts = async (center = centerRef.current) => {
+    if (!center) return;
+    try {
+      setAccounts(await center.getConnectedAccounts());
+    } catch (error) {
+      setAccountsError(error);
+      // The account endpoint remains the source of truth; keep the current state on a transient refresh failure.
+    }
+  };
+
+  const switchProvider = async (nextProviderId) => {
+    const provider = publishingProviderRegistry.get(nextProviderId);
+    const center = new PublishingCenterMVP({ storage: window.localStorage, publishingProvider: provider });
+    centerRef.current = center;
+    setProviderId(nextProviderId);
+    await reload(center);
+  };
+
   useEffect(() => {
     const center = new PublishingCenterMVP({ storage: window.localStorage });
     centerRef.current = center;
+    const returnedFromOAuth = window.sessionStorage.getItem(PUBLISHING_OAUTH_RETURN_KEY) === "1";
+    if (returnedFromOAuth) window.sessionStorage.removeItem(PUBLISHING_OAUTH_RETURN_KEY);
     const params = new URLSearchParams(window.location.search);
     const draftId = params.get("draft");
     if (draftId) {
@@ -143,13 +180,30 @@ export default function PublishingStudio() {
       setNotice({ tone: "success", text: "Publishing draft created from Creative Library. Add caption details, choose destinations, then publish or schedule." });
     }
     void reload(center);
+    if (returnedFromOAuth) void refreshConnectedAccounts(center);
     return () => { centerRef.current = null; };
+  }, []);
+
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (window.sessionStorage.getItem(PUBLISHING_OAUTH_RETURN_KEY) !== "1") return;
+      window.sessionStorage.removeItem(PUBLISHING_OAUTH_RETURN_KEY);
+      void refreshConnectedAccounts();
+    };
+    window.addEventListener("pageshow", refreshOnReturn);
+    window.addEventListener("focus", refreshOnReturn);
+    return () => {
+      window.removeEventListener("pageshow", refreshOnReturn);
+      window.removeEventListener("focus", refreshOnReturn);
+    };
   }, []);
 
   const scheduled = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.SCHEDULED || Boolean(draft.scheduledAt)), [drafts]);
   const published = useMemo(() => history.filter((item) => item.status === PUBLISHING_STATUS.PUBLISHED || item.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED), [history]);
   const attention = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.FAILED || draft.platforms.length === 0), [drafts]);
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
+  const focusedDraft = useMemo(() => drafts.find((draft) => draft.id === focusedDraftId) || null, [drafts, focusedDraftId]);
+  const focusedPreviewAsset = focusedDraft?.assets?.[0] || null;
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
     ...drafts.flatMap((draft) => draft.platforms || []),
@@ -200,8 +254,12 @@ export default function PublishingStudio() {
 
   const togglePlatform = (draft, platform) => {
     try {
+      if (draft.provider !== providerId) {
+        setNotice({ tone: "error", text: "Choose a destination from the same publishing provider as this draft." });
+        return;
+      }
       const option = PLATFORM_OPTIONS.find((item) => item.id === platform);
-      if (!option?.enabled) {
+      if (!option?.enabled && providerId !== PUBLISHING_PROVIDER_IDS.GHL_HUB) {
         setNotice({ tone: "error", text: `${option?.label || platform} is behind a capability flag until live account validation is complete.` });
         return;
       }
@@ -236,6 +294,10 @@ export default function PublishingStudio() {
         setNotice({ tone: "error", text: "Choose a connected account for this platform." });
         return;
       }
+      if (draft.provider !== providerId || accountProvider(account) !== draft.provider) {
+        setNotice({ tone: "error", text: "MuAPI and MavenSync Hub destinations cannot be mixed in one selection." });
+        return;
+      }
       const accountIds = { ...(draft.accountIds || {}), [platform]: account.id };
       const platformOverrides = {
         ...(draft.platformOverrides || {}),
@@ -263,11 +325,11 @@ export default function PublishingStudio() {
     setNotice(null);
     try {
       const response = await centerRef.current.connectAccount(platform, {
-        externalUserId: "creative-os-user",
         redirectTo: window.location.href,
       });
       const url = connectionUrl(response);
       if (url) {
+        window.sessionStorage.setItem(PUBLISHING_OAUTH_RETURN_KEY, "1");
         window.location.href = url;
         return;
       }
@@ -337,6 +399,7 @@ export default function PublishingStudio() {
 
       {activeCampaign && <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3"><StatusBadge tone="gold" dot>Campaign context</StatusBadge><span className="truncate text-xs font-semibold">{activeCampaign.name}</span></div>}
       {notice && <div role={notice.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-[var(--ms-radius-card-small)] border px-4 py-3 text-xs ${notice.tone === "error" ? "border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] text-[var(--ms-color-error)]" : "border-[rgba(99,197,155,0.3)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"}`}>{notice.text}</div>}
+      {accountsError && <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{accountsError.code === "hub_session_expired" ? "MavenSync Hub is not connected. Reconnect through MavenSync Hub, then refresh this page." : accountsError.message}</div>}
       {remoteHistoryError && <div role="status" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-4 py-3 text-xs text-[var(--ms-color-gold-muted)]">{remoteHistoryError}</div>}
       {loadError ? <ErrorState className="mt-5" title="Publishing Center unavailable" description={loadError} /> : null}
 
@@ -358,7 +421,46 @@ export default function PublishingStudio() {
 
       <GhlHubPublishingAccounts />
 
-      <WorkspaceSection title="Ready to Publish" description="Assets returned by the existing Publishing Center asset selection.">
+      <nav aria-label="Publishing views" className="mt-5 overflow-x-auto rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-surface)] p-1.5">
+        <div className="flex min-w-max gap-1">
+          {publishingViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => setActiveView(view.id)}
+              aria-current={activeView === view.id ? "page" : undefined}
+              className={`rounded-[var(--ms-radius-button)] px-4 py-2.5 text-left transition-colors ${activeView === view.id ? "bg-[var(--ms-color-pink-primary)] text-black" : "text-[var(--ms-color-text-secondary)] hover:bg-white/[0.05] hover:text-white"}`}
+            >
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.14em]">{view.label}</span>
+              <span className={`mt-0.5 block text-[9px] ${activeView === view.id ? "text-black/65" : "text-[var(--ms-color-text-muted)]"}`}>{view.detail}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {activeView === "create" && (
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] lg:items-start">
+          <WorkspaceSection title="Post Composer" description="Choose a real creative asset, set its destination, and prepare the post.">
+            {focusedDraft ? (
+              <div className="space-y-5">
+                <div className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
+                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedDraft.assets.length} {focusedDraft.assets.length === 1 ? "asset" : "assets"}</span><span>·</span><button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
+                </div>
+                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{PLATFORM_OPTIONS.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = PLATFORM_OPTIONS.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
+                <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
+                <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton></div>
+                {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
+              </div>
+            ) : <EmptyState title="Start with a creative asset" description="Choose an existing asset from your library to open the publishing composer. The publishing system does not support an unsaved post without an asset." icon={<Icon type="asset" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton>} />}
+          </WorkspaceSection>
+          <WorkspaceSection title="Live Preview" description="A quiet preview of the selected post and destination.">
+            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{PLATFORM_OPTIONS.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
+          </WorkspaceSection>
+        </div>
+      )}
+
+      {activeView === "create" && <WorkspaceSection title="Choose creative work" description="Assets returned by the existing Publishing Center asset selection.">
         {assets.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {assets.map((asset) => (
@@ -379,10 +481,9 @@ export default function PublishingStudio() {
             ))}
           </div>
         ) : <EmptyState title="No assets ready for publishing" description="Open the Creative Library to choose an existing asset, or create new content first. Only real saved assets appear here." icon={<Icon type="ready" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Select from Creative Library</SecondaryButton>} />}
-      </WorkspaceSection>
+      </WorkspaceSection>}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <WorkspaceSection title="Scheduled" description="Existing drafts with a scheduled time or scheduled status.">
+      {activeView === "calendar" && <WorkspaceSection title="Calendar" description="Existing drafts with a scheduled time or scheduled status.">
           {scheduled.length ? (
             <div className="space-y-3">
               {scheduled.map((draft) => (
@@ -397,9 +498,9 @@ export default function PublishingStudio() {
               ))}
             </div>
           ) : <EmptyState title="Nothing scheduled" description="Scheduled drafts will appear here at their existing date and timezone." icon={<Icon type="schedule" />} />}
-        </WorkspaceSection>
+      </WorkspaceSection>}
 
-        <WorkspaceSection title="Recently Published" description="Existing successful publishing history, most recent first.">
+      {activeView === "history" && <WorkspaceSection title="History" description="Existing successful publishing history, most recent first.">
           {published.length ? (
             <div className="space-y-3">
               {published.slice(0, 5).map((item) => {
@@ -417,31 +518,43 @@ export default function PublishingStudio() {
               })}
             </div>
           ) : <EmptyState title="No published history yet" description="Successful publishing activity will appear here using the existing history store." icon={<Icon type="history" />} />}
-        </WorkspaceSection>
-      </div>
+      </WorkspaceSection>}
 
-      <WorkspaceSection title="Connected Platforms" description="MuAPI-connected accounts available to the existing publishing workflow. Future platforms remain behind capability flags until live account validation.">
+      {activeView === "accounts" && <WorkspaceSection title="Accounts" description="Keep your publishing destinations ready. Connect an account when you are ready to share.">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3">
+          <div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Account source</p><p className="mt-1 text-xs font-semibold">{publishingProviderRegistry.get(providerId).name}</p></div>
+          <select aria-label="Account source" value={providerId} onChange={(event) => void switchProvider(event.target.value)} className="min-h-9 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-pink-primary)]">
+            <option value={PUBLISHING_PROVIDER_IDS.MUAPI}>MuAPI</option>
+            <option value={PUBLISHING_PROVIDER_IDS.GHL_HUB}>MavenSync Hub / GoHighLevel</option>
+          </select>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {PLATFORM_OPTIONS.map((platform) => {
-            const account = accountForPlatform(accounts, platform.id);
+          {PLATFORM_OPTIONS.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
+            const account = accountRecordForPlatform(accounts, platform.id);
+            const connected = Boolean(account?.connected !== false && account);
+            const needsAttention = Boolean(account && (!connected || [PUBLISHING_STATUS.FAILED, PUBLISHING_STATUS.CANCELLED, PUBLISHING_STATUS.UNKNOWN].includes(account.status)));
             return (
-              <WorkspaceCard key={platform.id} className="flex flex-col gap-3">
+              <WorkspaceCard key={platform.id} className="flex min-h-40 flex-col gap-3">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="platform" /></span>
+                  {account?.avatarUrl ? <img src={account.avatarUrl} alt="" className="h-10 w-10 shrink-0 rounded-[var(--ms-radius-card-small)] object-cover" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="platform" /></span>}
                   <div className="min-w-0">
                     <h3 className="truncate text-xs font-semibold">{platform.label}</h3>
-                    <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{account ? account.name || "Connected account" : platform.enabled ? "Not connected" : `Flag: ${platform.flag}`}</p>
+                    <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{connected ? account.name || account.username || "Connected account" : needsAttention ? "Connection needs a refresh" : platform.enabled ? "Ready to connect" : "Not available yet"}</p>
+                    {connected && providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? <p className="mt-1 text-[8px] text-[var(--ms-color-gold-muted)]">MavenSync Hub / GoHighLevel</p> : null}
                   </div>
                 </div>
-                {account ? <StatusBadge tone="success">Connected</StatusBadge> : platform.enabled ? <SecondaryButton type="button" disabled={busyId === `connect:${platform.id}`} onClick={() => connectPlatform(platform.id)} className="min-h-8 px-3 py-2 text-[10px]">Connect {platform.label}</SecondaryButton> : <StatusBadge tone="neutral">Flagged</StatusBadge>}
+                <div className="mt-auto flex items-center justify-between gap-2">
+                  {needsAttention ? <StatusBadge tone="warning">Needs attention</StatusBadge> : connected ? <StatusBadge tone="success">Connected</StatusBadge> : <StatusBadge tone="neutral">Not connected</StatusBadge>}
+                  {providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? null : platform.enabled ? <SecondaryButton type="button" disabled={busyId === `connect:${platform.id}`} onClick={() => connectPlatform(platform.id)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
+                </div>
               </WorkspaceCard>
             );
           })}
         </div>
         {activePlatforms.length === 0 ? <p className="mt-3 text-[10px] text-[var(--ms-color-text-muted)]">No platforms are active in current drafts, history, or connected-account state yet.</p> : null}
-      </WorkspaceSection>
+      </WorkspaceSection>}
 
-      <WorkspaceSection title="Publishing Queue" description="Existing drafts and their current destinations, schedule, status, ownership, and actions." actions={<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge>}>
+      {activeView === "queue" && <WorkspaceSection title="Queue" description="Existing drafts and their current destinations, schedule, status, ownership, and actions." actions={<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge>}>
         {drafts.length ? (
           <div className="space-y-3">
             {drafts.map((draft) => (
@@ -513,7 +626,7 @@ export default function PublishingStudio() {
             ))}
           </div>
         ) : <EmptyState title="Publishing queue is clear" description="Select an asset from the Creative Library or create a draft from a ready asset to begin the existing publishing workflow." icon={<Icon type="publish" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Select from Creative Library</SecondaryButton>} />}
-      </WorkspaceSection>
+      </WorkspaceSection>}
     </ExperiencePage>
   );
 }
