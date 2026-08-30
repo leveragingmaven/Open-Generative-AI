@@ -85,7 +85,15 @@ function publicResultFromJob(job, latestAttempt) {
  * Service auth alone can never execute; the handoff must validate AND the
  * underlying costAuthorization must approve for agency-funded providers.
  */
-export async function handleServiceExecutePost(request, { identity, preparationService, executionService, issueApproval, normalizeAuthorizedRequest, jobRepository, attemptRepository } = {}) {
+function scheduleInProcess(task) {
+  queueMicrotask(() => Promise.resolve().then(task).catch((error) => {
+    console.error('[Creator OS] Background creative execution failed before status persistence.', {
+      code: error?.code || 'background_execution_failed',
+    });
+  }));
+}
+
+export async function handleServiceExecutePost(request, { identity, preparationService, executionService, issueApproval, normalizeAuthorizedRequest, jobRepository, attemptRepository, scheduleExecution = scheduleInProcess } = {}) {
   if (!identity) return errorResponse({ code: 'creator_os_auth_required' });
   let payload;
   try { payload = await request.json(); } catch { return errorResponse({ code: 'invalid_json' }); }
@@ -158,12 +166,31 @@ export async function handleServiceExecutePost(request, { identity, preparationS
     }
 
     const exec = executionService || new CreativeJobExecutionService({ credentialResolver: resolveProviderCredential });
-    const result = await exec.executeReadyJob({
+    const executionIdentity = identity.identityKey || identity.creatorId || identity.userId;
+    scheduleExecution(async () => exec.executeReadyJob({
       jobId: prepared.jobId,
       accountId: identity.accountId,
-      creatorIdentityKey: identity.identityKey || identity.creatorId || identity.userId,
-    });
-    return Response.json({ ok: true, status: result.recoveryRequired ? 'recovery_required' : result.completed ? 'completed' : 'failed', executionStarted: true, result: publicResult(result) });
+      creatorIdentityKey: executionIdentity,
+    }));
+
+    // The durable Creator job and first attempt already exist at this point.
+    // Return their identity before provider work can outlive the HTTP request;
+    // Harness observes terminal state through the existing jobs/:jobId route.
+    return Response.json({
+      ok: true,
+      status: 'accepted',
+      executionStarted: true,
+      result: {
+        jobId: prepared.jobId,
+        jobStatus: 'queued',
+        executionStatus: 'ready',
+        attemptId: prepared.attemptId || null,
+        attemptStatus: 'created',
+        completed: false,
+        providerResponseRef: null,
+        outputReferences: [],
+      },
+    }, { status: 202 });
   } catch (error) {
     // Concurrent same-key request: one insert wins, the loser loads the
     // existing job and returns it idempotently instead of erroring blindly.

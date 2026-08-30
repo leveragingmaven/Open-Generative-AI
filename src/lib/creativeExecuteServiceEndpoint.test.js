@@ -85,7 +85,8 @@ function makeDeps(overrides = {}) {
   const executionService = overrides.executionService || {
     executeReadyJob: async () => ({ accepted: true, completed: true, job: { id: 'job-1', status: 'completed', executionStatus: 'completed', result: { providerResponseRef: 'asset-1', outputReferences: ['asset-1'] } }, attempt: { id: 'attempt-1', status: 'completed', providerResponseRef: 'asset-1' } }),
   };
-  return { issueApproval, normalizeAuthorizedRequest, preparationService, executionService, jobRepository: repo, attemptRepository: repo };
+  const scheduleExecution = overrides.scheduleExecution || ((task) => task());
+  return { issueApproval, normalizeAuthorizedRequest, preparationService, executionService, scheduleExecution, jobRepository: repo, attemptRepository: repo };
 }
 
 async function run(body, { identity = makeIdentity(), deps = {} } = {}) {
@@ -93,7 +94,7 @@ async function run(body, { identity = makeIdentity(), deps = {} } = {}) {
   return handleServiceExecutePost(makeRequest(body), { identity, ...full });
 }
 
-test('execute: valid service auth + delegated handoff executes once', async () => {
+test('execute: valid service auth + delegated handoff returns durable acknowledgement and executes once', async () => {
   const deps = {
     executionService: {
       executeReadyJob: async () => ({ accepted: true, completed: true, job: { id: 'job-1', status: 'completed', executionStatus: 'completed', result: { providerResponseRef: 'asset-1' } }, attempt: { id: 'attempt-1', status: 'completed' } }),
@@ -101,10 +102,11 @@ test('execute: valid service auth + delegated handoff executes once', async () =
   };
   const result = await run(makeProposal(), { deps });
   const body = await result.json();
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 202);
   assert.equal(body.executionStarted, true);
-  assert.equal(body.status, 'completed');
+  assert.equal(body.status, 'accepted');
   assert.equal(body.result.jobId, 'job-1');
+  assert.equal(body.result.completed, false);
 });
 
 test('execute: service auth WITHOUT delegated handoff cannot execute', async () => {
@@ -141,12 +143,16 @@ test('execute: non-ready prepare (requires_approval) does not execute', async ()
 });
 
 test('execute: cost authorization failure surfaces (Creator OS authoritative)', async () => {
+  const scheduled = [];
   const deps = {
+    scheduleExecution: (task) => scheduled.push(task),
     executionService: { executeReadyJob: async () => { const e = new Error('cost_authorization_required'); e.code = 'cost_authorization_required'; throw e; } },
   };
   const result = await run(makeProposal(), { deps });
   const body = await result.json();
-  assert.equal(body.code, 'cost_authorization_required');
+  assert.equal(result.status, 202);
+  assert.equal(body.status, 'accepted');
+  await assert.rejects(scheduled[0](), (error) => error.code === 'cost_authorization_required');
 });
 
 test('execute: identity/account overrides are rejected', async () => {
@@ -171,7 +177,7 @@ test('execute: exactly one attempt and no automatic retry on failure', async () 
   const result = await run(makeProposal(), { deps });
   const body = await result.json();
   assert.equal(calls, 1);
-  assert.equal(body.status, 'failed');
+  assert.equal(body.status, 'accepted');
   assert.equal(body.executionStarted, true);
 });
 
@@ -188,7 +194,7 @@ test('execute: first call with idempotencyKey creates one job', async () => {
   };
   const result = await run(makeProposal({ idempotencyKey: 'idem-fresh' }), { deps });
   const body = await result.json();
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 202);
   assert.equal(body.executionStarted, true);
   assert.equal(minted, 1);
   assert.equal(executed, 1);
