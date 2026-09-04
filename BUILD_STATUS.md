@@ -6,6 +6,13 @@ Phase 4 - MavenSync Experience Layer
 
 Status: Completed
 
+### Milestone - Live MuAPI Image Studio Validation (2026-08-19)
+
+- Live production validation completed through the existing Image Studio -> Provider Registry -> MuAPI execution path without changing provider routing or model availability.
+- Nano Banana successfully completed an image generation and returned the resulting asset to the Image Studio UI. This live-verifies MuAPI authentication, the configured MuAPI key, the shared Image Studio MuAPI execution path, terminal polling, and successful asset return.
+- Ideogram v3 remains enabled, but is temporarily classified as model/provider-failing: three live requests were accepted and billed by MuAPI, then each reached terminal `status: failed` with an internal provider error.
+- The successful Nano Banana run confirms the Ideogram failures are not evidence of a general MuAPI authentication or Image Studio integration failure. No additional Ideogram request is planned until the provider-specific failure is resolved.
+
 ### Milestone - Publishing Experience Completion Sprint (2026-08-06)
 
 - Completed the existing Publishing workflow as a UX/workflow-connection pass: Create Asset -> Creative Library -> Select Asset -> Create Publishing Draft -> Choose Platforms -> Choose Connected Account -> Write Caption -> Publish/Schedule -> Publishing History.
@@ -643,7 +650,7 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 
 ### Blocked
 
-- Real API generation validation is blocked by absence of a real MuAPI key in this validation pass.
+- Ideogram v3 live generation is temporarily provider-blocked after three accepted and billed requests ended with terminal `status: failed` and an internal provider error; the model remains enabled.
 - Upload endpoint side effects were intentionally not exercised in Phase 1 functional smoke validation.
 - IS-002: Reference-image upload validation is externally blocked by MuAPI 403 insufficient-credit/auth responses with the validation key.
 - VS-001: Real Video Studio generation and paid upload validation are externally blocked by unavailable MuAPI credits/valid credentials.
@@ -763,7 +770,7 @@ Expected validation noise filtered: invalid-key `403` responses for balance and 
 
 ## Blocked
 
-- Real external API generation tests.
+- Further Ideogram v3 live generation validation is provider-blocked after three billed internal failures; Nano Banana generation through the shared production path is live-verified working.
 - Upload side-effect tests.
 - Image Studio reference upload validation with real credits.
 - Video Studio generation/upload validation with real credits.
