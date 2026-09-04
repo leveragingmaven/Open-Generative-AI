@@ -860,13 +860,13 @@ const handleTabChange = (tabId) => {
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Informational workspace header */}
         {isHeaderVisible && (
-          <header className="relative z-50 flex-shrink-0 h-14 border-b border-[#D4A858]/[0.12] bg-[#121212]/80 backdrop-blur-md flex items-center justify-between gap-4 px-4 md:px-5">
+          <header className="relative z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
               {!isStudioHome && (
                 <a
                   href="/studio"
                   aria-label="Back to Dashboard"
-                  className="hidden md:flex shrink-0 items-center gap-2 px-3.5 py-2 rounded-full border border-white/10 bg-[#1B1B1B] text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
+                  className="hidden md:flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] font-semibold text-white/60 hover:text-white transition-colors"
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M19 12H5" />
@@ -875,7 +875,7 @@ const handleTabChange = (tabId) => {
                   <span>Dashboard</span>
                 </a>
               )}
-<div className="min-w-0 border-l-2 border-[#D4A858]/60 pl-3.5">
+<div className="min-w-0 border-l border-[#D4A858]/50 pl-3">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
                 <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isOverviewWorkspace ? 'Workspace overview' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard'))))))}</p>
                 <CampaignHeaderLabel />
@@ -886,15 +886,15 @@ const handleTabChange = (tabId) => {
               <CommandBar onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} />
             </div>
 
-            <div className="flex-shrink-0 flex items-center gap-3">
+            <div className="flex-shrink-0 flex items-center gap-2">
               <WorkspacesMenu onNavigate={handleCommandNavigate} enabledTabIds={effectiveVisibleTabIds} activeWorkspaceId={activeWorkspaceId} />
               {!agencyMode && (
-                <div className="hidden md:flex items-center gap-2 rounded-full border border-[#D4A858]/30 bg-[#D4A858]/[0.08] px-4 py-2 shadow-[0_0_16px_rgba(212,168,88,0.12)]" title="Balance">
+                <div className="hidden md:flex items-center gap-2 px-2 py-1 text-[#F0D9A8]" title="Balance">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#D4A858] animate-pulse" />
                   <span className="text-xs font-bold text-[#F0D9A8]">${balance !== null ? `${balance}` : '---'}</span>
                 </div>
               )}
-              <div className="relative p-2.5 rounded-full border border-[#D4A858]/30 bg-[#D4A858]/[0.08] text-[#F0D9A8] hover:bg-[#D4A858]/[0.14] hover:text-[#FFE7C0] shadow-[0_0_16px_rgba(212,168,88,0.12)] transition-colors" aria-label={`${notifications.length} notifications`}>
+              <div className="relative p-2 text-[#D4A858]/80 hover:text-[#FFE7C0] transition-colors" aria-label={`${notifications.length} notifications`}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
                   <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -908,7 +908,7 @@ const handleTabChange = (tabId) => {
               <button
                   onClick={openSettings}
                   aria-label="Settings"
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-full border border-white/10 bg-[#1B1B1B] text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] font-semibold text-white/60 hover:text-white transition-colors"
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="3" />

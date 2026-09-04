@@ -217,7 +217,7 @@ export default function MavenHomeDashboard() {
       {/* Wide Maven hero */}
       <section
         aria-label="Hey, I'm Maven"
-        className="relative flex min-h-[300px] items-stretch overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-emphasized)] bg-[linear-gradient(120deg,rgba(212,168,88,0.12),#191714_48%,rgba(232,32,112,0.08))] shadow-[var(--ms-shadow-gold)] lg:min-h-[340px]"
+        className="relative flex h-[150px] items-stretch overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-subtle)] bg-[linear-gradient(120deg,rgba(212,168,88,0.08),#191714_48%,rgba(232,32,112,0.05))] sm:h-[190px] lg:h-[220px]"
       >
         <img
           src="/assets/maven-dashboard-hero.png"
@@ -235,7 +235,7 @@ export default function MavenHomeDashboard() {
       {/* Conversation workspace */}
       <section aria-label="What are you working on?" className="mt-6">
         <h2 className="text-sm font-semibold tracking-[-0.01em]">What are you working on?</h2>
-        <WorkspaceCard className="mt-3 flex flex-col overflow-hidden p-0">
+        <div className="mt-3 flex flex-col overflow-hidden">
           <div className="flex min-h-[300px] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 lg:min-h-[400px]">
             {mavenMessages.length === 0 ? (
               <div className="flex flex-1 items-center justify-center">
@@ -285,7 +285,7 @@ export default function MavenHomeDashboard() {
               <Icon type="arrow" size={16} />
             </button>
           </form>
-        </WorkspaceCard>
+        </div>
       </section>
 
       {/* Operational information */}

@@ -42,18 +42,18 @@ export function MavenChat({
     <div
       className={`flex flex-col h-full overflow-hidden ${
         flat
-          ? "bg-[#12151E] border border-[#252B3B] rounded-2xl"
-          : "bg-[#12151E] border border-[#F3BA4A]/30 rounded-2xl shadow-[0_0_20px_rgba(243,186,74,0.08)]"
+          ? "bg-transparent"
+          : "bg-transparent border-l border-[#252B3B]/60"
       } ${className}`}
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between p-4 border-b border-[#252B3B] ${
-          flat ? "" : "bg-[#0A0C10]/40"
+        className={`flex items-center justify-between px-1 py-3 border-b border-[#252B3B]/60 ${
+          flat ? "" : ""
         }`}
       >
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-[#F3BA4A]/10 text-[#F3BA4A] border border-[#F3BA4A]/30">
+            <div className="p-1 text-[#F3BA4A]/80">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
@@ -101,7 +101,7 @@ export function MavenChat({
       {/* Composer Footer */}
       <div
         className={`${
-          flat ? "p-3 border-t border-[#252B3B]/50" : "p-3 border-t border-[#252B3B] bg-[#0A0C10]/60"
+          flat ? "p-3 border-t border-[#252B3B]/40" : "p-3 border-t border-[#252B3B]/40"
         } ${composerClassName}`}
       >
         <MavenComposer

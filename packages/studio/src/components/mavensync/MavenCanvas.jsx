@@ -54,12 +54,12 @@ export function MavenCanvas({
 
   return (
     <div
-      className={`flex flex-col h-full bg-[#12151E] border border-[#252B3B] rounded-2xl overflow-hidden ${className}`}
+      className={`flex flex-col h-full bg-transparent overflow-hidden ${className}`}
     >
       {/* Top Toolbar */}
-      <div className="flex items-center justify-between p-4 border-b border-[#252B3B] bg-[#0A0C10]/40">
+      <div className="flex items-center justify-between px-1 py-3 border-b border-[#252B3B]/60">
         <div className="flex items-center gap-3">
-          <div className="p-1.5 rounded-lg bg-[#E82070]/10 text-[#E82070] border border-[#E82070]/30">
+          <div className="p-1 text-[#E82070]/80">
             <Layers className="w-4 h-4" />
           </div>
           <div>
@@ -81,7 +81,7 @@ export function MavenCanvas({
 
         {/* View Switcher & Export */}
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex p-1 bg-[#1A1E2B] border border-[#252B3B] rounded-xl text-xs">
+          <div className="hidden sm:flex p-0.5 bg-[#1A1E2B]/60 border border-[#252B3B]/70 rounded-lg text-xs">
             <button
               onClick={() => setActiveTab("preview")}
               className={`px-3 py-1 rounded-lg flex items-center gap-1.5 cursor-pointer ${

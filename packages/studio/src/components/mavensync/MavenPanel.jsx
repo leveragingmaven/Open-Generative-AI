@@ -18,7 +18,7 @@ export function MavenPanel({
   return (
     <div
       className={`
-        relative rounded-2xl overflow-hidden transition-all duration-200
+        relative rounded-xl overflow-hidden transition-all duration-200
         ${selectedVariant.container}
         ${padded ? "p-5 sm:p-6" : ""}
         ${className}

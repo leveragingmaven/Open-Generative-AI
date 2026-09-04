@@ -53,7 +53,7 @@ export function MavenComposer({
           flat
             ? "w-full"
             : `
-          relative rounded-2xl bg-[#1A1E2B] border transition-all duration-200 overflow-hidden
+          relative rounded-xl bg-[#1A1E2B]/70 border transition-all duration-200 overflow-hidden
           ${
             mode === "creative"
               ? "border-[#E82070]/40 focus-within:border-[#E82070] focus-within:shadow-[0_0_20px_rgba(232,32,112,0.15)]"
@@ -67,7 +67,7 @@ export function MavenComposer({
           className={`flex items-center justify-between px-3.5 py-2 text-xs ${
             flat
               ? ""
-              : "border-b border-[#252B3B]/60 bg-[#12151E]/60"
+              : "border-b border-[#252B3B]/40 bg-transparent"
           }`}
         >
           <div className="flex items-center gap-1.5">
@@ -76,7 +76,7 @@ export function MavenComposer({
               onClick={() => setMode("intelligence")}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1 ${
                 mode === "intelligence"
-                  ? "bg-[#F3BA4A]/20 text-[#F3BA4A] border border-[#F3BA4A]/30"
+                  ? "bg-[#F3BA4A]/10 text-[#F3BA4A] border border-[#F3BA4A]/20"
                   : "text-[#64748B] hover:text-[#94A3B8]"
               }`}
             >
@@ -88,7 +88,7 @@ export function MavenComposer({
               onClick={() => setMode("creative")}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1 ${
                 mode === "creative"
-                  ? "bg-[#E82070]/20 text-[#E82070] border border-[#E82070]/30"
+                  ? "bg-[#E82070]/10 text-[#E82070] border border-[#E82070]/20"
                   : "text-[#64748B] hover:text-[#94A3B8]"
               }`}
             >
@@ -114,7 +114,7 @@ export function MavenComposer({
           className={`w-full bg-transparent text-[#F8FAFC] placeholder-[#64748B] text-sm p-3.5 outline-none resize-none leading-relaxed transition-all ${
             flat
               ? "border-b border-transparent focus:border-b-[#D4A858]/50 focus:bg-transparent"
-              : "border-t border-[#252B3B]/60"
+              : "border-t border-transparent"
           }`}
         />
 

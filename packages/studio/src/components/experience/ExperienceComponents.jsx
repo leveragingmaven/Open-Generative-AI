@@ -38,7 +38,7 @@ export function WorkspaceHero({ children, className = "" }) {
   return (
     <section
       className={classes(
-        "relative overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-emphasized)] bg-[linear-gradient(135deg,rgba(212,168,88,0.09),rgba(25,23,20,0.98)_52%,rgba(232,32,112,0.05))] p-5 shadow-[var(--ms-shadow-gold)] sm:p-6",
+        "relative overflow-hidden rounded-[var(--ms-radius-card-hero)] border border-[var(--ms-color-border-subtle)] bg-[linear-gradient(135deg,rgba(212,168,88,0.06),rgba(25,23,20,0.92)_52%,rgba(232,32,112,0.03))] p-5 sm:p-6",
         className,
       )}
     >
@@ -73,8 +73,8 @@ export const WorkspaceCard = forwardRef(function WorkspaceCard(
     <Element
       ref={ref}
       className={classes(
-        "rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-4 shadow-[var(--ms-shadow-card)]",
-        interactive && "transition-[transform,border-color,background-color,box-shadow] duration-[var(--ms-motion-card)] ease-[var(--ms-ease-standard)] hover:-translate-y-0.5 hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)] hover:shadow-[var(--ms-shadow-card-hover)]",
+        "rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-4",
+        interactive && "transition-[transform,border-color,background-color] duration-[var(--ms-motion-card)] ease-[var(--ms-ease-standard)] hover:-translate-y-0.5 hover:border-[var(--ms-color-border-emphasized)] hover:bg-[var(--ms-color-panel-hover)]",
         className,
       )}
       {...props}

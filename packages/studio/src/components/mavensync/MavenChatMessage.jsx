@@ -24,11 +24,11 @@ export function MavenChatMessage({ message, onActionClick, renderContent, varian
       {/* Avatar */}
       <div
         className={`
-          flex items-center justify-center w-8 h-8 rounded-xl shrink-0 text-xs font-bold border shadow-md
+          flex items-center justify-center w-7 h-7 rounded-full shrink-0 text-xs font-bold border
           ${
             isAI
-              ? "bg-[#12151E] border-[#F3BA4A]/40 text-[#F3BA4A] shadow-[0_0_12px_rgba(243,186,74,0.15)]"
-              : "bg-[#1A1E2B] border-[#252B3B] text-[#F8FAFC]"
+              ? "bg-transparent border-[#F3BA4A]/30 text-[#F3BA4A]"
+              : "bg-[#1A1E2B]/60 border-[#252B3B]/70 text-[#F8FAFC]"
           }
         `}
       >
@@ -53,10 +53,10 @@ export function MavenChatMessage({ message, onActionClick, renderContent, varian
           className={`text-sm leading-relaxed ${
             flat
               ? ""
-              : `p-4 rounded-2xl border transition-all ${
+              : `p-3 rounded-xl border transition-all ${
                   isAI
-                    ? "bg-[#12151E] border-[#F3BA4A]/25 text-[#F8FAFC] shadow-[0_0_20px_rgba(243,186,74,0.05)]"
-                    : "bg-[#1A1E2B] border-[#3A435A] text-[#F8FAFC]"
+                    ? "bg-transparent border-transparent text-[#F8FAFC]"
+                    : "bg-[#1A1E2B]/60 border-[#252B3B]/70 text-[#F8FAFC]"
                 }`
           }`}
         >
