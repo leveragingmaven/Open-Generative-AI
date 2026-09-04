@@ -105,9 +105,6 @@ export function hasExpiredTemporaryAssetUrl(url, now = Date.now()) {
 
 export function validatePublishingDraft(draft, capabilityRegistry) {
   const normalized = normalizePublishingDraft(draft);
-  if (normalized.assets.length === 0 && normalized.assetIds.length === 0) {
-    throw new PublishingValidationError("Publishing draft requires at least one asset", { field: "assets" });
-  }
   if (normalized.platforms.length === 0) {
     throw new PublishingValidationError("Publishing draft requires at least one platform", { field: "platforms" });
   }

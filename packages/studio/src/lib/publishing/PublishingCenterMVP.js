@@ -4,6 +4,12 @@ import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
 import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
 import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
 import { localAssetManager } from "../intelligence/AssetManager.js";
+import { PublishingValidationError } from "./publishingErrors.js";
+
+function freshDraftId() {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `draft-${suffix}`;
+}
 
 export class PublishingCenterMVP {
   constructor(options = {}) {
@@ -31,13 +37,24 @@ export class PublishingCenterMVP {
     return service.list();
   }
 
-  /**
-   * Create a new publishing draft from an existing asset
-   */
-  createDraftFromAsset(asset, options = {}) {
-    const campaignInfo = assetCampaignInfo(asset);
+  /** Create a new publishing draft, optionally seeded with an existing asset. */
+  createDraft(input = {}, options = {}) {
     const provider = options.publishingProvider || (options.providerId ? this.publishingProviderRegistry.get(options.providerId) : this.publishingProvider);
     const draft = provider.createDraft({
+      ...input,
+      id: input.id || freshDraftId(),
+      assets: Array.isArray(input.assets) ? input.assets : [],
+      assetIds: Array.isArray(input.assetIds) ? input.assetIds : [],
+      platforms: Array.isArray(input.platforms) ? input.platforms : [],
+      scheduledAt: input.scheduledAt || null,
+    }, { storage: this.storage });
+    savePublishingDraft(draft, this.storage);
+    return draft;
+  }
+
+  createDraftFromAsset(asset, options = {}) {
+    const campaignInfo = assetCampaignInfo(asset);
+    return this.createDraft({
       assetIds: [asset.id],
       assets: [asset],
       caption: asset.description || asset.title || "",
@@ -46,11 +63,7 @@ export class PublishingCenterMVP {
       campaignName: options.campaignName || campaignInfo?.campaignName || null,
       platforms: [],
       scheduledAt: null,
-    }, { storage: this.storage });
-
-    // Save using the publishing history abstraction
-    savePublishingDraft(draft, this.storage);
-    return draft;
+    }, options);
   }
 
   /**
@@ -110,6 +123,10 @@ export class PublishingCenterMVP {
     if (!draft) {
       throw new Error("Draft not found");
     }
+    const scheduledTime = new Date(scheduledAt).getTime();
+    if (!Number.isFinite(scheduledTime) || scheduledTime <= Date.now()) {
+      throw new PublishingValidationError("Choose a future date and time before scheduling.", { field: "scheduledAt" });
+    }
 
     const provider = this.providerForDraft(draft);
     const scheduledDraft = provider.updateDraft({
@@ -140,6 +157,57 @@ export class PublishingCenterMVP {
     // Save the job using the publishing history abstraction
     savePublishingJob(result, this.storage);
     return result;
+  }
+
+  async cancelScheduledDraft(draftId) {
+    const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
+    if (!draft) throw new Error("Draft not found");
+    if (!["scheduled", "queued"].includes(draft.status) && !draft.scheduledAt) {
+      throw new PublishingValidationError("Only scheduled publishing jobs can be cancelled.", { field: "status" });
+    }
+    const historyJob = readPublishingHistory(this.storage).find((job) => job.draftId === draft.id);
+    const providerJobId = draft.providerJobId || historyJob?.providerJobId || historyJob?.id;
+    if (!providerJobId) {
+      throw new PublishingValidationError("This scheduled draft has no provider job to cancel.", { field: "providerJobId" });
+    }
+    const provider = this.providerForDraft(draft);
+    const result = await provider.cancelScheduledPost(providerJobId, { storage: this.storage });
+    const cancelledDraft = provider.updateDraft({
+      ...draft,
+      status: "cancelled",
+      scheduledAt: null,
+      error: null,
+      providerJobId,
+    }, { storage: this.storage });
+    savePublishingDraft(cancelledDraft, this.storage);
+    savePublishingJob({
+      ...(historyJob || {}),
+      id: historyJob?.id || providerJobId,
+      draftId: draft.id,
+      provider: draft.provider,
+      providerJobId,
+      status: "cancelled",
+      raw: result,
+    }, this.storage);
+    return result;
+  }
+
+  duplicateDraft(source, options = {}) {
+    const drafts = readPublishingDrafts(this.storage);
+    const sourceDraft = typeof source === "string" ? drafts.find((draft) => draft.id === source) : source;
+    if (!sourceDraft) throw new Error("Draft not found");
+    const { providerPostIds, providerJobId, providerRequestIds, publishedAt, error, status, scheduledAt, createdAt, updatedAt, id, ...copy } = sourceDraft;
+    return this.createDraft({
+      ...copy,
+      id: freshDraftId(),
+      status: "draft",
+      scheduledAt: null,
+      providerPostIds: {},
+      providerJobId: null,
+      providerRequestIds: {},
+      publishedAt: null,
+      error: null,
+    }, { providerId: sourceDraft.provider, ...options });
   }
 
   /**
