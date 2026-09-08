@@ -205,7 +205,7 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   // first enabled tab (historically Image Studio) because of Agency config.
   const visibleTabs = useMemo(() => TABS.filter((tab) => tab.id !== 'apps'), []);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
-const isStudioHome = slug.length === 0;
+const isStudioHome = slug.length === 0 && !idFromParams;
   const isOverviewWorkspace = !idFromParams && slug[0] === 'overview';
   const isCreateWorkspace = !idFromParams && slug[0] === 'create';
   const isIntelligenceWorkspace = !idFromParams && slug[0] === 'intelligence';
