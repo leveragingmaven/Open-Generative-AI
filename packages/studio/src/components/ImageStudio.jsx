@@ -1546,127 +1546,52 @@ export default function ImageStudio({
 
   // ── Render ───────────────────────────────────────────────────────────────
 return (
-    <div className="w-full h-full grid grid-cols-1 lg:grid-cols-12 gap-6 relative overflow-hidden">
-      {/* LEFT: 35% Chat Workspace — MavenSync Assistant */}
-      <div className="lg:col-span-4 h-full min-h-0">
+    <div className="w-full min-h-full flex flex-col gap-6 relative">
+      {/* Generated content remains the primary surface; Maven conversation and composer sit below it. */}
+      <div className="w-full">
+        <MavenCanvas
+          lastPrompt={featuredEntry?.prompt || prompt}
+          className="!h-auto !overflow-visible"
+          contentOverride={
+            history.length > 0 ? (
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <MavenBadge variant="pink" size="sm">Featured Result</MavenBadge>
+                    <span className="text-xs font-mono text-[#64748B]">{history.length} {history.length === 1 ? "image" : "images"} generated</span>
+                  </div>
+                  <div className="relative overflow-hidden">
+                    <img src={featuredEntry.url} alt={featuredEntry.prompt?.substring(0, 30) || "Generated image"} className="w-full max-h-[72vh] object-contain bg-black/20 cursor-pointer hover:opacity-90 transition-opacity" onClick={() => setFullscreenUrl(featuredEntry.url)} />
+                    <div className="absolute top-3 right-3 flex flex-col gap-2">
+                      <button type="button" title="Fullscreen" onClick={(e) => { e.stopPropagation(); setFullscreenUrl(featuredEntry.url); }} className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-[#E82070] transition-all border border-[#252B3B]"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg></button>
+                      <button type="button" title="Download" onClick={(e) => { e.stopPropagation(); downloadImage(featuredEntry.url, `muapi-${featuredEntry.id || featuredIdx}.jpg`); }} className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-[#E82070] transition-all border border-[#252B3B]"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg></button>
+                      <button type="button" title="Delete" onClick={(e) => { e.stopPropagation(); if (confirm("Are you sure you want to delete this generated item?")) setLocalHistory((prev) => prev.filter((_, i) => i !== featuredIdx)); }} className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-red-400 hover:bg-red-500 transition-all border border-[#252B3B]"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg></button>
+                    </div>
+                  </div>
+                  <div className="flex items-start justify-between gap-3 flex-wrap"><p className="text-sm text-[#F8FAFC] leading-relaxed max-w-xl" title={featuredEntry.prompt}>{featuredEntry.prompt || "No prompt provided"}</p><div className="flex items-center gap-2"><span className="text-[10px] font-bold text-[#E82070] px-2 py-0.5 bg-[#E82070]/10 rounded border border-[#E82070]/30 capitalize">{featuredEntry.model?.replace("-", " ") || "Image Studio"}</span><span className="text-[10px] text-[#64748B] font-mono">{featuredEntry.aspect_ratio}</span></div></div>
+                </div>
+                <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-[#F3BA4A] uppercase tracking-wider">Generation History</span><button type="button" onClick={() => { setActiveHistoryIdx(0); setCurrentImageUrl(history[0]?.url || null); }} className="text-[10px] text-[#64748B] hover:text-[#F3BA4A] transition-colors">Show latest</button></div><div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">{history.map((entry, idx) => <button key={entry.id || idx} type="button" onClick={() => { setActiveHistoryIdx(idx); setCurrentImageUrl(entry.url); }} className={`relative rounded-xl overflow-hidden border transition-all cursor-pointer aspect-square group ${idx === featuredIdx ? "border-[#F3BA4A]" : "border-[#252B3B] hover:border-[#3A435A]"}`} title={entry.prompt?.substring(0, 40) || "Generated image"}><img src={entry.url} alt="" className="w-full h-full object-cover" />{idx === featuredIdx && <span className="absolute top-1.5 left-1.5 text-[9px] px-1.5 py-0.5 rounded bg-[#F3BA4A] text-[#0A0C10] font-bold">Active</span>}</button>)}</div></div>
+              </div>
+            ) : <div className="flex flex-col items-center justify-center min-h-[40vh] text-center p-8 sm:p-12"><div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[#1A1E2B] text-[#F3BA4A] mb-4"><svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></div><h3 className="text-lg font-semibold text-[#F8FAFC]">Your canvas is empty</h3><p className="text-sm text-[#94A3B8] max-w-md mt-1.5 leading-relaxed">Describe an image in the assistant workspace and hit Generate. Your creations will appear here, ready to preview, download, and refine.</p></div>
+          }
+        />
+      </div>
+      <div className="w-full">
         <MavenChat
           title="Image Studio"
           messages={chatMessages}
           onSendMessage={handleGenerate}
           onResetChat={resetToPrompt}
           isProcessing={generating}
-          className="h-full"
+          className="!h-auto !overflow-visible"
           placeholder={placeholderText}
           value={prompt}
           onValueChange={setPrompt}
           composerControls={composerGenerationControls}
+          messagesClassName="!overflow-visible !flex-none"
+          variant="flat"
         />
       </div>
-
-      {/* RIGHT: 65% Canvas Results — MavenSync Canvas */}
-      <div className="lg:col-span-8 h-full min-h-0">
-        <MavenCanvas
-          lastPrompt={featuredEntry?.prompt || prompt}
-          className="h-full"
-          contentOverride={
-            history.length > 0 ? (
-              <div className="space-y-6">
-                <MavenPanel variant="creative" showAccentLine padded className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <MavenBadge variant="pink" size="sm">Featured Result</MavenBadge>
-                    <span className="text-xs font-mono text-[#64748B]">
-                      {history.length} {history.length === 1 ? "image" : "images"} generated
-                    </span>
-                  </div>
-                  <div className="relative rounded-2xl overflow-hidden border border-[#E82070]/30 bg-[#0A0C10] shadow-[0_0_25px_rgba(232,32,112,0.15)]">
-                    <img
-                      src={featuredEntry.url}
-                      alt={featuredEntry.prompt?.substring(0, 30) || "Generated image"}
-                      className="w-full aspect-video object-contain bg-black/40 cursor-pointer hover:opacity-90 transition-opacity"
-                      onClick={() => setFullscreenUrl(featuredEntry.url)}
-                    />
-                    <div className="absolute top-3 right-3 flex flex-col gap-2">
-                      <button type="button" title="Fullscreen"
-                        onClick={(e) => { e.stopPropagation(); setFullscreenUrl(featuredEntry.url); }}
-                        className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-[#E82070] hover:text-white transition-all border border-[#252B3B]">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
-                      </button>
-                      <button type="button" title="Download"
-                        onClick={(e) => { e.stopPropagation(); downloadImage(featuredEntry.url, `muapi-${featuredEntry.id || featuredIdx}.jpg`); }}
-                        className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-[#E82070] hover:text-white transition-all border border-[#252B3B]">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
-                      </button>
-                      <button type="button" title="Delete"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm("Are you sure you want to delete this generated item?")) {
-                            setLocalHistory((prev) => prev.filter((_, i) => i !== featuredIdx));
-                          }
-                        }}
-                        className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-red-400 hover:bg-red-500 hover:text-white transition-all border border-[#252B3B]">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <p className="text-sm text-[#F8FAFC] leading-relaxed max-w-xl" title={featuredEntry.prompt}>
-                      {featuredEntry.prompt || "No prompt provided"}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-[#E82070] px-2 py-0.5 bg-[#E82070]/10 rounded border border-[#E82070]/30 capitalize">
-                        {featuredEntry.model?.replace("-", " ") || "Image Studio"}
-                      </span>
-                      <span className="text-[10px] text-[#64748B] font-mono">{featuredEntry.aspect_ratio}</span>
-                    </div>
-                  </div>
-                </MavenPanel>
-
-                <MavenPanel variant="default" padded className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#F3BA4A] uppercase tracking-wider">Generation History</span>
-                    <button
-                      type="button"
-                      onClick={() => { setActiveHistoryIdx(0); setCurrentImageUrl(history[0]?.url || null); }}
-                      className="text-[10px] text-[#64748B] hover:text-[#F3BA4A] transition-colors"
-                    >Show latest</button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {history.map((entry, idx) => (
-                      <button
-                        key={entry.id || idx}
-                        type="button"
-                        onClick={() => { setActiveHistoryIdx(idx); setCurrentImageUrl(entry.url); }}
-                        className={`relative rounded-xl overflow-hidden border transition-all cursor-pointer aspect-square group ${
-                          idx === featuredIdx
-                            ? "border-[#F3BA4A] shadow-[0_0_15px_rgba(243,186,74,0.25)]"
-                            : "border-[#252B3B] hover:border-[#3A435A]"
-                        }`}
-                        title={entry.prompt?.substring(0, 40) || "Generated image"}
-                      >
-                        <img src={entry.url} alt="" className="w-full h-full object-cover" />
-                        {idx === featuredIdx && (
-                          <span className="absolute top-1.5 left-1.5 text-[9px] px-1.5 py-0.5 rounded bg-[#F3BA4A] text-[#0A0C10] font-bold">Active</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </MavenPanel>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center p-8 sm:p-12">
-                <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[#1A1E2B] border border-[#252B3B] text-[#F3BA4A] mb-4 shadow-lg">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg>
-                </div>
-                <h3 className="text-lg font-semibold text-[#F8FAFC]">Your canvas is empty</h3>
-                <p className="text-sm text-[#94A3B8] max-w-md mt-1.5 leading-relaxed">
-                  Describe an image in the assistant workspace and hit Generate. Your creations will appear here, ready to preview, download, and refine.
-                </p>
-              </div>
-            )
-          }
-        />
-      </div>
-
       {/* ── FULLSCREEN IMAGE MODAL ── */}
       {fullscreenUrl && (
         <div 
