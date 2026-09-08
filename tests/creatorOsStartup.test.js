@@ -43,6 +43,16 @@ test("Studio retains active-workspace-only mounting", () => {
   assert.doesNotMatch(shellSource, /const studioContent = \(\s*<>/);
 });
 
+test("Agents mounts eagerly and keeps its catalog effect", () => {
+  assert.match(shellSource, /import AgentStudio from ['"]\.\.\/packages\/studio\/src\/components\/AgentStudio\.jsx['"]/);
+  assert.doesNotMatch(shellSource, /const AgentStudio = workspaceImport\(\(\) => import\(['"]\.\.\/packages\/studio\/src\/components\/AgentStudio\.jsx/);
+  const agentCase = shellSource.match(/case 'agents':[\s\S]*?break;/)?.[0];
+  assert.ok(agentCase?.includes('<AgentStudio apiKey={studioApiKey}'), 'Agents tab should preserve existing props');
+  const agentSource = readFileSync(new URL('../packages/studio/src/components/AgentStudio.jsx', import.meta.url), 'utf8');
+  assert.match(agentSource, /getTemplateAgents\(apiKey\)/);
+  assert.match(agentSource, /useEffect\(\(\) => \{[\s\S]*?getTemplateAgents\(apiKey\)/);
+});
+
 test("Studio startup isolates workspaces from the full studio barrel", () => {
   assert.doesNotMatch(shellSource, /from ['"]studio['"]/);
   assert.doesNotMatch(shellSource, /import\(['"]studio['"]\)/);

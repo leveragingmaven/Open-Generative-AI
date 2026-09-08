@@ -52,7 +52,7 @@ const AudioStudio = workspaceImport(() => import('../packages/studio/src/compone
 const MarketingStudio = workspaceImport(() => import('../packages/studio/src/components/MarketingStudio.jsx'), 'Marketing Studio');
 const CharacterStudio = workspaceImport(() => import('../packages/studio/src/components/character/CharacterStudio.jsx'), 'Character Studio');
 const WorkflowStudio = workspaceImport(() => import('../packages/studio/src/components/WorkflowStudio.jsx'), 'Workflow Studio');
-const AgentStudio = workspaceImport(() => import('../packages/studio/src/components/AgentStudio.jsx'), 'Agents');
+import AgentStudio from '../packages/studio/src/components/AgentStudio.jsx';
 const AppsStudio = workspaceImport(() => import('../packages/studio/src/components/AppsStudio.jsx'), 'Apps');
 const AiTwinTab = workspaceImport(() => import('../packages/studio/src/components/AiTwinTab.jsx'), 'AI Twin');
 const AiInfluencerStudio = workspaceImport(() => import('../packages/studio/src/components/AiInfluencerStudio.jsx'), 'AI Influencer');
