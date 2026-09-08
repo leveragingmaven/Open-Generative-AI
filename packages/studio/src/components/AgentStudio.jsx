@@ -5,7 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getPublishedAgents, getTemplateAgents } from "../muapi.js";
-import { mergeAgentTemplates, filterAgentCatalog } from "../lib/agents/AgentCatalog.js";
+import {
+  adaptRemoteAgentTemplate,
+  filterAgentCatalog,
+  mergeAgentTemplates,
+  startAgentCatalogFeedRequest,
+} from "../lib/agents/AgentCatalog.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { SKILL_LIBRARY } from "../lib/skills/index.js";
@@ -40,6 +45,13 @@ import {
 const MAIN_TABS = ["all", "featured", "my-agents", "my-chats"];
 const CATALOG_REQUEST_TIMEOUT_MS = 15_000;
 
+function initialRemoteFeedState() {
+  return {
+    templates: { records: [], status: "loading", error: null },
+    featured: { records: [], status: "loading", error: null },
+  };
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return "";
   const utcStr = dateStr.endsWith("Z") || dateStr.includes("+") ? dateStr : dateStr + "Z";
@@ -50,46 +62,6 @@ function timeAgo(dateStr) {
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
   return new Date(utcStr).toLocaleDateString();
 }
-
-// Adapt a remote MuAPI agent template into a local agent-profile-compatible
-// object. Keeps the remote icon so Featured cards can show the image, and maps
-// name/description/category/prompt so the current in-shell Create/runtime can
-// persist it via createAgentProfile/createAgent.
-function adaptRemoteTemplate(t, { sourceCatalog = "templates", isFeatured = false } = {}) {
-  const name = t.name || t.title || "Remote Agent";
-  const iconUrl = t.icon_url || t.image_url || t.icon || null;
-  const remoteSkills = Array.isArray(t.skills) ? t.skills : [];
-  return {
-    ...t,
-    id: t.agent_id || t.id || null,
-    name,
-    specialty: t.specialty || t.description || name,
-    description: t.description || "",
-    systemPrompt: t.system_prompt || t.prompt || "",
-    prompt: t.prompt || t.system_prompt || `You are ${name}. Analyze the brief, apply your specialty together with the executing AI Twin's context, and produce the creative asset for the active campaign.`,
-    category: t.category || "General",
-    categories: [t.category || "General", "General"],
-    welcomeMessage: t.welcome_message || "",
-    initialSuggestions: Array.isArray(t.initial_suggestions) ? t.initial_suggestions : [],
-    suggestedSkillIds: remoteSkills.map((skill) => skill?.name || skill?.id).filter(Boolean),
-    skills: remoteSkills.map((skill) => ({ ...skill })),
-    iconUrl,
-    artwork: t.artwork || (iconUrl ? { url: iconUrl } : null),
-    metadata: { ...(t.metadata || {}), ...(iconUrl ? { iconUrl } : {}) },
-    remoteId: t.agent_id || t.id || null,
-    remoteRecordId: t.id || null,
-    remote: true,
-    ownerUsername: t.owner_username || t.ownerUsername || "",
-    ownerEmail: t.owner_email || t.ownerEmail || "",
-    publication: t.publication || { isPublished: t.is_published, isTemplate: t.is_template },
-    isPublished: t.is_published ?? t.isPublished,
-    isTemplate: t.is_template ?? t.isTemplate,
-    isFeatured: t.is_featured ?? t.isFeatured ?? isFeatured,
-    sourceCatalog,
-    avatarPlaceholder: (name || "A").charAt(0).toUpperCase(),
-  };
-}
-
 
 function AgentAvatar({ agent, className = "", size = "lg" }) {
   return (
@@ -257,9 +229,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   const [agents, setAgents] = useState([]);
   const [chats, setChats] = useState([]);
   const [twins, setTwins] = useState([]);
-  const [remoteTemplates, setRemoteTemplates] = useState([]);
-  const [remoteCatalogError, setRemoteCatalogError] = useState(null);
-  const [remoteCatalogLoading, setRemoteCatalogLoading] = useState(true);
+  const [remoteFeeds, setRemoteFeeds] = useState(initialRemoteFeedState);
   const [twinId, setTwinId] = useState(null);
   const [openChat, setOpenChat] = useState(null); // { agentId, chatId? }
   const [chatDraft, setChatDraft] = useState("");
@@ -280,50 +250,45 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
     refresh();
   }, [refresh]);
 
-  // Load both existing MuAPI catalog feeds that made up the original gallery.
-  // Each remote item is adapted into a local agent-profile-compatible object so
-  // it can be used by the current in-shell Create/agent runtime. A failure of
-  // one read must not hide the other remote catalog or the local additions.
+  // Load each existing MuAPI catalog feed independently so a fast successful
+  // feed becomes visible without waiting for the other feed to settle.
   useEffect(() => {
     let cancelled = false;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CATALOG_REQUEST_TIMEOUT_MS);
+    setRemoteFeeds(initialRemoteFeedState());
     const feeds = [
-      { load: getTemplateAgents, sourceCatalog: "templates", isFeatured: false },
-      { load: getPublishedAgents, sourceCatalog: "featured", isFeatured: true },
+      { key: "templates", load: getTemplateAgents, isFeatured: false },
+      { key: "featured", load: getPublishedAgents, isFeatured: true },
     ];
-    (async () => {
-      const results = await Promise.allSettled(
-        feeds.map((feed) => feed.load(apiKey, { signal: controller.signal }))
-      );
-      clearTimeout(timeoutId);
+    const updateFeed = (key, changes) => {
       if (cancelled) return;
-      setRemoteCatalogLoading(false);
-      const failures = results.filter((result) => result.status === "rejected");
-      setRemoteCatalogError(failures.length ? failures[0].reason : null);
-
-      const remote = results.flatMap((result, index) => {
-        if (result.status !== "fulfilled" || !Array.isArray(result.value)) return [];
-        const { sourceCatalog, isFeatured } = feeds[index];
-        return result.value
+      setRemoteFeeds((current) => ({
+        ...current,
+        [key]: { ...current[key], ...changes },
+      }));
+    };
+    const requests = feeds.map((feed) => startAgentCatalogFeedRequest({
+      load: feed.load,
+      apiKey,
+      timeoutMs: CATALOG_REQUEST_TIMEOUT_MS,
+      onFulfilled: (value) => {
+        const records = (Array.isArray(value) ? value : [])
           .filter((template) => template && (template.name || template.title))
-          .map((template) => adaptRemoteTemplate(template, { sourceCatalog, isFeatured }));
-      });
-      setRemoteTemplates(remote);
-
-      if (process.env.NODE_ENV !== "production") {
-        results.forEach((result) => {
-          const status = result.status === "rejected" ? result.reason?.status : null;
-          if (result.status === "rejected" && status !== 401 && status !== 403) {
-            console.warn("AgentStudio: remote catalog read failed", result.reason);
-          }
-        });
-      }
-    })();
+          .map((template) => adaptRemoteAgentTemplate(template, {
+            sourceCatalog: feed.key,
+            isFeatured: feed.isFeatured,
+          }));
+        updateFeed(feed.key, { records, status: "fulfilled", error: null });
+      },
+      onRejected: (error) => {
+        updateFeed(feed.key, { records: [], status: "rejected", error });
+        if (process.env.NODE_ENV !== "production" && error?.status !== 401 && error?.status !== 403) {
+          console.warn(`AgentStudio: ${feed.key} catalog read failed`, error);
+        }
+      },
+    }));
     return () => {
       cancelled = true;
-      clearTimeout(timeoutId);
-      controller.abort();
+      requests.forEach((request) => request.abort());
     };
   }, [apiKey]);
 
@@ -346,6 +311,12 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [openChat?.chatId, sending]);
 
+  const remoteTemplates = useMemo(
+    () => [...remoteFeeds.templates.records, ...remoteFeeds.featured.records],
+    [remoteFeeds.templates.records, remoteFeeds.featured.records]
+  );
+  const remoteCatalogLoading = remoteFeeds.templates.status === "loading" || remoteFeeds.featured.status === "loading";
+  const failedRemoteFeedCount = [remoteFeeds.templates, remoteFeeds.featured].filter((feed) => feed.status === "rejected").length;
   const catalog = useMemo(() => mergeAgentTemplates(remoteTemplates, listFeaturedAgentTemplates()), [remoteTemplates]);
   const templates = useMemo(() => activeMainTab === "featured" ? catalog.filter((agent) => agent.isFeatured || listFeaturedAgentTemplates().some((local) => local.id === agent.stableId)) : catalog, [catalog, activeMainTab]);
   const activeTwin = useMemo(() => (twinId ? getTwin(twinId) : null), [twinId, twins]);
@@ -623,7 +594,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
             ))}
           </div>
           {remoteCatalogLoading && <span className="text-[9px] text-white/30 uppercase tracking-widest">Loading upstream templates…</span>}
-          {!remoteCatalogLoading && remoteCatalogError && <span className="text-[9px] text-amber-300/70 uppercase tracking-widest">Upstream templates unavailable; showing local templates</span>}
+          {!remoteCatalogLoading && failedRemoteFeedCount === 1 && <span className="text-[9px] text-amber-300/70 uppercase tracking-widest">Some upstream agents unavailable; showing available catalog</span>}
+          {!remoteCatalogLoading && failedRemoteFeedCount === 2 && <span className="text-[9px] text-amber-300/70 uppercase tracking-widest">Upstream agents unavailable; showing MavenSync templates</span>}
           <div className="relative hidden md:block min-w-0 flex-1 max-w-xs">
             <input
               value={query}

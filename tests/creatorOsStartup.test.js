@@ -59,15 +59,24 @@ test("Agents mounts eagerly and keeps its catalog effect", () => {
   const agentCase = shellSource.match(/case 'agents':[\s\S]*?break;/)?.[0];
   assert.ok(agentCase?.includes('<AgentStudio apiKey={studioApiKey}'), 'Agents tab should preserve existing props');
   const agentSource = readFileSync(new URL('../packages/studio/src/components/AgentStudio.jsx', import.meta.url), 'utf8');
+  const catalogSource = readFileSync(new URL('../packages/studio/src/lib/agents/AgentCatalog.js', import.meta.url), 'utf8');
   const muapiSource = readFileSync(new URL('../packages/studio/src/muapi.js', import.meta.url), 'utf8');
   assert.match(agentSource, /const \[activeMainTab, setActiveMainTab\] = useState\(["']all["']\)/);
   assert.match(agentSource, /const CATALOG_REQUEST_TIMEOUT_MS = 15_000;/);
-  assert.match(agentSource, /new AbortController\(\)/);
-  assert.match(agentSource, /feed\.load\(apiKey, \{ signal: controller\.signal \}\)/);
-  assert.match(agentSource, /sourceCatalog: ["']featured["'], isFeatured: true/);
-  assert.match(agentSource, /useEffect\(\(\) => \{[\s\S]*?Promise\.allSettled/);
+  assert.match(agentSource, /templates: \{ records: \[\], status: ["']loading["'], error: null \}/);
+  assert.match(agentSource, /featured: \{ records: \[\], status: ["']loading["'], error: null \}/);
+  assert.match(agentSource, /startAgentCatalogFeedRequest\(\{/);
+  assert.match(agentSource, /sourceCatalog: feed\.key,[\s\S]*?isFeatured: feed\.isFeatured/);
+  assert.match(agentSource, /requests\.forEach\(\(request\) => request\.abort\(\)\)/);
+  assert.match(agentSource, /Some upstream agents unavailable; showing available catalog/);
+  assert.match(agentSource, /Upstream agents unavailable; showing MavenSync templates/);
+  assert.doesNotMatch(agentSource, /Promise\.allSettled/);
+  assert.match(catalogSource, /const controller = new AbortController\(\)/);
+  assert.match(catalogSource, /const timeoutId = setTimeout\(\(\) => controller\.abort\(\), timeoutMs\)/);
+  assert.match(catalogSource, /clearTimeout\(timeoutId\)/);
   assert.match(muapiSource, /getTemplateAgents\(apiKey, \{ signal \} = \{\}\)/);
   assert.match(muapiSource, /getPublishedAgents\(apiKey, \{ signal \} = \{\}\)/);
+  assert.match(muapiSource, /agents\/featured\/agents/);
 });
 
 test("Studio startup isolates workspaces from the full studio barrel", () => {
