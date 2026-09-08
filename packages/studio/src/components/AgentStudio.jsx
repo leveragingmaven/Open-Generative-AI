@@ -38,6 +38,7 @@ import {
 } from "../lib/agents/index.js";
 
 const MAIN_TABS = ["all", "featured", "my-agents", "my-chats"];
+const CATALOG_REQUEST_TIMEOUT_MS = 15_000;
 
 function timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -54,11 +55,12 @@ function timeAgo(dateStr) {
 // object. Keeps the remote icon so Featured cards can show the image, and maps
 // name/description/category/prompt so the current in-shell Create/runtime can
 // persist it via createAgentProfile/createAgent.
-function adaptRemoteTemplate(t) {
+function adaptRemoteTemplate(t, { sourceCatalog = "templates", isFeatured = false } = {}) {
   const name = t.name || t.title || "Remote Agent";
   const iconUrl = t.icon_url || t.image_url || t.icon || null;
   const remoteSkills = Array.isArray(t.skills) ? t.skills : [];
   return {
+    ...t,
     id: t.agent_id || t.id || null,
     name,
     specialty: t.specialty || t.description || name,
@@ -70,11 +72,20 @@ function adaptRemoteTemplate(t) {
     welcomeMessage: t.welcome_message || "",
     initialSuggestions: Array.isArray(t.initial_suggestions) ? t.initial_suggestions : [],
     suggestedSkillIds: remoteSkills.map((skill) => skill?.name || skill?.id).filter(Boolean),
+    skills: remoteSkills.map((skill) => ({ ...skill })),
     iconUrl,
-    metadata: iconUrl ? { iconUrl } : {},
+    artwork: t.artwork || (iconUrl ? { url: iconUrl } : null),
+    metadata: { ...(t.metadata || {}), ...(iconUrl ? { iconUrl } : {}) },
     remoteId: t.agent_id || t.id || null,
+    remoteRecordId: t.id || null,
     remote: true,
-    ownerUsername: t.owner_username || "",
+    ownerUsername: t.owner_username || t.ownerUsername || "",
+    ownerEmail: t.owner_email || t.ownerEmail || "",
+    publication: t.publication || { isPublished: t.is_published, isTemplate: t.is_template },
+    isPublished: t.is_published ?? t.isPublished,
+    isTemplate: t.is_template ?? t.isTemplate,
+    isFeatured: t.is_featured ?? t.isFeatured ?? isFeatured,
+    sourceCatalog,
     avatarPlaceholder: (name || "A").charAt(0).toUpperCase(),
   };
 }
@@ -240,7 +251,7 @@ function RecipeChips({ ids }) {
 export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader }) {
   const { activeCampaign } = useActiveCampaign();
 
-  const [activeMainTab, setActiveMainTab] = useState("featured");
+  const [activeMainTab, setActiveMainTab] = useState("all");
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [agents, setAgents] = useState([]);
@@ -275,24 +286,30 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   // one read must not hide the other remote catalog or the local additions.
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CATALOG_REQUEST_TIMEOUT_MS);
+    const feeds = [
+      { load: getTemplateAgents, sourceCatalog: "templates", isFeatured: false },
+      { load: getPublishedAgents, sourceCatalog: "featured", isFeatured: true },
+    ];
     (async () => {
-      const results = await Promise.allSettled([
-        getTemplateAgents(apiKey),
-        getPublishedAgents(apiKey),
-      ]);
+      const results = await Promise.allSettled(
+        feeds.map((feed) => feed.load(apiKey, { signal: controller.signal }))
+      );
+      clearTimeout(timeoutId);
       if (cancelled) return;
       setRemoteCatalogLoading(false);
       const failures = results.filter((result) => result.status === "rejected");
       setRemoteCatalogError(failures.length ? failures[0].reason : null);
 
-      const remote = results.flatMap((result) =>
-        result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []
-      );
-      setRemoteTemplates(
-        remote
-          .filter((t) => t && (t.name || t.title))
-          .map((t) => adaptRemoteTemplate(t))
-      );
+      const remote = results.flatMap((result, index) => {
+        if (result.status !== "fulfilled" || !Array.isArray(result.value)) return [];
+        const { sourceCatalog, isFeatured } = feeds[index];
+        return result.value
+          .filter((template) => template && (template.name || template.title))
+          .map((template) => adaptRemoteTemplate(template, { sourceCatalog, isFeatured }));
+      });
+      setRemoteTemplates(remote);
 
       if (process.env.NODE_ENV !== "production") {
         results.forEach((result) => {
@@ -303,7 +320,11 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
         });
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [apiKey]);
 
   // Active twin defaults to the stored selection, else first published twin.

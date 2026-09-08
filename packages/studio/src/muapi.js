@@ -427,9 +427,10 @@ export async function getPublishedWorkflows(apiKey) {
 };
 
 // Agents — uses direct URL → https://api.muapi.ai/agents/...
-export async function getTemplateAgents(apiKey) {
+export async function getTemplateAgents(apiKey, { signal } = {}) {
     const response = await fetch(`${BASE_URL}/agents/templates/agents`, {
-        headers: jsonHeaders(apiKey)
+        headers: jsonHeaders(apiKey),
+        ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
         const errText = await response.text();
@@ -453,10 +454,11 @@ export async function getUserAgents(apiKey) {
     return agentListFromResponse(data);
 };
 
-export async function getPublishedAgents(apiKey) {
+export async function getPublishedAgents(apiKey, { signal } = {}) {
     // MuAPI: GET /agents/featured/agents
     const response = await fetch(`${BASE_URL}/agents/featured/agents`, {
-        headers: jsonHeaders(apiKey)
+        headers: jsonHeaders(apiKey),
+        ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
         const errText = await response.text();

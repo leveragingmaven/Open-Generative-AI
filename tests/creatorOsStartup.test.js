@@ -59,8 +59,15 @@ test("Agents mounts eagerly and keeps its catalog effect", () => {
   const agentCase = shellSource.match(/case 'agents':[\s\S]*?break;/)?.[0];
   assert.ok(agentCase?.includes('<AgentStudio apiKey={studioApiKey}'), 'Agents tab should preserve existing props');
   const agentSource = readFileSync(new URL('../packages/studio/src/components/AgentStudio.jsx', import.meta.url), 'utf8');
-  assert.match(agentSource, /getTemplateAgents\(apiKey\)/);
-  assert.match(agentSource, /useEffect\(\(\) => \{[\s\S]*?getTemplateAgents\(apiKey\)/);
+  const muapiSource = readFileSync(new URL('../packages/studio/src/muapi.js', import.meta.url), 'utf8');
+  assert.match(agentSource, /const \[activeMainTab, setActiveMainTab\] = useState\(["']all["']\)/);
+  assert.match(agentSource, /const CATALOG_REQUEST_TIMEOUT_MS = 15_000;/);
+  assert.match(agentSource, /new AbortController\(\)/);
+  assert.match(agentSource, /feed\.load\(apiKey, \{ signal: controller\.signal \}\)/);
+  assert.match(agentSource, /sourceCatalog: ["']featured["'], isFeatured: true/);
+  assert.match(agentSource, /useEffect\(\(\) => \{[\s\S]*?Promise\.allSettled/);
+  assert.match(muapiSource, /getTemplateAgents\(apiKey, \{ signal \} = \{\}\)/);
+  assert.match(muapiSource, /getPublishedAgents\(apiKey, \{ signal \} = \{\}\)/);
 });
 
 test("Studio startup isolates workspaces from the full studio barrel", () => {

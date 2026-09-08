@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateI2I, generateImage } from "./muapi.js";
+import { generateI2I, generateImage, getPublishedAgents, getTemplateAgents } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -25,6 +25,26 @@ function response(body, status = 200) {
     async text() { return typeof body === 'string' ? body : JSON.stringify(body); },
   };
 }
+
+test('agent catalog reads forward their AbortSignal', async () => {
+  const controller = new AbortController();
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, signal: options?.signal });
+    return response([]);
+  };
+
+  await Promise.all([
+    getTemplateAgents('test-key', { signal: controller.signal }),
+    getPublishedAgents('test-key', { signal: controller.signal }),
+  ]);
+
+  assert.deepEqual(calls.map(({ url }) => url), [
+    'https://api.muapi.ai/agents/templates/agents',
+    'https://api.muapi.ai/agents/featured/agents',
+  ]);
+  assert.equal(calls.every(({ signal }) => signal === controller.signal), true);
+});
 
 function imageParams(signal) {
   return { model: 'ideogram-v3-t2i', prompt: 'test prompt', signal };
