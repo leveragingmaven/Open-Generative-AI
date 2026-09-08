@@ -1410,15 +1410,7 @@ export default function VideoStudio({
 
   // ── MavenSync chat messages ──────────────────────────────────────────
   const chatMessages = (() => {
-    const msgs = [
-      {
-        id: "welcome",
-        sender: "mavensync",
-        content:
-          "Welcome to Video Studio. Describe the video you want to create, pick a model and options in the composer, then hit Generate. You can also upload reference images or video for image-to-video and motion control.",
-        timestamp: "Video Studio",
-      },
-    ];
+    const msgs = [];
     if (prompt.trim()) {
       msgs.push({
         id: "user",
