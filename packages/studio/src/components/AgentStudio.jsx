@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getPublishedAgents, getTemplateAgents } from "../muapi.js";
+import { mergeAgentTemplates, filterAgentCatalog } from "../lib/agents/AgentCatalog.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { SKILL_LIBRARY } from "../lib/skills/index.js";
@@ -36,7 +37,7 @@ import {
   buildAgentReply,
 } from "../lib/agents/index.js";
 
-const MAIN_TABS = ["featured", "my-agents", "my-chats"];
+const MAIN_TABS = ["all", "featured", "my-agents", "my-chats"];
 
 function timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -246,6 +247,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   const [chats, setChats] = useState([]);
   const [twins, setTwins] = useState([]);
   const [remoteTemplates, setRemoteTemplates] = useState([]);
+  const [remoteCatalogError, setRemoteCatalogError] = useState(null);
+  const [remoteCatalogLoading, setRemoteCatalogLoading] = useState(true);
   const [twinId, setTwinId] = useState(null);
   const [openChat, setOpenChat] = useState(null); // { agentId, chatId? }
   const [chatDraft, setChatDraft] = useState("");
@@ -278,21 +281,17 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
         getPublishedAgents(apiKey),
       ]);
       if (cancelled) return;
+      setRemoteCatalogLoading(false);
+      const failures = results.filter((result) => result.status === "rejected");
+      setRemoteCatalogError(failures.length ? failures[0].reason : null);
 
       const remote = results.flatMap((result) =>
         result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []
       );
-      const seen = new Set();
       setRemoteTemplates(
         remote
           .filter((t) => t && (t.name || t.title))
           .map((t) => adaptRemoteTemplate(t))
-          .filter((agent) => {
-            const key = agent.remoteId || agent.name;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          })
       );
 
       if (process.env.NODE_ENV !== "production") {
@@ -326,10 +325,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [openChat?.chatId, sending]);
 
-  const templates = useMemo(
-    () => [...remoteTemplates, ...listFeaturedAgentTemplates()],
-    [remoteTemplates]
-  );
+  const catalog = useMemo(() => mergeAgentTemplates(remoteTemplates, listFeaturedAgentTemplates()), [remoteTemplates]);
+  const templates = useMemo(() => activeMainTab === "featured" ? catalog.filter((agent) => agent.isFeatured || listFeaturedAgentTemplates().some((local) => local.id === agent.stableId)) : catalog, [catalog, activeMainTab]);
   const activeTwin = useMemo(() => (twinId ? getTwin(twinId) : null), [twinId, twins]);
   const openAgent = openChat?.agentId ? getAgent(openChat.agentId) : null;
   const openConversation = useMemo(
@@ -339,12 +336,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
 
   const visibleAgents = useMemo(() => {
     const list = activeMainTab === "my-agents" ? agents : templates;
-    const q = query.trim().toLowerCase();
-    return list.filter((agent) => {
-      if (categoryFilter !== "all" && !(agent.categories || []).includes(categoryFilter) && agent.category !== categoryFilter) return false;
-      if (!q) return true;
-      return `${agent.name} ${agent.specialty} ${agent.description} ${agent.category}`.toLowerCase().includes(q);
-    });
+    return filterAgentCatalog(list, { category: categoryFilter, query });
   }, [activeMainTab, agents, templates, query, categoryFilter]);
 
   const visibleChats = useMemo(() => {
@@ -609,6 +601,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
               </button>
             ))}
           </div>
+          {remoteCatalogLoading && <span className="text-[9px] text-white/30 uppercase tracking-widest">Loading upstream templates…</span>}
+          {!remoteCatalogLoading && remoteCatalogError && <span className="text-[9px] text-amber-300/70 uppercase tracking-widest">Upstream templates unavailable; showing local templates</span>}
           <div className="relative hidden md:block min-w-0 flex-1 max-w-xs">
             <input
               value={query}
