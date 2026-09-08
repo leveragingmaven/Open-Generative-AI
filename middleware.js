@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
 
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+function isAgencyModeEnabled() {
+    return TRUE_VALUES.has((process.env.AGENCY_MODE || '').trim().toLowerCase());
+}
+
 function addSecurityHeaders(response) {
     // Prevent MIME type sniffing (CWE-693)
     response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -29,6 +35,10 @@ export function middleware(request) {
                     url.pathname.startsWith('/api/v1');
 
     if (isMuApi) {
+        if (isAgencyModeEnabled()) {
+            return addSecurityHeaders(NextResponse.next());
+        }
+
         // Exclude paths that have their own dedicated route handlers with custom logic
         const isHandledByRoute = url.pathname.startsWith('/api/v1/creative-agent') ||
                                 url.pathname.startsWith('/api/v1/get_upload_url') ||

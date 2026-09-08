@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { runMotionGraphics, runMotionGraphicsEdit } from "../muapi.js";
+import { runMotionGraphics, runMotionGraphicsEdit } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createVibeMotionStudioRequest, executeVibeMotionStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -23,20 +26,7 @@ import {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function downloadFile(url, filename) {
-  try {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
-  }
+  return downloadAsset(url, { filename, kind: "video", prefix: "motion" });
 }
 
 const formatTime = (s) =>
@@ -139,20 +129,24 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
     try {
       let result;
       if (editMode) {
-        result = await runMotionGraphicsEdit(apiKey, {
+        const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
+        const editParams = {
           request_id: editSourceId,
-          edit_prompt: prompt.trim(),
+          edit_prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },
-        });
+        };
+        result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), editMode: true, params: editParams, references: editSourceId ? [editSourceId] : [] }), { legacyExecute: () => runMotionGraphicsEdit(apiKey, editParams) });
       } else {
-        result = await runMotionGraphics(apiKey, {
-          prompt: prompt.trim(),
+        const recipe = buildRecipe("vibeMotion", { prompt: prompt.trim() });
+        const generateParams = {
+          prompt: recipe.prompt,
           aspect_ratio: aspectRatio,
           duration_seconds: duration,
           onRequestId: (id) => { pendingRequestId.current = id; },
-        });
+        };
+        result = await executeVibeMotionStudioRequest(createVibeMotionStudioRequest({ apiKey, prompt: prompt.trim(), params: generateParams }), { legacyExecute: () => runMotionGraphics(apiKey, generateParams) });
       }
 
       const videoUrl = result?.output?.video || result?.url || result?.outputs?.[0];
@@ -251,11 +245,11 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
           <div className="w-full pt-6 flex justify-center animate-fade-in-up">
             <div className="flex flex-col items-center gap-4 py-16">
               <div className="relative w-20 h-20">
-                <div className="absolute inset-0 rounded-full border-2 border-violet-500/20 animate-ping" />
+                <div className="absolute inset-0 rounded-full border-2 border-[#E82070]/20 animate-ping" />
                 <div className="absolute inset-2 rounded-full border-2 border-[#22d3ee]/30 animate-spin" />
-                <div className="absolute inset-4 rounded-full border-2 border-violet-400/50 animate-[spin_1.5s_linear_infinite_reverse]" />
+                <div className="absolute inset-4 rounded-full border-2 border-[#D4A858]/50 animate-[spin_1.5s_linear_infinite_reverse]" />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-violet-400 animate-pulse">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#D4A858] animate-pulse">
                     <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
                   </svg>
                 </div>
@@ -301,7 +295,7 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
                 <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm border ${
                   entry.mode === "edit"
                     ? "bg-[#22d3ee]/20 text-[#22d3ee] border-[#22d3ee]/30"
-                    : "bg-violet-600/30 text-violet-300 border-violet-500/30"
+                    : "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/30"
                 }`}>
                   {entry.mode === "edit" ? "✏ Edit" : "✦ Generated"}
                 </div>
@@ -426,7 +420,8 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
           /* ── Empty State ── */
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -458,13 +453,10 @@ export default function VibeMotionStudio({ apiKey, onGenerationComplete, onGener
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                VIBE MOTION STUDIO
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What motion asset are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Generate animated motion graphics from a text prompt — kinetic typography, data charts, logo reveals, and more.
+              Generate animated motion graphics from a text prompt, with templates and controls below.
             </p>
           </div>
         ) : null}

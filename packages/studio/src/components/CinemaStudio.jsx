@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, uploadFile } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateImage, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import {
   PromptAspectRatioIcon,
   PromptAction,
@@ -18,7 +21,7 @@ import {
   promptMediaButtonClassName,
 } from "./prompt/PromptComposer.jsx";
 
-// ─── Constants (inlined from promptUtils) ───────────────────────────────────
+// ─── Recipe-backed cinematic controls ───────────────────────────────────────
 
 const CAMERA_MAP = {
   "Modular 8K Digital": "modular 8K digital cinema camera",
@@ -89,35 +92,15 @@ const LENSES = Object.keys(LENS_MAP);
 const FOCAL_LENGTHS = Object.keys(FOCAL_PERSPECTIVE).map((k) => parseInt(k));
 const APERTURES = Object.keys(APERTURE_EFFECT);
 
-function buildNanoBananaPrompt(
-  basePrompt,
-  camera,
-  lens,
-  focalLength,
-  aperture,
-) {
-  const cameraDesc = CAMERA_MAP[camera] || camera;
-  const lensDesc = LENS_MAP[lens] || lens;
-  const perspective = FOCAL_PERSPECTIVE[focalLength] || "";
-  const depthEffect = APERTURE_EFFECT[aperture] || "";
-  const qualityTags = [
-    "professional photography",
-    "ultra-detailed",
-    "8K resolution",
-  ];
-  const parts = [
-    basePrompt,
-    `shot on a ${cameraDesc}`,
-    `using a ${lensDesc} at ${focalLength}mm ${perspective ? `(${perspective})` : ""}`,
-    `aperture ${aperture}`,
-    depthEffect,
-    "cinematic lighting",
-    "natural color science",
-    "high dynamic range",
-    qualityTags.join(", "),
-  ];
-  return parts.filter((p) => p && p.trim() !== "").join(", ");
-}
+const buildNanoBananaPrompt = (basePrompt, camera, lens, focalLength, aperture) =>
+  buildRecipe("cinemaImage", {
+    prompt: basePrompt,
+    camera,
+    lens,
+    focalLength,
+    aperture,
+    reference: false,
+  }).prompt;
 
 // ─── Dropdown ────────────────────────────────────────────────────────────────
 
@@ -276,11 +259,11 @@ function ScrollColumn({ title, items, columnKey, value, onChange }) {
     <section className="flex w-[170px] shrink-0 snap-center flex-col md:w-[190px]">
       <div className="mb-3 flex items-center justify-between px-1">
         <h3 className="text-xs font-semibold text-white/75">{title}</h3>
-        <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-b from-[#22d3ee] to-[#a855f7] shadow-[0_0_6px_rgba(34,211,238,0.5)]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-b from-[#E82070] to-[#D4A858] shadow-[0_0_6px_rgba(232,32,112,0.35)]" />
       </div>
 
       <div className="relative h-[320px] overflow-hidden rounded-2xl border border-white/[0.06] bg-[#030303] shadow-inner">
-        <div className="pointer-events-none absolute inset-x-2 top-1/2 z-0 h-[82px] -translate-y-1/2 rounded-xl border border-[#22d3ee]/20 bg-gradient-to-r from-[#22d3ee]/15 to-purple-500/10 shadow-[0_0_15px_rgba(34,211,238,0.1)]" />
+        <div className="pointer-events-none absolute inset-x-2 top-1/2 z-0 h-[82px] -translate-y-1/2 rounded-xl border border-[#E82070]/20 bg-gradient-to-r from-[#E82070]/15 to-[#D4A858]/10 shadow-[0_0_15px_rgba(232,32,112,0.1)]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-20 bg-gradient-to-b from-[#030303] via-[#030303]/85 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-20 bg-gradient-to-t from-[#030303] via-[#030303]/85 to-transparent" />
 
@@ -611,14 +594,25 @@ export default function CinemaStudio({
     );
 
     try {
-      const res = await generateImage(apiKey, {
+      const legacyParams = {
         model: uploadedImage ? "nano-banana-pro-edit" : "nano-banana-pro",
         prompt: finalPrompt,
         aspect_ratio: settings.aspect_ratio,
         resolution: resolution.toLowerCase(),
         negative_prompt: "blurry, low quality, distortion, bad composition",
         images_list: uploadedImage ? [uploadedImage] : [],
-      });
+      };
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "cinema",
+        recipeId: "cinemaImage",
+        operation: "image_generation",
+        capability: uploadedImage ? "image_editing" : "image_generation",
+        prompt: finalPrompt,
+        inputs: legacyParams,
+        references: legacyParams.images_list,
+        output: { modality: "image", aspectRatio: settings.aspect_ratio },
+        apiKey,
+      }), { legacyExecute: () => generateImage(apiKey, legacyParams) });
 
       if (res && res.url) {
         const entry = {
@@ -678,20 +672,11 @@ export default function CinemaStudio({
   // ── Download ──
   const handleDownload = useCallback(async () => {
     if (!canvasUrl) return;
-    try {
-      const response = await fetch(canvasUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `cinema-shot-${Date.now()}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(canvasUrl, "_blank");
-    }
+    await downloadAsset(canvasUrl, {
+      filename: `cinema-shot-${Date.now()}.jpg`,
+      kind: "image",
+      prefix: "cinema-shot",
+    });
   }, [canvasUrl]);
 
   const handleCopyPrompt = useCallback(
@@ -781,20 +766,11 @@ export default function CinemaStudio({
                     title="Download"
                     onClick={async (e) => {
                       e.stopPropagation();
-                      try {
-                        const response = await fetch(entry.url);
-                        const blob = await response.blob();
-                        const blobUrl = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = blobUrl;
-                        a.download = `cinema-shot-${entry.id || idx}.jpg`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
-                      } catch {
-                        window.open(entry.url, "_blank");
-                      }
+                      await downloadAsset(entry.url, {
+                        filename: `cinema-shot-${entry.id || idx}.jpg`,
+                        kind: "image",
+                        prefix: "cinema-shot",
+                      });
                     }}
                     className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-[#22d3ee] hover:text-black transition-all border border-white/10"
                   >
@@ -868,7 +844,8 @@ export default function CinemaStudio({
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -900,10 +877,7 @@ export default function CinemaStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                CINEMA STUDIO
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What cinematic scene are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
               What would you shoot with infinite budget? Control cameras, lighting, lenses, and prompt high-end cinematic scenes.

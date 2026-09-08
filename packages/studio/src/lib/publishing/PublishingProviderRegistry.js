@@ -1,0 +1,28 @@
+import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
+import { PUBLISHING_PROVIDER_IDS } from "./publishingTypes.js";
+
+class PublishingProviderRegistry {
+  constructor() {
+    this.providers = new Map();
+    this.activeProviderId = PUBLISHING_PROVIDER_IDS.MUAPI;
+    this.register(muApiPublishingProvider);
+  }
+
+  register(provider) {
+    if (!provider?.id) throw new Error("Publishing provider must have an id");
+    this.providers.set(provider.id, provider);
+    return provider;
+  }
+
+  get(providerId = this.activeProviderId) {
+    const provider = this.providers.get(providerId);
+    if (!provider) throw new Error(`Unknown publishing provider: ${providerId}`);
+    return provider;
+  }
+
+  getActiveProvider() {
+    return this.get(this.activeProviderId);
+  }
+}
+
+export const publishingProviderRegistry = new PublishingProviderRegistry();

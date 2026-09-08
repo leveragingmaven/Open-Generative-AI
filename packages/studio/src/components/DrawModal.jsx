@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { uploadFile, generateI2I } from "../muapi.js";
+import { uploadFile, generateI2I } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 
 export default function DrawModal({
   isOpen,
@@ -938,8 +939,10 @@ export default function DrawModal({
       const results = await Promise.all(
         Array.from({ length: batchSize }).map(async () => {
           const genParams = {
-            model: selectedModel,
-            prompt: promptText.trim() || "Edit the image based on the drawing overlay",
+            ...buildRecipe("imageEdit", {
+              prompt: promptText.trim() || "Edit the image based on the drawing overlay",
+              parameters: { model: selectedModel },
+            }),
             images_list: [uploadedUrl],
             aspect_ratio: aspectRatio === "Auto" ? "1:1" : aspectRatio,
           };

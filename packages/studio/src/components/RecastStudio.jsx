@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { processRecast, uploadFile } from "../muapi.js";
+import { processRecast, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createRecastStudioRequest, executeRecastStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
 import {
   recastModels,
   getRecastModelById,
@@ -681,20 +684,7 @@ export default function RecastStudio({
   }, []);
 
   const downloadFile = async (url, filename) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    return downloadAsset(url, { filename, kind: "video", prefix: "bodyswap" });
   };
 
   // ── Generation ──────────────────────────────────────────────────────────────
@@ -718,12 +708,14 @@ export default function RecastStudio({
         image_url: imageUrl,
       };
       if (showAspect) params.aspect_ratio = selectedAspectRatio;
-      if (prompt && selectedModel?.hasPrompt) params.prompt = prompt;
+      if (prompt && selectedModel?.hasPrompt) {
+        params.prompt = buildRecipe("recast", { prompt }).prompt;
+      }
       if (selectedModelId === "kling-v3.0-pro-recast") {
         params.character_orientation = characterOrientation;
       }
 
-      const res = await processRecast(apiKey, params);
+      const res = await executeRecastStudioRequest(createRecastStudioRequest({ apiKey, prompt, params }), { legacyExecute: () => processRecast(apiKey, params) });
 
       if (!res?.url) throw new Error("No video URL returned by API");
 
@@ -882,7 +874,8 @@ export default function RecastStudio({
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -914,10 +907,7 @@ export default function RecastStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                BODY SWAP STUDIO
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What character swap are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
               Swap the character in any video dynamically by choosing a video clip and a target character image.

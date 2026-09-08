@@ -18,6 +18,7 @@ const WorkflowUI = ({ workflowId, initialNodeSchemas, initialWorkflowData }) => 
         initialNodeSchemas={initialNodeSchemas} 
         initialWorkflowData={initialWorkflowData}
         costType="dollars" 
+        backHref="/studio/workflows"
       />
     </div>
   );

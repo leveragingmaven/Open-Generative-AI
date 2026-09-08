@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, generateI2I, uploadFile } from "../muapi.js";
+import { generateImage, generateI2I, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { useMavenSyncIntegration } from "../lib/mavensync/useMavenSyncIntegration.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createImageStudioRequest, executeImageStudioRequest } from "../lib/intelligence/ImageStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
 import {
   t2iModels,
@@ -39,20 +46,7 @@ import {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function downloadImage(url, filename) {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
-  }
+  return downloadAsset(url, { filename, kind: "image", prefix: "muapi" });
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
@@ -604,7 +598,7 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
       case "blackforest":
         return { text: "BF", bg: "bg-amber-500/10 text-amber-400 border-amber-500/25" };
       case "bytedance":
-        return { text: "BD", bg: "bg-purple-500/10 text-purple-400 border-purple-500/25" };
+        return { text: "BD", bg: "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/25" };
       case "midjourney":
         return { text: "MJ", bg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/25" };
       case "kling":
@@ -620,9 +614,9 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
       case "alibaba":
         return { text: "AL", bg: "bg-sky-500/10 text-sky-400 border-sky-500/25" };
       case "leonardoai":
-        return { text: "LE", bg: "bg-violet-500/10 text-violet-400 border-violet-500/25" };
+        return { text: "LE", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       case "stability":
-        return { text: "SD", bg: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/25" };
+        return { text: "SD", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       default:
         const name = provider ? provider.toUpperCase() : "AI";
         return { text: name.substring(0, 2), bg: "bg-primary/10 text-primary border-primary/25" };
@@ -776,7 +770,7 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
                         m.family === "kontext"
                           ? "bg-blue-500/10 text-blue-400 border-blue-500/10"
                           : m.family === "effects"
-                            ? "bg-purple-500/10 text-purple-400 border-purple-500/10"
+                            ? "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/10"
                             : "bg-primary/10 text-primary border-primary/10"
                       } border rounded-full flex items-center justify-center font-bold text-xs shadow-inner uppercase`}
                     >
@@ -867,7 +861,10 @@ export default function ImageStudio({
   const [maxImages, setMaxImages] = useState(1);
 
   // ── Prompt / upload state ───────────────────────────────────────────────
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [uploadedImageUrls, setUploadedImageUrls] = useState([]);
   const [swapImageUrl, setSwapImageUrl] = useState(null);
   const [uploadHistory, setUploadHistory] = useState([]); // persisted reference images history
@@ -887,6 +884,8 @@ export default function ImageStudio({
 
   // Use prop history if provided, otherwise local
   const history = historyItems ?? localHistory;
+  const mavenSync = useMavenSyncIntegration();
+  const { activeCampaign } = useActiveCampaign();
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
@@ -1213,6 +1212,15 @@ export default function ImageStudio({
     setGenerateError(null);
 
     try {
+      const trimmedPrompt = prompt.trim();
+      const creative = enrichCreativeRequest({
+        studio: "image",
+        userRequest: trimmedPrompt,
+        activeCampaign,
+        skills: selectCreativeSkillsForStudio("image"),
+      });
+      const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
+
       const results = await Promise.all(
         Array.from({ length: batchSize }).map(async () => {
           if (imageMode) {
@@ -1223,42 +1231,81 @@ export default function ImageStudio({
               aspect_ratio: selectedAr,
             };
             if (swapImageUrl) genParams.swap_url = swapImageUrl;
-            if (prompt.trim()) genParams.prompt = prompt.trim();
+            if (trimmedPrompt) genParams.prompt = enrichedPrompt;
             if (currentQualityField && selectedQuality) {
               genParams[currentQualityField] = selectedQuality;
             }
             if (showEffectBtn && selectedEffect) genParams.name = selectedEffect;
-            return await generateI2I(apiKey, genParams);
-          } else {
-            const genParams = {
+            return await executeImageStudioRequest(createImageStudioRequest({
+              prompt: genParams.prompt,
               model: selectedModelId,
-              prompt: prompt.trim(),
+              aspectRatio: selectedAr,
+              references: uploadedImageUrls,
+              swapUrl: swapImageUrl,
+              imageMode: true,
+              inputs: genParams,
+              apiKey,
+            }), { legacyExecute: () => generateI2I(apiKey, genParams) });
+          } else {
+            const recipe = buildRecipe("image", {
+              prompt: enrichedPrompt,
+              parameters: {
+                model: selectedModelId,
+              },
+            });
+            const genParams = {
+              ...recipe,
               aspect_ratio: selectedAr,
             };
             if (currentQualityField && selectedQuality) {
               genParams[currentQualityField] = selectedQuality;
             }
-            return await generateImage(apiKey, genParams);
+            return await executeImageStudioRequest(createImageStudioRequest({
+              prompt: enrichedPrompt,
+              model: selectedModelId,
+              aspectRatio: selectedAr,
+              qualityField: currentQualityField,
+              quality: selectedQuality,
+              imageMode: false,
+              inputs: genParams,
+              apiKey,
+            }), { legacyExecute: () => generateImage(apiKey, genParams) });
           }
         })
       );
 
       results.forEach((res) => {
         if (res && res.url) {
-          const entry = {
+          const entry = withCampaignMetadata({
             id: res.id || Math.random().toString(36).substring(7),
             url: res.url,
             prompt: prompt.trim(),
             model: selectedModelId,
             aspect_ratio: selectedAr,
+            brief: creative?.brief || null,
             timestamp: new Date().toISOString(),
-          };
+          }, activeCampaign, "image");
           addToHistory(entry);
           onGenerationComplete?.({
             url: res.url,
             model: selectedModelId,
             prompt: prompt.trim(),
             type: "image",
+          });
+          void mavenSync.registerAsset({
+            id: entry.id,
+            url: entry.url,
+            type: "image",
+            sourceProvider: res.provider || "muapi",
+            sourceJobId: res.request_id || res.requestId || res.jobId || null,
+            filename: `muapi-${entry.id}.jpg`,
+            prompt: entry.prompt,
+            metadata: {
+              model: entry.model,
+              aspect_ratio: entry.aspect_ratio,
+              studio: "image",
+            },
+            createdAt: entry.timestamp,
           });
         }
       });
@@ -1284,7 +1331,7 @@ export default function ImageStudio({
     <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative p-4 md:p-6 overflow-hidden">
       
       {/* ── CENTRAL GALLERY AREA ── */}
-      <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
+      <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-72 md:pb-80 lg:pb-72 px-2">
         {history.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 w-full pt-4 animate-fade-in-up">
             {history.map((entry, idx) => (
@@ -1386,7 +1433,8 @@ export default function ImageStudio({
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -1418,13 +1466,10 @@ export default function ImageStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                {selectedModelName}
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What would you like to create?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Describe a scene, character, mood, or style — and watch it come to life
+              Describe an image, choose your model and options below, and let MavenSync shape the result.
             </p>
           </div>
         )}
@@ -1711,6 +1756,21 @@ export default function ImageStudio({
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-sm animate-fade-in"
           onClick={() => setFullscreenUrl(null)}
         >
+          <button
+            type="button"
+            title="Download"
+            className="absolute top-6 right-20 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10"
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadImage(fullscreenUrl, `muapi-preview-${Date.now()}.jpg`);
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
           <button
             type="button"
             className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10"

@@ -1,9 +1,10 @@
 import StandaloneShell from '@/components/StandaloneShell';
+import { getAgencyShellConfig } from '@/src/lib/agencyMode';
 
 export const metadata = {
-  title: 'Studio — Open Generative AI',
+  title: 'Studio — MavenSync Creative OS',
 };
 
 export default function StudioPage() {
-  return <StandaloneShell />;
+  return <StandaloneShell {...getAgencyShellConfig()} />;
 }

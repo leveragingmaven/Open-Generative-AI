@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
+import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import DrawModal from "./DrawModal.jsx";
+import VideoRepurposePanel from "./repurpose/VideoRepurposePanel.jsx";
 import {
   t2vModels,
   i2vModels,
@@ -46,20 +53,7 @@ function getQualitiesForModel(modelList, modelId) {
 }
 
 async function downloadFile(url, filename) {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
-  }
+  return downloadAsset(url, { filename, kind: "video", prefix: "video" });
 }
 
 // ── SVG icons (kept inline to avoid extra deps) ───────────────────────────────
@@ -170,7 +164,7 @@ function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
       case "blackforest":
         return { text: "BF", bg: "bg-amber-500/10 text-amber-400 border-amber-500/25" };
       case "bytedance":
-        return { text: "BD", bg: "bg-purple-500/10 text-purple-400 border-purple-500/25" };
+        return { text: "BD", bg: "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/25" };
       case "midjourney":
         return { text: "MJ", bg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/25" };
       case "kling":
@@ -186,9 +180,9 @@ function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
       case "alibaba":
         return { text: "AL", bg: "bg-sky-500/10 text-sky-400 border-sky-500/25" };
       case "leonardoai":
-        return { text: "LE", bg: "bg-violet-500/10 text-violet-400 border-violet-500/25" };
+        return { text: "LE", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       case "stability":
-        return { text: "SD", bg: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/25" };
+        return { text: "SD", bg: "bg-[#E82070]/10 text-[#f5a6c8] border-[#E82070]/25" };
       default:
         const name = provider ? provider.toUpperCase() : "AI";
         return { text: name.substring(0, 2), bg: "bg-primary/10 text-primary border-primary/25" };
@@ -229,7 +223,7 @@ function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
   const getIconColor = (m, isV2V) => {
     if (isV2V) return "bg-orange-500/10 text-orange-400 border-orange-500/10";
     if (m.id.includes("kling")) return "bg-blue-500/10 text-blue-400 border-blue-500/10";
-    if (m.id.includes("veo")) return "bg-purple-500/10 text-purple-400 border-purple-500/10";
+    if (m.id.includes("veo")) return "bg-[#D4A858]/10 text-[#D4A858] border-[#D4A858]/10";
     if (m.id.includes("sora")) return "bg-rose-500/10 text-rose-400 border-rose-500/10";
     return "bg-primary/10 text-primary border-primary/10";
   };
@@ -406,12 +400,15 @@ export default function VideoStudio({
   historyItems,
   droppedFiles,
   onFilesHandled,
+  repurposeTarget = null,
+  onRepurposeTargetHandled,
 }) {
   const PERSIST_KEY = "hg_video_studio_persistent";
 
   // ── mode state ──
   const [imageMode, setImageMode] = useState(false); // i2v
   const [v2vMode, setV2vMode] = useState(false);
+  const [repurposeMode, setRepurposeMode] = useState(false);
 
   // ── model / params ──
   const defaultModel = t2vModels[0];
@@ -474,7 +471,10 @@ export default function VideoStudio({
   const [openDropdown, setOpenDropdown] = useState(null); // 'model'|'ar'|'duration'|'resolution'|'quality'|'mode'|null
 
   // ── prompt ──
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [promptDisabled, setPromptDisabled] = useState(false);
 
   // ── refs ──
@@ -489,6 +489,17 @@ export default function VideoStudio({
 
   // ── derived data ──
   const history = historyItems ?? localHistory;
+  const { activeCampaign } = useActiveCampaign();
+
+  // Command Bar repurpose intent → enter Repurpose mode once. The routing
+  // context (recipe/skill) is consumed by the panel; the shell target is cleared
+  // so a repeat navigation re-triggers this effect.
+  useEffect(() => {
+    if (repurposeTarget?.recipeId === "repurposeVideo" && !repurposeMode) {
+      setRepurposeMode(true);
+      onRepurposeTargetHandled?.();
+    }
+  }, [repurposeTarget?.recipeId, repurposeTarget?.requestId, repurposeMode, onRepurposeTargetHandled]);
 
   const getCurrentModels = useCallback(() => {
     if (v2vMode) return v2vModels;
@@ -1051,6 +1062,13 @@ export default function VideoStudio({
     const currentModel = getCurrentModel();
     const isExtendMode = currentModel?.requiresRequestId;
     const trimmedPrompt = prompt.trim();
+    const creative = enrichCreativeRequest({
+      studio: "video",
+      userRequest: trimmedPrompt,
+      activeCampaign,
+      skills: selectCreativeSkillsForStudio("video"),
+    });
+    const enrichedPrompt = (creative.text || "").trim() || trimmedPrompt;
 
     if (v2vMode) {
       if (!uploadedVideoUrl) {
@@ -1111,21 +1129,22 @@ export default function VideoStudio({
           v2vParams.image_url = uploadedImageUrl;
         }
         if (currentModel?.hasPrompt && trimmedPrompt) {
-          v2vParams.prompt = trimmedPrompt;
+          v2vParams.prompt = buildRecipe("videoTransform", { prompt: enrichedPrompt }).prompt;
         }
-        res = await processV2V(apiKey, v2vParams);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "videoTransform", operation: "video_transform", capability: "video_editing", prompt: enrichedPrompt, inputs: v2vParams, references: [uploadedVideoUrl, uploadedImageUrl].filter(Boolean), output: { modality: "video" }, apiKey }), { legacyExecute: () => processV2V(apiKey, v2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
         setLastGenerationId(null);
         setLastGenerationModel(null);
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
           model: selectedModel,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)
@@ -1137,13 +1156,14 @@ export default function VideoStudio({
           });
       } else if (imageMode) {
         const maxImgs = getMaxImagesForI2VModel(selectedModel);
-        const i2vParams = { model: selectedModel };
+        const i2vRecipe = buildRecipe("video", { prompt: enrichedPrompt });
+        const i2vParams = { ...i2vRecipe, model: selectedModel };
         if (maxImgs > 2) {
           i2vParams.images_list = uploadedImageUrls;
         } else {
           i2vParams.image_url = uploadedImageUrl;
         }
-        if (trimmedPrompt) i2vParams.prompt = trimmedPrompt;
+        if (trimmedPrompt) i2vParams.prompt = enrichedPrompt;
         i2vParams.aspect_ratio = selectedAr;
         const i2vModel = i2vModels.find((m) => m.id === selectedModel);
         if (uploadedEndImageUrl && i2vModel?.lastImageField) {
@@ -1157,7 +1177,7 @@ export default function VideoStudio({
         if (selectedMode) i2vParams.mode = selectedMode;
         if (showEffect && selectedEffect) i2vParams.name = selectedEffect;
 
-        res = await generateI2V(apiKey, i2vParams);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "image_to_video", capability: "video_generation", prompt: enrichedPrompt, inputs: i2vParams, references: uploadedImageUrls, output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateI2V(apiKey, i2vParams) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1168,15 +1188,16 @@ export default function VideoStudio({
           setLastGenerationId(null);
           setLastGenerationModel(null);
         }
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: trimmedPrompt,
           model: selectedModel,
           aspect_ratio: selectedAr,
           duration: selectedDuration,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)
@@ -1188,8 +1209,9 @@ export default function VideoStudio({
           });
       } else {
         // T2V (including extend mode)
-        const params = { model: selectedModel };
-        if (trimmedPrompt) params.prompt = trimmedPrompt;
+        const videoRecipe = buildRecipe("video", { prompt: enrichedPrompt });
+        const params = { ...videoRecipe, model: selectedModel };
+        if (trimmedPrompt) params.prompt = enrichedPrompt;
 
         if (isExtendMode) {
           params.request_id = lastGenerationId;
@@ -1212,7 +1234,7 @@ export default function VideoStudio({
         if (selectedQuality) params.quality = selectedQuality;
         if (selectedMode) params.mode = selectedMode;
 
-        res = await generateVideo(apiKey, params);
+        res = await executeMediaStudioRequest(createMediaStudioRequest({ studioId: "video", recipeId: "video", operation: "video_generation", capability: "video_generation", prompt: enrichedPrompt, inputs: params, references: [uploadedVideoUrl, ...uploadedImageUrls].filter(Boolean), output: { modality: "video", aspectRatio: selectedAr, durationSeconds: selectedDuration }, apiKey }), { legacyExecute: () => generateVideo(apiKey, params) });
         if (!res?.url) throw new Error("No video URL returned by API");
 
         const genId = res.id || Date.now().toString();
@@ -1226,15 +1248,16 @@ export default function VideoStudio({
           setLastGenerationId(null);
           setLastGenerationModel(null);
         }
-        const entry = {
+        const entry = withCampaignMetadata({
           id: genId,
           url: res.url,
           prompt: trimmedPrompt,
           model: selectedModel,
           aspect_ratio: selectedAr,
           duration: selectedDuration,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString(),
-        };
+        }, activeCampaign, "video");
         addToLocalHistory(entry);
         showVideoInCanvas(res.url, selectedModel);
         if (onGenerationComplete)
@@ -1482,7 +1505,8 @@ export default function VideoStudio({
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -1514,13 +1538,10 @@ export default function VideoStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                {selectedModelName}
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What video are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Animate images into stunning AI videos with motion effects
+              Add your idea, references, motion controls, and output settings below.
             </p>
           </div>
         )}
@@ -2133,6 +2154,28 @@ export default function VideoStudio({
         batchSize={1}
         onAddHistoryItem={handleDrawReference}
       />
+
+      {/* ── REPURPOSE MODE ── */}
+      {!repurposeMode && (
+        <button
+          type="button"
+          onClick={() => {
+            setRepurposeMode(true);
+            onRepurposeTargetHandled?.();
+          }}
+          className="absolute top-4 right-4 z-30 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25 transition-colors"
+          title="Repurpose a video into short-form clips (TikTok / Shorts / Reels)"
+        >
+          Repurpose
+        </button>
+      )}
+      {repurposeMode && (
+        <VideoRepurposePanel
+          apiKey={apiKey}
+          repurposeTarget={repurposeTarget}
+          onExit={() => setRepurposeMode(false)}
+        />
+      )}
     </div>
   );
 }

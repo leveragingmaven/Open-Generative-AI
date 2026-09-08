@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { generateImage } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateImage } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createAIInfluencerStudioRequest, executeAIInfluencerStudioRequest } from "../lib/intelligence/SpecializedStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import CampaignChip from "./CampaignChip.jsx";
 
 const CDN = "https://cdn.muapi.ai/influencer";
 
@@ -344,7 +350,10 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
   });
 
   const [aspectRatio, setAspectRatio] = useState("3:4");
-  const [customPrompt, setCustomPrompt] = useState("");
+  const [customPrompt, setCustomPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [isGeneratingInternal, setIsGeneratingInternal] = useState(false);
   const [currentResult, setCurrentResult] = useState(null);   // latest generated image
   const [history, setHistory] = useState([]);                  // all generated images
@@ -352,9 +361,10 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
   const [errorMsg, setErrorMsg] = useState("");
 
   const isGenerating = externalIsGenerating || isGeneratingInternal;
+  const { activeCampaign } = useActiveCampaign();
 
-  // ── Build prompt from selections ──────────────────────────────────────────
-  const buildPrompt = useCallback(() => {
+  // ── Build recipe values from selections ────────────────────────────────────
+  const getPromptValues = useCallback(() => {
     const parts = [];
     Object.values(TABS_CONFIG).forEach((tab) =>
       tab.subcategories.forEach((sub) => {
@@ -362,10 +372,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
         if (opt?.promptVal) parts.push(opt.promptVal);
       })
     );
-    let prompt = "Ultra-realistic professional portrait photograph of an AI influencer character, 8k resolution, cinematic lighting, sharp detail";
-    if (parts.length) prompt += ", " + parts.join(", ");
-    if (customPrompt.trim()) prompt += ", " + customPrompt.trim();
-    return prompt;
+    return { optionPrompts: parts, customPrompt: customPrompt.trim() };
   }, [selectedOptions, customPrompt]);
 
   // ── Option selection ───────────────────────────────────────────────────────
@@ -390,21 +397,22 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
     setIsGeneratingInternal(true);
     setErrorMsg("");
 
-    const prompt = buildPrompt();
+    const recipe = buildRecipe("aiInfluencer", getPromptValues());
+    const prompt = recipe.prompt;
     try {
       let res;
       if (onGenerate) {
         res = await onGenerate({ prompt, aspectRatio, selections: selectedOptions });
       } else {
-        res = await generateImage(apiKey, {
-          model: INFLUENCER_MODEL,
-          prompt,
+        const influencerParams = {
+          ...recipe,
           aspect_ratio: aspectRatio,
-        });
+        };
+        res = await executeAIInfluencerStudioRequest(createAIInfluencerStudioRequest({ apiKey, prompt, aspectRatio, params: influencerParams, references: getPromptValues().optionPrompts }), { legacyExecute: () => generateImage(apiKey, influencerParams) });
       }
       if (res?.url) {
         setCurrentResult(res.url);
-        setHistory((prev) => [{ url: res.url, ts: Date.now() }, ...prev]);
+        setHistory((prev) => [withCampaignMetadata({ url: res.url, ts: Date.now() }, activeCampaign, "ai-influencer"), ...prev]);
         setSelectedHistoryIdx(0);
       }
     } catch (err) {
@@ -416,17 +424,11 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
 
   // ── Download helper ───────────────────────────────────────────────────────
   const downloadImg = async (url) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `ai-influencer-${Date.now()}.webp`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch {
-      window.open(url, "_blank");
-    }
+    await downloadAsset(url, {
+      filename: `ai-influencer-${Date.now()}.webp`,
+      kind: "image",
+      prefix: "ai-influencer",
+    });
   };
 
   // Preview image = selected history or current result
@@ -555,7 +557,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
                 onClick={() => setAspectRatio(r)}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
                   aspectRatio === r
-                    ? "bg-violet-600 text-white shadow-md shadow-violet-600/40"
+                    ? "bg-[#E82070] text-white shadow-md shadow-[#E82070]/40"
                     : "text-gray-500 hover:text-white"
                 }`}
               >
@@ -580,8 +582,8 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
               disabled={isGenerating}
               className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[13px] font-bold transition-all shadow-lg ${
                 isGenerating
-                  ? "bg-violet-600/40 text-white/60 cursor-not-allowed"
-                  : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-violet-600/30 hover:shadow-violet-500/40"
+                  ? "bg-[#E82070]/35 text-white/60 cursor-not-allowed"
+                  : "bg-gradient-to-r from-[#E82070] to-[#C0185C] hover:from-[#f03a8b] hover:to-[#E82070] text-white shadow-[#E82070]/30 hover:shadow-[#E82070]/40"
               }`}
             >
               {isGenerating ? (
@@ -607,7 +609,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
           >
             {isGenerating ? (
               <div className="flex flex-col items-center gap-4 text-center px-8 py-12">
-                <div className="w-12 h-12 border-[3px] border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+                <div className="w-12 h-12 border-[3px] border-[#E82070]/20 border-t-[#E82070] rounded-full animate-spin" />
                 <p className="text-sm text-gray-400 font-medium">Generating your AI influencer…</p>
               </div>
             ) : previewUrl ? (
@@ -674,12 +676,15 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
 
         {/* Custom prompt bar at bottom */}
         <div className="px-6 pb-4 shrink-0">
+          <div className="mb-2 flex items-center justify-between">
+            <CampaignChip />
+          </div>
           <input
             type="text"
             value={customPrompt}
             onChange={(e) => setCustomPrompt(e.target.value)}
             placeholder="Add extra details… e.g. neon cyberpunk lighting, dramatic shadows"
-            className="w-full h-9 bg-[#161616] border border-white/[0.07] rounded-xl px-3 text-[12px] text-gray-200 placeholder-gray-600 outline-none focus:border-violet-500/40 transition-colors"
+            className="w-full h-9 bg-[#161616] border border-white/[0.07] rounded-xl px-3 text-[12px] text-gray-200 placeholder-gray-600 outline-none focus:border-[#E82070]/40 transition-colors"
           />
         </div>
       </div>
@@ -714,7 +719,7 @@ export default function AiInfluencerStudio({ apiKey, onGenerate, isGenerating: e
                 onKeyDown={(e) => e.key === "Enter" && setSelectedHistoryIdx(idx)}
                 className={`group relative w-full aspect-[3/4] rounded-xl overflow-hidden border transition-all cursor-pointer ${
                   selectedHistoryIdx === idx
-                    ? "border-violet-500 ring-1 ring-violet-500/40"
+                    ? "border-[#E82070] ring-1 ring-[#E82070]/40"
                     : "border-white/[0.08] hover:border-white/20"
                 }`}
               >

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateAudio, uploadFile } from "../muapi.js";
+import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { generateAudio, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { audioModels, getAudioModelById } from "../models.js";
 
 // ---------------------------------------------------------------------------
@@ -344,20 +349,11 @@ function PremiumAudioPlayer({ url, title }) {
   };
 
   const downloadAudio = async () => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = title ? `${title.replace(/\s+/g, '_')}.mp3` : "generated_audio.mp3";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    await downloadAsset(url, {
+      filename: title ? `${title.replace(/\s+/g, '_')}.mp3` : "generated_audio.mp3",
+      kind: "audio",
+      prefix: "generated_audio",
+    });
   };
 
   return (
@@ -377,7 +373,7 @@ function PremiumAudioPlayer({ url, title }) {
           {visualizerHeights.map((h, i) => (
             <div
               key={i}
-              className="w-1.5 rounded-full bg-gradient-to-t from-primary to-[#a855f7] transition-all duration-100"
+              className="w-1.5 rounded-full bg-gradient-to-t from-[#E82070] to-[#D4A858] transition-all duration-100"
               style={{ height: `${h}px` }}
             />
           ))}
@@ -512,6 +508,7 @@ export default function AudioStudio({
   // ── History state ────────────────────────────────────────────────────
   const [internalHistory, setInternalHistory] = useState([]);
   const history = historyItems ?? internalHistory;
+  const { activeCampaign } = useActiveCampaign();
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   const selectedModel = getAudioModelById(selectedModelId);
@@ -636,27 +633,39 @@ export default function AudioStudio({
     setGenerateError(null);
 
     try {
+      const recipe = buildRecipe("audio", { prompt: params.prompt || "" });
       const audioParams = {
         ...params,
+        ...(params.prompt !== undefined ? { prompt: recipe.prompt } : {}),
         _modelId: selectedModelId,
       };
 
       // Call generateAudio
-      const res = await generateAudio(apiKey, audioParams);
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "audio",
+        recipeId: "audio",
+        operation: "audio_generation",
+        capability: "voice_generation",
+        prompt: params.prompt || "",
+        inputs: audioParams,
+        references: Object.values(params).filter((value) => typeof value === "string" && /^https?:/.test(value)),
+        output: { modality: "audio" },
+        apiKey,
+      }), { legacyExecute: () => generateAudio(apiKey, audioParams) });
 
       if (!res?.url) {
         throw new Error("No audio URL returned by the API.");
       }
 
       const title = params.title || params.prompt || `Generated ${selectedModel.name}`;
-      const entry = {
+      const entry = withCampaignMetadata({
         id: res.id || Date.now().toString(),
         url: res.url,
         title,
         prompt: params.prompt || "",
         model: selectedModelId,
         timestamp: new Date().toISOString(),
-      };
+      }, activeCampaign, "audio");
 
       if (!historyItems) addToInternalHistory(entry);
 

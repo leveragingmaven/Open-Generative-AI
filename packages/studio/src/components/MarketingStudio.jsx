@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { uploadFile, generateMarketingStudioAd } from "../muapi.js";
+import { uploadFile, generateMarketingStudioAd } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMarketingStudioRequest, executeMarketingStudioRequest } from "../lib/intelligence/MarketingStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
+import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -16,10 +22,13 @@ import {
   PromptPopoverHeader,
   PromptDurationIcon,
   PromptQualityIcon,
+  PromptSegmentedControl,
+  PromptSegmentOption,
   PromptTextarea,
   promptControlClassName,
   promptMediaButtonClassName,
 } from "./prompt/PromptComposer.jsx";
+import MarketingMotionPanel from "./motion/MarketingMotionPanel.jsx";
 
 const SCROLLBAR_STYLE = `
   .custom-scrollbar-thin::-webkit-scrollbar {
@@ -163,8 +172,155 @@ function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = 
   );
 }
 
+// Placeholder shown when a preset thumbnail fails to load, so a broken image
+// icon is never displayed. Same aspect box as the media it replaces.
+function PresetThumbPlaceholder({ item, isVideo }) {
+  return (
+    <div className={`w-full ${isVideo ? "aspect-[3/4]" : "aspect-square"} flex flex-col items-center justify-center gap-1.5 bg-[#161616]`}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {isVideo ? (
+          <>
+            <rect x="2" y="4" width="15" height="16" rx="2" />
+            <path d="M17 9l5-3v12l-5-3" />
+          </>
+        ) : (
+          <>
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </>
+        )}
+      </svg>
+      <span className="text-[8px] font-black text-white/40 uppercase tracking-tight">{item.name}</span>
+    </div>
+  );
+}
+
+// A single preset card. Renders the real thumbnail (lazy) and swaps to the
+// placeholder on error; existing interactions and selection are preserved.
+// Preset media can stall when the shell is still saturating the network with
+// bulk CDN requests; a watchdog re-triggers the load (bounded retries) once the
+// burst settles, and only falls back to the placeholder after retries are spent.
+const PRESET_MEDIA_STALL_MS = 4000;
+const MAX_PRESET_MEDIA_ATTEMPTS = 3;
+
+function PresetCard({ item, isVideo, selectedId, onSelect, onPreview, hasPreview }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const mediaRef = useRef(null);
+  const selected = selectedId === item.id || selectedId === item.url;
+
+  // Watchdog: if the media hasn't started loading within the stall window, bump
+  // the attempt counter to force a fresh load. Skips out-of-view lazy images so
+  // they are not falsely marked as failed before being scrolled into view.
+  useEffect(() => {
+    if (failed) return;
+    const el = mediaRef.current;
+    if (!el) return;
+    if (attempt >= MAX_PRESET_MEDIA_ATTEMPTS) {
+      setFailed(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const rect = el.getBoundingClientRect();
+      const inViewport =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom > 0 &&
+        rect.top < window.innerHeight &&
+        rect.right > 0 &&
+        rect.left < window.innerWidth;
+      if (!inViewport) return;
+      const loaded =
+        el.tagName === "IMG"
+          ? el.complete && el.naturalWidth > 0
+          : el.readyState >= 1;
+      if (!loaded) setAttempt((a) => a + 1);
+    }, PRESET_MEDIA_STALL_MS);
+    return () => clearTimeout(timer);
+  }, [attempt, failed]);
+
+  // Force a fresh request on each retry (cache-busted so the browser refetches).
+  useEffect(() => {
+    if (failed || attempt === 0) return;
+    const el = mediaRef.current;
+    if (!el) return;
+    const cacheBusted = `${item.url}${item.url.includes("?") ? "&" : "?"}retry=${attempt}`;
+    el.src = cacheBusted;
+    if (el.tagName === "VIDEO") el.load();
+  }, [attempt, failed, item.url]);
+
+  return (
+    <div
+      onClick={() => onSelect(item)}
+      className={`relative rounded overflow-hidden border-2 transition-all group cursor-pointer ${
+        selected ? 'border-primary shadow-glow' : 'border-white/5 hover:border-white/20'
+      }`}
+    >
+      {hasPreview && !isVideo && (
+        <button
+          type="button"
+          title="Enlarge preview"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreview(item);
+          }}
+          className="absolute top-1.5 left-1.5 w-6 h-6 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-[#22d3ee] hover:text-black transition-all border border-white/10 z-20 text-white"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        </button>
+      )}
+
+      {failed ? (
+        <PresetThumbPlaceholder item={item} isVideo={isVideo} />
+      ) : isVideo ? (
+        <video
+          ref={mediaRef}
+          src={item.url}
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          onError={() => setFailed(true)}
+          className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500"
+        />
+      ) : (
+        <img
+          ref={mediaRef}
+          src={item.url}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="w-full aspect-square object-cover group-hover:scale-105 transition-all duration-500"
+          alt={item.name}
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="text-[9px] font-black text-white uppercase tracking-tight">{item.name}</span>
+      </div>
+      {selected && (
+        <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-primary rounded-full flex items-center justify-center shadow-lg">
+          <CheckSvg />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo = false, onPreview = null }) {
   const ref = useRef(null);
+  // Solid opaque Creative OS surface so the hero behind the preset dialog never
+  // bleeds through, while preserving the popover's rounded corners and shadow.
+  const popoverStyle = {
+    backgroundColor: "#1B1B1B",
+    backdropFilter: "none",
+    WebkitBackdropFilter: "none",
+  };
   
   useEffect(() => {
     if (!isOpen) return;
@@ -181,50 +337,20 @@ function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo
     <PromptPopover
       ref={ref}
       className="w-[420px] max-w-[calc(100vw-2rem)]"
+      style={popoverStyle}
     >
       <PromptPopoverHeader className="mb-3">{title}</PromptPopoverHeader>
       <div className="grid grid-cols-3 gap-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
         {items.map(item => (
-          <div 
+          <PresetCard
             key={item.id}
-            onClick={() => onSelect(item)}
-            className={`relative rounded overflow-hidden border-2 transition-all group cursor-pointer ${
-              selectedId === item.id || selectedId === item.url ? 'border-primary shadow-glow' : 'border-white/5 hover:border-white/20'
-            }`}
-          >
-            {onPreview && !isVideo && (
-              <button
-                type="button"
-                title="Enlarge preview"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPreview(item);
-                }}
-                className="absolute top-1.5 left-1.5 w-6 h-6 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-[#22d3ee] hover:text-black transition-all border border-white/10 z-20 text-white"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  <line x1="11" y1="8" x2="11" y2="14" />
-                  <line x1="8" y1="11" x2="14" y2="11" />
-                </svg>
-              </button>
-            )}
-
-            {isVideo ? (
-              <video src={item.url} autoPlay loop muted className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-all duration-500" />
-            ) : (
-              <img src={item.url} className="w-full aspect-square object-cover group-hover:scale-105 transition-all duration-500" alt={item.name} />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="text-[9px] font-black text-white uppercase tracking-tight">{item.name}</span>
-            </div>
-            {(selectedId === item.id || selectedId === item.url) && (
-              <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-primary rounded-full flex items-center justify-center shadow-lg">
-                <CheckSvg />
-              </div>
-            )}
-          </div>
+            item={item}
+            isVideo={isVideo}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onPreview={onPreview}
+            hasPreview={Boolean(onPreview)}
+          />
         ))}
       </div>
     </PromptPopover>
@@ -267,10 +393,15 @@ function SimpleDropdown({ isOpen, title, options, selected, onSelect, onClose })
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, onGenerationComplete, onGenerationError, historyItems }) {
+export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, onGenerationComplete, onGenerationError, historyItems, motionTarget = null, onMotionTargetHandled = null }) {
   const PERSIST_KEY = "hg_marketing_studio_persistent";
+
+  const [view, setView] = useState("ads"); // 'ads' | 'motion'
   
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") || "";
+  });
   const [productImage, setProductImage] = useState(null);
   const [avatarImage, setAvatarImage] = useState(null);
   const [additionalImages, setAdditionalImages] = useState([]);
@@ -285,6 +416,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
   const [localHistory, setLocalHistory] = useState([]);
   const history = historyItems ?? localHistory;
+  const { activeCampaign } = useActiveCampaign();
   const [isGenerating, setIsGenerating] = useState(false);
   const [dropdown, setDropdown] = useState(null); // 'format' | 'avatar' | 'ratio' | 'res' | 'duration'
   const [uploadProgress, setUploadProgress] = useState({ product: 0, avatar: 0, additional: 0 });
@@ -293,6 +425,16 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   const [slideDirection, setSlideDirection] = useState("next"); // 'next' | 'prev'
 
   const textareaRef = useRef(null);
+
+  // Command Bar motion intent → open the Motion Graphics view once. Routing
+  // context (recipe + skill) is informational; the panel always resolves the
+  // template/skill/recipe from the shared job builder + Workflow Template Library.
+  useEffect(() => {
+    if (motionTarget?.recipeId === "motionGraphics") {
+      setView("motion");
+      onMotionTargetHandled?.();
+    }
+  }, [motionTarget?.recipeId, onMotionTargetHandled]);
 
   // ── Persistence ───────────────────────────────────────────────────────────
 
@@ -323,20 +465,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const downloadFile = async (url, filename) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    return downloadAsset(url, { filename, kind: "video", prefix: "marketing-ad" });
   };
 
   const handleUpload = async (e, target) => {
@@ -369,23 +498,42 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
     setIsGenerating(true);
     try {
-      const result = await generateMarketingStudioAd(apiKey, {
-        prompt,
+      const creative = enrichCreativeRequest({
+        studio: "marketing",
+        userRequest: prompt.trim(),
+        activeCampaign,
+        skills: selectCreativeSkillsForStudio("marketing"),
+      });
+      const enrichedPrompt = (creative.text || "").trim() || prompt.trim();
+
+      const recipe = buildRecipe("marketing", { prompt: enrichedPrompt });
+      const legacyParams = {
+        ...recipe,
         aspect_ratio: params.ratio,
         duration: params.duration,
         resolution: params.res,
         images_list: [productImage, avatarImage, ...additionalImages].filter(Boolean),
         video_files: params.videoUrl ? [params.videoUrl] : []
-      });
+      };
+      const result = await executeMarketingStudioRequest(createMarketingStudioRequest({
+        prompt: enrichedPrompt,
+        ratio: params.ratio,
+        duration: params.duration,
+        resolution: params.res,
+        images: legacyParams.images_list,
+        videoFiles: legacyParams.video_files,
+        apiKey,
+      }), { legacyExecute: () => generateMarketingStudioAd(apiKey, legacyParams) });
 
       if (result?.url) {
-        const entry = {
+        const entry = withCampaignMetadata({
           id: Date.now(),
           url: result.url,
           prompt,
           format: params.format,
+          brief: creative?.brief || null,
           timestamp: new Date().toISOString()
-        };
+        }, activeCampaign, "marketing");
         if (!historyItems) {
           setLocalHistory(prev => [entry, ...prev]);
         }
@@ -404,7 +552,35 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative overflow-hidden">
       <style>{SCROLLBAR_STYLE}</style>
-      
+
+      {/* ── CAPABILITY SWITCH ── */}
+      <div className="relative z-10 pt-4">
+        <PromptSegmentedControl>
+          <PromptSegmentOption
+            type="button"
+            onClick={() => setView("ads")}
+            selected={view === "ads"}
+          >
+            AI Video Ads
+          </PromptSegmentOption>
+          <PromptSegmentOption
+            type="button"
+            onClick={() => setView("motion")}
+            selected={view === "motion"}
+          >
+            Motion Graphics
+          </PromptSegmentOption>
+        </PromptSegmentedControl>
+      </div>
+
+      {view === "motion" ? (
+        <MarketingMotionPanel
+          apiKey={apiKey}
+          motionTarget={motionTarget}
+          onExit={() => setView("ads")}
+        />
+      ) : (
+      <>
       {/* ── MAIN CONTENT AREA ── */}
       <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
         {history.length > 0 ? (
@@ -498,7 +674,8 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -530,13 +707,10 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                MARKETING STUDIO
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What marketing asset are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Describe your scene, upload your product, and watch high-converting AI video ads come to life.
+              Describe the ad, product, audience, and format you want MavenSync to produce.
             </p>
           </div>
         )}
@@ -935,6 +1109,9 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           </div>
         </div>
       )}
+      </>
+      )}
     </div>
   );
 }
+

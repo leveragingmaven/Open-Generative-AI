@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { processLipSync, uploadFile } from "../muapi.js";
+import { processLipSync, uploadFile } from "../lib/providers/ProviderRegistry.js";
+import { downloadAsset } from "../lib/assets/assetManager.js";
+import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
+import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import {
   lipsyncModels,
   imageLipSyncModels,
@@ -365,6 +370,7 @@ export default function LipSyncStudio({
   // If historyItems prop is provided, use it; otherwise use internal state.
   const [internalHistory, setInternalHistory] = useState([]);
   const history = historyItems ?? internalHistory;
+  const { activeCampaign } = useActiveCampaign();
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   // ── Dropdown state ──────────────────────────────────────────────────────
@@ -609,20 +615,7 @@ export default function LipSyncStudio({
   }, []);
 
   const downloadFile = async (url, filename) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(url, "_blank");
-    }
+    return downloadAsset(url, { filename, kind: "video", prefix: "lipsync" });
   };
 
   // ── Generation ──────────────────────────────────────────────────────────
@@ -650,22 +643,34 @@ export default function LipSyncStudio({
       };
       if (inputMode === "image") lipsyncParams.image_url = imageUrl;
       else lipsyncParams.video_url = videoUrl;
-      if (prompt && selectedModel?.hasPrompt) lipsyncParams.prompt = prompt;
+      if (prompt && selectedModel?.hasPrompt) {
+        lipsyncParams.prompt = buildRecipe("lipSync", { prompt }).prompt;
+      }
       if (showResolution) lipsyncParams.resolution = selectedResolution;
       if (selectedModel?.hasSeed) lipsyncParams.seed = -1;
 
-      const res = await processLipSync(apiKey, lipsyncParams);
+      const res = await executeMediaStudioRequest(createMediaStudioRequest({
+        studioId: "lipsync",
+        recipeId: "lipSync",
+        operation: "lip_sync",
+        capability: "lip_sync",
+        prompt,
+        inputs: lipsyncParams,
+        references: [imageUrl, videoUrl, audioUrl].filter(Boolean),
+        output: { modality: "video" },
+        apiKey,
+      }), { legacyExecute: () => processLipSync(apiKey, lipsyncParams) });
 
       if (!res?.url) throw new Error("No video URL returned by API");
 
       const genId = res.id || Date.now().toString();
-      const entry = {
+      const entry = withCampaignMetadata({
         id: genId,
         url: res.url,
         prompt,
         model: selectedModelId,
         timestamp: new Date().toISOString(),
-      };
+      }, activeCampaign, "lipsync");
 
       if (!historyItems) addToInternalHistory(entry);
 
@@ -854,7 +859,8 @@ export default function LipSyncStudio({
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
             {/* Overlapping floating cards */}
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
+              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
               <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
                 <img
                   src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
@@ -886,13 +892,10 @@ export default function LipSyncStudio({
             </div>
 
             <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase text-xl sm:text-3xl tracking-wide mb-1 opacity-90">START CREATING WITH</span>
-              <span className="text-[#22d3ee] font-black uppercase text-2xl sm:text-4xl sm:mt-1 tracking-tight">
-                LIP SYNC STUDIO
-              </span>
+              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">Create a lip sync video.</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Sync any voice with any face video to create premium talking avatars and videos.
+              Add a face video and audio track, then sync them with the controls below.
             </p>
           </div>
         )}
