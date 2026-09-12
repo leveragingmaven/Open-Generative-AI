@@ -118,6 +118,7 @@
     }
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "axios": "^1.7.0",
     "mysql2": "^3.23.3",
     "next": "^15.0.0",

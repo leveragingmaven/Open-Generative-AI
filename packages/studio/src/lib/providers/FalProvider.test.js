@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { FalProvider, FAL_MODEL_IDS } from "./FalProvider.js";
 
 function response(body, ok = true, status = ok ? 200 : 500) {
-  return { ok, status, async json() { return body; } };
+  return {
+    ok,
+    status,
+    statusText: ok ? "OK" : "Bad Request",
+    headers: { get(name) { return name.toLowerCase() === "content-type" ? "application/json" : null; } },
+    async json() { return body; },
+  };
 }
 
 test("fal provider submits documented Flux Schnell input and polls the queue", async () => {
@@ -22,8 +28,8 @@ test("fal provider submits documented Flux Schnell input and polls the queue", a
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[1].options.method, "GET");
   assert.equal(calls[2].options.method, "GET");
-  assert.equal(calls[1].url, "https://queue.fal.run/fal-ai/flux/schnell/requests/req-1");
-  assert.equal(calls[2].url, calls[1].url);
+  assert.match(calls[1].url, /^https:\/\/queue\.fal\.run\/fal-ai\/flux\/schnell\/requests\/req-1\/status\?logs=0$/);
+  assert.equal(calls[2].url, "https://queue.fal.run/fal-ai/flux/schnell/requests/req-1");
 });
 
 test("fal Redux maps the existing reference image flow", async () => {

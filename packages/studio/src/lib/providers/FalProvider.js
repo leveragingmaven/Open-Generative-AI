@@ -1,5 +1,6 @@
 import { CreativeProvider } from "./CreativeProvider.js";
 import { PROVIDER_CAPABILITIES, PROVIDER_IDS, normalizeProviderResponse } from "./providerTypes.js";
+import { createFalClient } from "@fal-ai/client";
 
 export const FAL_MODEL_IDS = Object.freeze({
   TEXT_TO_IMAGE: "fal-ai/flux/schnell",
@@ -20,10 +21,6 @@ function error(code, message) {
   return result;
 }
 
-function requestUrl(modelId, requestId) {
-  return `https://queue.fal.run/${modelId}/requests/${encodeURIComponent(requestId)}`;
-}
-
 function toInput(inputs = {}, imageEdit = false) {
   const input = {};
   if (imageEdit) {
@@ -41,10 +38,6 @@ function toInput(inputs = {}, imageEdit = false) {
   if (Number.isInteger(inputs.seed)) input.seed = inputs.seed;
   if (inputs.output_format === "jpeg" || inputs.output_format === "png") input.output_format = inputs.output_format;
   return input;
-}
-
-async function readJson(response) {
-  try { return await response.json(); } catch { return null; }
 }
 
 function safeDiagnosticBody(value, depth = 0) {
@@ -78,6 +71,35 @@ function reportUpstreamFailure({ phase, response, body, url, operation, modelId 
   console.error("[fal] upstream request failed", JSON.stringify(diagnostic));
 }
 
+function reportClientFailure({ phase, cause, operation, modelId } = {}) {
+  reportUpstreamFailure({
+    phase,
+    operation,
+    modelId,
+    url: `fal.queue.${phase}`,
+    response: { status: cause?.status ?? cause?.statusCode ?? null },
+    body: {
+      code: cause?.code || cause?.error_type || cause?.error_code || null,
+      message: typeof cause?.message === "string" ? cause.message.slice(0, 500) : null,
+      body: cause?.body || cause?.data || null,
+    },
+  });
+}
+
+function createQueueRequestMiddleware(modelId) {
+  const endpointUrl = `https://queue.fal.run/${modelId}`;
+  return async (request) => {
+    // @fal-ai/client 1.10.x parses nested model IDs as owner/alias for queue
+    // status/result URLs. Keep the SDK in charge of the operation, auth,
+    // retries, and response handling, while restoring the documented nested
+    // endpoint path in its generated request URL.
+    if (request.url.startsWith("https://queue.fal.run/") && request.url.includes("/requests/")) {
+      return { ...request, url: `${endpointUrl}${request.url.slice(request.url.indexOf("/requests/"))}` };
+    }
+    return request;
+  };
+}
+
 export class FalProvider extends CreativeProvider {
   constructor({ fetchImpl = globalThis.fetch, pollIntervalMs = 1000, maxPolls = 1800 } = {}) {
     super({
@@ -101,20 +123,24 @@ export class FalProvider extends CreativeProvider {
     if (modelId !== expectedModel) throw error("provider_model_unsupported", "The selected fal.ai model is not supported by this studio.");
     if (typeof this.fetchImpl !== "function") throw error("provider_transport_unavailable", "Provider transport is unavailable.");
 
-    const headers = { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" };
+    // A new client is created for every execution so a customer's BYOK key is
+    // held only by this request's client instance. Do not use the shared fal
+    // singleton/configuration, which would race between concurrent users.
+    const client = createFalClient({
+      credentials: apiKey,
+      fetch: this.fetchImpl,
+      requestMiddleware: createQueueRequestMiddleware(modelId),
+    });
     let submit;
     try {
-      const url = `https://queue.fal.run/${modelId}`;
-      const response = await this.fetchImpl(url, {
-        method: "POST", headers, body: JSON.stringify(toInput(request.inputs, imageEdit)), signal: request.signal,
+      submit = await client.queue.submit(modelId, {
+        input: toInput(request.inputs, imageEdit),
+        abortSignal: request.signal,
       });
-      submit = await readJson(response);
-      if (!response.ok || !submit?.request_id) {
-        reportUpstreamFailure({ phase: "submit", response, body: submit, url, operation, modelId });
-        throw error("provider_request_failed", "fal.ai request submission failed.");
-      }
+      if (!submit?.request_id) throw error("provider_request_failed", "fal.ai request submission failed.");
     } catch (cause) {
       if (cause?.code) throw cause;
+      reportClientFailure({ phase: "submit", cause, operation, modelId });
       throw error("provider_request_failed", "fal.ai request submission failed.");
     }
     request.onProviderJobAccepted?.(submit.request_id, "accepted");
@@ -123,15 +149,10 @@ export class FalProvider extends CreativeProvider {
       if (request.signal?.aborted) throw error("provider_execution_cancelled", "Provider execution was cancelled.");
       let status;
       try {
-        const url = requestUrl(modelId, submit.request_id);
-        const response = await this.fetchImpl(url, { method: "GET", headers, signal: request.signal });
-        status = await readJson(response);
-        if (!response.ok) {
-          reportUpstreamFailure({ phase: "status", response, body: status, url, operation, modelId });
-          throw error("provider_status_failed", "fal.ai status lookup failed.");
-        }
+        status = await client.queue.status(modelId, { requestId: submit.request_id, abortSignal: request.signal });
       } catch (cause) {
         if (cause?.code) throw cause;
+        reportClientFailure({ phase: "status", cause, operation, modelId });
         throw error("provider_status_failed", "fal.ai status lookup failed.");
       }
       if (status?.status === "COMPLETED") break;
@@ -141,13 +162,9 @@ export class FalProvider extends CreativeProvider {
     }
 
     try {
-      const url = requestUrl(modelId, submit.request_id);
-      const response = await this.fetchImpl(url, { method: "GET", headers, signal: request.signal });
-      const result = await readJson(response);
-      if (!response.ok || !Array.isArray(result?.images) || !result.images.some((image) => image?.url)) {
-        reportUpstreamFailure({ phase: "result", response, body: result, url, operation, modelId });
-        throw error("provider_response_invalid", "fal.ai returned no usable image.");
-      }
+      const resultEnvelope = await client.queue.result(modelId, { requestId: submit.request_id, abortSignal: request.signal });
+      const result = resultEnvelope?.data;
+      if (!Array.isArray(result?.images) || !result.images.some((image) => image?.url)) throw error("provider_response_invalid", "fal.ai returned no usable image.");
       return normalizeProviderResponse({
         ...result,
         url: result.images.find((image) => image?.url)?.url,
@@ -158,6 +175,7 @@ export class FalProvider extends CreativeProvider {
       }, { provider: this.id });
     } catch (cause) {
       if (cause?.code) throw cause;
+      reportClientFailure({ phase: "result", cause, operation, modelId });
       throw error("provider_response_invalid", "fal.ai returned an invalid response.");
     }
   }
