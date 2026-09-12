@@ -12,7 +12,7 @@ function response(body, ok = true, status = ok ? 200 : 500) {
   };
 }
 
-test("fal provider submits documented Flux Schnell input and polls the queue", async () => {
+test("fal provider subscribes to Flux Schnell with the complete model ID and normalizes its result", async () => {
   const calls = [];
   const provider = new FalProvider({ pollIntervalMs: 0, fetchImpl: async (url, options = {}) => {
     calls.push({ url, options });
@@ -26,10 +26,10 @@ test("fal provider submits documented Flux Schnell input and polls the queue", a
   assert.equal(calls[0].options.headers.Authorization, "Key fal-secret");
   assert.deepEqual(JSON.parse(calls[0].options.body), { prompt: "A red fox", image_size: "square_hd" });
   assert.equal(calls[0].options.method, "POST");
-  assert.equal(calls[1].options.method, "GET");
-  assert.equal(calls[2].options.method, "GET");
-  assert.match(calls[1].url, /^https:\/\/queue\.fal\.run\/fal-ai\/flux\/schnell\/requests\/req-1\/status\?logs=0$/);
-  assert.equal(calls[2].url, "https://queue.fal.run/fal-ai/flux/schnell/requests/req-1");
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].url, "https://queue.fal.run/fal-ai/flux/schnell");
+  assert.match(calls[1].url, /\/requests\/req-1\/status\?logs=1$/);
+  assert.equal(calls[2].url, "https://queue.fal.run/fal-ai/flux/requests/req-1");
 });
 
 test("fal Redux maps the existing reference image flow", async () => {
@@ -61,12 +61,12 @@ test("fal upstream status failures log safe phase diagnostics without authorizat
     const provider = new FalProvider({ fetchImpl: async (url, options = {}) => options.method === "POST"
       ? response({ request_id: "req-status" })
       : response({ error_type: "AUTHENTICATION_ERROR", message: "invalid key", api_key: "do-not-log" }, false, 401), pollIntervalMs: 0 });
-    await assert.rejects(() => provider.execute({ apiKey: "fal-secret", operation: "image_generation", inputs: { prompt: "x" } }), { code: "provider_status_failed" });
+    await assert.rejects(() => provider.execute({ apiKey: "fal-secret", operation: "image_generation", inputs: { prompt: "x" } }), { code: "provider_execution_failed" });
   } finally {
     console.error = originalError;
   }
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /"phase":"status"/);
+  assert.match(logs[0], /"phase":"subscribe"/);
   assert.match(logs[0], /"httpStatus":401/);
   assert.match(logs[0], /AUTHENTICATION_ERROR/);
   assert.doesNotMatch(logs[0], /fal-secret|Authorization|do-not-log/);

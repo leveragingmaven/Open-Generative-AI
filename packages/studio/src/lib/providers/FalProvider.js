@@ -86,20 +86,6 @@ function reportClientFailure({ phase, cause, operation, modelId } = {}) {
   });
 }
 
-function createQueueRequestMiddleware(modelId) {
-  const endpointUrl = `https://queue.fal.run/${modelId}`;
-  return async (request) => {
-    // @fal-ai/client 1.10.x parses nested model IDs as owner/alias for queue
-    // status/result URLs. Keep the SDK in charge of the operation, auth,
-    // retries, and response handling, while restoring the documented nested
-    // endpoint path in its generated request URL.
-    if (request.url.startsWith("https://queue.fal.run/") && request.url.includes("/requests/")) {
-      return { ...request, url: `${endpointUrl}${request.url.slice(request.url.indexOf("/requests/"))}` };
-    }
-    return request;
-  };
-}
-
 export class FalProvider extends CreativeProvider {
   constructor({ fetchImpl = globalThis.fetch, pollIntervalMs = 1000, maxPolls = 1800 } = {}) {
     super({
@@ -129,54 +115,34 @@ export class FalProvider extends CreativeProvider {
     const client = createFalClient({
       credentials: apiKey,
       fetch: this.fetchImpl,
-      requestMiddleware: createQueueRequestMiddleware(modelId),
     });
-    let submit;
+    let requestId = null;
     try {
-      submit = await client.queue.submit(modelId, {
+      const resultEnvelope = await client.subscribe(modelId, {
         input: toInput(request.inputs, imageEdit),
         abortSignal: request.signal,
+        logs: true,
+        onEnqueue: (id) => {
+          requestId = id;
+          request.onProviderJobAccepted?.(id, "accepted");
+        },
       });
-      if (!submit?.request_id) throw error("provider_request_failed", "fal.ai request submission failed.");
-    } catch (cause) {
-      if (cause?.code) throw cause;
-      reportClientFailure({ phase: "submit", cause, operation, modelId });
-      throw error("provider_request_failed", "fal.ai request submission failed.");
-    }
-    request.onProviderJobAccepted?.(submit.request_id, "accepted");
-
-    for (let attempt = 0; attempt < this.maxPolls; attempt += 1) {
-      if (request.signal?.aborted) throw error("provider_execution_cancelled", "Provider execution was cancelled.");
-      let status;
-      try {
-        status = await client.queue.status(modelId, { requestId: submit.request_id, abortSignal: request.signal });
-      } catch (cause) {
-        if (cause?.code) throw cause;
-        reportClientFailure({ phase: "status", cause, operation, modelId });
-        throw error("provider_status_failed", "fal.ai status lookup failed.");
-      }
-      if (status?.status === "COMPLETED") break;
-      if (status?.error || ["FAILED", "ERROR", "CANCELLED"].includes(status?.status)) throw error("provider_generation_failed", "fal.ai generation failed.");
-      await new Promise((resolve) => setTimeout(resolve, this.pollIntervalMs));
-      if (attempt === this.maxPolls - 1) throw error("provider_execution_timeout", "fal.ai generation timed out.");
-    }
-
-    try {
-      const resultEnvelope = await client.queue.result(modelId, { requestId: submit.request_id, abortSignal: request.signal });
       const result = resultEnvelope?.data;
+      requestId = requestId || resultEnvelope?.requestId || null;
+      if (!requestId) throw error("provider_request_failed", "fal.ai request submission failed.");
       if (!Array.isArray(result?.images) || !result.images.some((image) => image?.url)) throw error("provider_response_invalid", "fal.ai returned no usable image.");
       return normalizeProviderResponse({
         ...result,
         url: result.images.find((image) => image?.url)?.url,
         provider: this.id,
-        providerResponseRef: submit.request_id,
+        providerResponseRef: requestId,
         outputReferences: result.images.filter((image) => image?.url).map((image) => image.url),
-        providerMetadata: { model: modelId, requestId: submit.request_id },
+        providerMetadata: { model: modelId, requestId },
       }, { provider: this.id });
     } catch (cause) {
       if (cause?.code) throw cause;
-      reportClientFailure({ phase: "result", cause, operation, modelId });
-      throw error("provider_response_invalid", "fal.ai returned an invalid response.");
+      reportClientFailure({ phase: "subscribe", cause, operation, modelId });
+      throw error("provider_execution_failed", "fal.ai generation failed.");
     }
   }
 }
