@@ -1552,12 +1552,28 @@ export default function ImageStudio({
 
   // ── Render ───────────────────────────────────────────────────────────────
 return (
-    <div className="w-full h-full min-h-0 flex flex-col gap-6 relative overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {/* Generated content remains the primary surface; Maven conversation and composer sit below it. */}
-      <div className="w-full">
+    <div className="w-full h-full grid grid-cols-1 lg:grid-cols-12 gap-6 relative overflow-hidden">
+      {/* LEFT: 35% Chat Workspace — MavenSync Assistant */}
+      <div className="lg:col-span-4 h-full min-h-0 order-1">
+        <MavenChat
+          title="Image Studio"
+          messages={chatMessages}
+          onSendMessage={handleGenerate}
+          onResetChat={resetToPrompt}
+          isProcessing={generating}
+          className="h-full"
+          placeholder={placeholderText}
+          value={prompt}
+          onValueChange={setPrompt}
+          composerControls={composerGenerationControls}
+        />
+      </div>
+
+      {/* RIGHT: 65% Canvas Results — MavenSync Canvas */}
+      <div className="lg:col-span-8 h-full min-h-0 order-2">
         <MavenCanvas
           lastPrompt={featuredEntry?.prompt || prompt}
-          className="!h-auto !overflow-visible"
+          className="h-full"
           contentOverride={
             history.length > 0 ? (
               <div className="space-y-6">
@@ -1580,22 +1596,6 @@ return (
               </div>
             ) : <div className="flex flex-col items-center justify-center min-h-[40vh] text-center p-8 sm:p-12"><div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[#1A1E2B] text-[#F3BA4A] mb-4"><svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></div><h3 className="text-lg font-semibold text-[#F8FAFC]">Your canvas is empty</h3><p className="text-sm text-[#94A3B8] max-w-md mt-1.5 leading-relaxed">Describe an image in the assistant workspace and hit Generate. Your creations will appear here, ready to preview, download, and refine.</p></div>
           }
-        />
-      </div>
-      <div className="w-full">
-        <MavenChat
-          title="Image Studio"
-          messages={chatMessages}
-          onSendMessage={handleGenerate}
-          onResetChat={resetToPrompt}
-          isProcessing={generating}
-          className="!h-auto !overflow-visible"
-          placeholder={placeholderText}
-          value={prompt}
-          onValueChange={setPrompt}
-          composerControls={composerGenerationControls}
-          messagesClassName="!overflow-visible !flex-none"
-          variant="flat"
         />
       </div>
       {/* ── FULLSCREEN IMAGE MODAL ── */}
