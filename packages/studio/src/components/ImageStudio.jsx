@@ -1552,7 +1552,7 @@ export default function ImageStudio({
 
   // ── Render ───────────────────────────────────────────────────────────────
 return (
-    <div className="w-full min-h-full flex flex-col gap-6 relative">
+    <div className="w-full h-full min-h-0 flex flex-col gap-6 relative overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {/* Generated content remains the primary surface; Maven conversation and composer sit below it. */}
       <div className="w-full">
         <MavenCanvas
