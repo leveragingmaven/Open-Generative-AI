@@ -1,6 +1,7 @@
 import { LocalModelManager } from './LocalModelManager.js';
 import { isLocalAIAvailable } from '../lib/localInferenceClient.js';
 import { t } from '../lib/i18n.js';
+import { BYOK_CREDENTIAL_PROVIDERS, readProviderCredentialStatus, saveProviderCredential } from '../../packages/studio/src/lib/providers/providerCredentialClient.js';
 
 export function SettingsModal(onClose) {
     const overlay = document.createElement('div');
@@ -51,16 +52,8 @@ export function SettingsModal(onClose) {
     const apiPanel = document.createElement('div');
     apiPanel.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
-            <div>
-                <label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.4rem;font-weight:600;">${t('settings.muapiKeyLabel')}</label>
-                <input id="settings-api-key" type="password"
-                    style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;padding:0.6rem 0.9rem;color:#fff;font-size:0.875rem;outline:none;"
-                    placeholder="${t('settings.keyPlaceholder')}"
-                    value="${localStorage.getItem('muapi_key') || ''}">
-            </div>
-            <p style="font-size:0.7rem;color:rgba(255,255,255,0.3);margin:0;">
-                ${t('settings.keyNote')}
-            </p>
+            <p style="font-size:0.7rem;color:rgba(255,255,255,0.55);margin:0;">Configure one or more generation providers. Keys are encrypted and stored server-side for this Creator OS account.</p>
+            ${BYOK_CREDENTIAL_PROVIDERS.map((provider) => `<div><label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.4rem;font-weight:600;text-transform:capitalize;">${provider === 'openrouter' ? 'OpenRouter' : provider === 'muapi' ? 'MuAPI' : provider}</label><input id="settings-api-key-${provider}" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;padding:0.6rem 0.9rem;color:#fff;font-size:0.875rem;outline:none;" placeholder="Leave blank to keep current key"><span id="settings-api-status-${provider}" style="display:block;margin-top:0.25rem;font-size:0.65rem;color:rgba(255,255,255,0.35);">Checking secure status…</span></div>`).join('')}
             <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem;">
                 <button id="settings-cancel-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.75rem;font-weight:700;cursor:pointer;">${t('common.cancel')}</button>
                 <button id="settings-save-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:var(--color-primary,#22d3ee);color:#000;font-size:0.75rem;font-weight:700;cursor:pointer;border:none;">${t('common.save')}</button>
@@ -100,15 +93,17 @@ export function SettingsModal(onClose) {
     };
 
     apiPanel.querySelector('#settings-cancel-btn').onclick = close;
-    apiPanel.querySelector('#settings-save-btn').onclick = () => {
-        const key = apiPanel.querySelector('#settings-api-key').value.trim();
-        if (key) {
-            localStorage.setItem('muapi_key', key);
-            close();
-        } else {
-            alert(t('settings.invalidKey'));
-        }
+    apiPanel.querySelector('#settings-save-btn').onclick = async () => {
+        const configured = BYOK_CREDENTIAL_PROVIDERS.filter((provider) => apiPanel.querySelector(`#settings-api-key-${provider}`).value.trim());
+        if (!configured.length) { alert('Enter at least one provider key.'); return; }
+        try { await Promise.all(configured.map((provider) => saveProviderCredential(provider, apiPanel.querySelector(`#settings-api-key-${provider}`).value))); close(); }
+        catch (error) { alert(error.message || 'Unable to save provider credentials.'); }
     };
+
+    void Promise.all(BYOK_CREDENTIAL_PROVIDERS.map(async (provider) => {
+        try { const status = await readProviderCredentialStatus(provider); const node = apiPanel.querySelector(`#settings-api-status-${provider}`); if (node) node.textContent = status.configured ? 'Configured (key is never returned)' : 'Not configured'; }
+        catch { const node = apiPanel.querySelector(`#settings-api-status-${provider}`); if (node) node.textContent = 'Status unavailable'; }
+    }));
 
     header.querySelector('#settings-close-btn').onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });

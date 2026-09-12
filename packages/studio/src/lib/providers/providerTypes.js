@@ -4,6 +4,7 @@ export const PROVIDER_IDS = Object.freeze({
   OPENAI: "openai",
   REPLICATE: "replicate",
   FAL: "fal",
+  KIE: "kie",
   OPENROUTER: "openrouter",
   MAVENSYNC: "mavensync",
 });

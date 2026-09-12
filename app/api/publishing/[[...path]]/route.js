@@ -32,6 +32,7 @@ const PLATFORM_CONNECT_URL_UPSTREAMS = {
     youtube: '/api/v1/social/youtube/connect-url',
     tiktok: '/api/v1/social/tiktok/connect-url',
     instagram: '/api/v1/social/instagram/connect-url',
+    facebook: '/api/v1/social/facebook/connect-url',
 };
 
 function cleanHeaders(request) {

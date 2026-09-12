@@ -24,10 +24,10 @@ export async function resolveProviderCredential({ accountId, creatorIdentityKey,
   if (!provider) throw credentialError('provider_required');
 
   let credential;
-  if (provider === 'muapi') {
+  if (['muapi', 'kie', 'fal', 'openrouter'].includes(provider)) {
     const repository = credentialRepository || new MySqlProviderCredentialRepository();
     const record = await repository.getActive({ accountId, creatorIdentityKey, providerId: provider });
-    if (!record) throw credentialError('provider_credential_required:muapi');
+    if (!record) throw credentialError(`provider_credential_required:${provider}`);
     credential = decryptProviderCredential(record.ciphertext);
   }
   else if (provider === 'openai') credential = environment('OPENAI_API_KEY') || environment('MAVENSYNC_OPENAI_API_KEY');
@@ -42,6 +42,6 @@ export function credentialResolutionMetadata({ providerId, operation } = {}) {
   return {
     providerId: normalizedProvider,
     operation: String(operation || '').trim(),
-    source: normalizedProvider.toLowerCase() === 'muapi' ? 'server_account_credential' : 'server_environment',
+    source: ['muapi', 'kie', 'fal', 'openrouter'].includes(normalizedProvider.toLowerCase()) ? 'server_account_credential' : 'server_environment',
   };
 }

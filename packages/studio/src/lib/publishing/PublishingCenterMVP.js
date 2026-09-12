@@ -138,6 +138,15 @@ export class PublishingCenterMVP {
     // Save using the publishing history abstraction
     savePublishingDraft(scheduledDraft, this.storage);
     
+    if (scheduledDraft.providerJobId && ["scheduled", "queued"].includes(draft.status)) {
+      const result = await provider.reschedulePost(scheduledDraft.providerJobId, {
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        scheduledAt: new Date(scheduledAt).toISOString(),
+        timezone,
+      });
+      savePublishingJob({ ...(result || {}), draftId: draft.id, provider: provider.id, providerJobId: scheduledDraft.providerJobId, status: "scheduled", updatedAt: new Date().toISOString() }, this.storage);
+      return result;
+    }
     return await provider.schedulePost(scheduledDraft, { storage: this.storage });
   }
 

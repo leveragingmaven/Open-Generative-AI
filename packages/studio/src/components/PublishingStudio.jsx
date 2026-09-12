@@ -25,7 +25,7 @@ const PLATFORM_OPTIONS = [
   { id: "instagram", label: "Instagram", enabled: true },
   { id: "tiktok", label: "TikTok", enabled: true },
   { id: "youtube", label: "YouTube", enabled: true },
-  { id: "facebook", label: "Facebook", enabled: false, flag: "publishing.facebook" },
+  { id: "facebook", label: "Facebook", enabled: true },
   { id: "linkedin", label: "LinkedIn", enabled: false, flag: "publishing.linkedin" },
   { id: "pinterest", label: "Pinterest", enabled: false, flag: "publishing.pinterest" },
   { id: "threads", label: "Threads", enabled: false, flag: "publishing.threads" },
