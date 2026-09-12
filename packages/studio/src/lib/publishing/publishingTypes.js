@@ -4,6 +4,7 @@ import { PublishingValidationError } from "./publishingErrors.js";
 export const PUBLISHING_PROVIDER_IDS = {
   MUAPI: "muapi",
   GHL_HUB: "ghl_hub",
+  POSTIZ: "postiz",
 };
 
 export const PUBLISHING_STATUS = {

@@ -4,6 +4,7 @@ import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
 import { isAgencyModeEnabled } from '@/src/lib/agencyMode';
 import { assertOwnedMuApiAccount, buildMuApiAccountScope, buildMuApiConnectPayload } from '@/src/lib/publishingIdentity';
+import { fetchPostizIntegrations } from '@/src/lib/postizPublishingProxy';
 
 const ROUTES = {
     'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', handler: 'getConnectedAccounts' },
@@ -39,6 +40,7 @@ function cleanHeaders(request) {
     headers.delete('content-length');
     headers.delete('x-api-key');
     headers.delete('authorization');
+    headers.delete('x-publishing-provider');
     return headers;
 }
 
@@ -216,6 +218,10 @@ async function handleConnectAccount(request, identity) {
 }
 
 async function handleGetConnectedAccounts(request, identity) {
+    if (request.headers.get('x-publishing-provider') === 'postiz') {
+        const result = await fetchPostizIntegrations({ requestUrl: requestSearch(request) });
+        return NextResponse.json(result.data, { status: result.status });
+    }
     return proxyMuApi(request, '/api/v1/social/ext/accounts', {
         searchParams: buildMuApiAccountScope(identity),
     });

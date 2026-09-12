@@ -3,6 +3,7 @@ import test from "node:test";
 import { GhlHubPublishingProvider, GHL_HUB_ACCOUNTS_URL } from "./GhlHubPublishingProvider.js";
 import { PublishingProviderRegistry } from "./PublishingProviderRegistry.js";
 import { PUBLISHING_PROVIDER_IDS } from "./publishingTypes.js";
+import { PostizPublishingProvider, normalizePostizIntegration } from "./PostizPublishingProvider.js";
 
 function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -87,6 +88,37 @@ test("MuAPI remains registered and remains the default provider", () => {
   assert.equal(registry.activeProviderId, PUBLISHING_PROVIDER_IDS.MUAPI);
   assert.equal(registry.get(PUBLISHING_PROVIDER_IDS.MUAPI).id, PUBLISHING_PROVIDER_IDS.MUAPI);
   assert.equal(registry.get(PUBLISHING_PROVIDER_IDS.GHL_HUB).id, PUBLISHING_PROVIDER_IDS.GHL_HUB);
+  assert.equal(registry.get(PUBLISHING_PROVIDER_IDS.POSTIZ).id, PUBLISHING_PROVIDER_IDS.POSTIZ);
+});
+
+test("Postiz integrations normalize into Creator OS connected accounts without credentials", () => {
+  const account = normalizePostizIntegration({
+    id: "postiz-int-1", name: "Brand Instagram", identifier: "instagram", picture: "https://cdn.test/avatar.png",
+    profile: "@brand", disabled: false, access_token: "opaque-secret", nested: { token: "opaque-secret" },
+  });
+  assert.equal(account.id, "postiz-int-1");
+  assert.equal(account.accountId, "postiz-int-1");
+  assert.equal(account.platform, "instagram");
+  assert.equal(account.provider, PUBLISHING_PROVIDER_IDS.POSTIZ);
+  assert.equal(account.connected, true);
+  assert.equal(account.username, "@brand");
+  assert.equal(account.raw.access_token, undefined);
+  assert.equal(JSON.stringify(account).includes("opaque-secret"), false);
+});
+
+test("Postiz account discovery uses same-origin boundary and handles empty integrations", async () => {
+  let request;
+  const provider = new PostizPublishingProvider({
+    fetchFn: async (url, options) => {
+      request = { url, options };
+      return response([]);
+    },
+  });
+  assert.deepEqual(await provider.getConnectedAccounts(), []);
+  assert.equal(request.url, "/api/publishing/accounts");
+  assert.equal(request.options.headers["x-publishing-provider"], "postiz");
+  assert.equal(request.options.headers.authorization, undefined);
+  assert.equal(request.options.headers["x-api-key"], undefined);
 });
 
 test("provider selections cannot mix MuAPI and Hub accounts", () => {
