@@ -28,6 +28,15 @@ export function imageStudioRuntimeEnabled() {
 }
 
 export async function executeImageStudioRequest(request, { runtimeFactory = createImageStudioRuntime, legacyExecute, runtimeOptions = {} } = {}) {
+  if (request?.providerId === "fal") {
+    const response = await fetch("/api/generation/fal", {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: request.imageMode ? "image_editing" : "image_generation", inputs: request.inputs }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.outputReferences?.length) throw new Error(body?.error || "fal.ai generation failed");
+    return { url: body.outputReferences[0], id: body.requestId, request_id: body.requestId, provider: "fal" };
+  }
   if (!imageStudioRuntimeEnabled()) return legacyExecute();
   try {
     const runtime = runtimeFactory({
@@ -65,7 +74,7 @@ export async function executeImageStudioRequest(request, { runtimeFactory = crea
   }
 }
 
-export function createImageStudioRequest({ prompt, model, aspectRatio, qualityField, quality, references = [], swapUrl = null } = {}) {
+export function createImageStudioRequest({ prompt, model, providerId = null, aspectRatio, qualityField, quality, references = [], swapUrl = null, imageMode = false, inputs = null } = {}) {
   return {
     recipeId: references.length ? "imageEdit" : "image",
     studioId: "image",
@@ -77,7 +86,10 @@ export function createImageStudioRequest({ prompt, model, aspectRatio, qualityFi
       ...(qualityField && quality ? { [qualityField]: quality } : {}),
       ...(references.length ? { images_list: references, image_url: references[0] } : {}),
       ...(swapUrl ? { swap_url: swapUrl } : {}),
+      ...(inputs ? { ...inputs } : {}),
     },
+    providerId,
+    imageMode,
     references,
     output: { modality: "image", aspectRatio },
     metadata: { compatibility: "image-studio" },

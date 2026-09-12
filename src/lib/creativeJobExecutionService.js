@@ -62,7 +62,7 @@ function requiredCapabilities(plan) {
 
 function fundingSource(routing = {}) {
   if (routing.fundingSource === 'byok' || routing.fundingSource === 'agency-funded') return routing.fundingSource;
-  return String(routing.providerId || '').toLowerCase() === 'muapi' ? 'byok' : 'agency-funded';
+  return ['muapi', 'fal'].includes(String(routing.providerId || '').toLowerCase()) ? 'byok' : 'agency-funded';
 }
 
 function estimatedCredits(routing = {}) {

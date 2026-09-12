@@ -3,6 +3,7 @@ import { PROVIDER_IDS } from "./providerTypes.js";
 import { muApiDesignAgentProvider } from "./design/index.js";
 import { MuApiWorkflowProvider } from "./workflow/index.js";
 import { openAICompatibleProvider } from "./OpenAICompatibleProvider.js";
+import { falProvider } from "./FalProvider.js";
 
 class ProviderRegistry {
   constructor() {
@@ -10,6 +11,7 @@ class ProviderRegistry {
     this.activeProviderId = PROVIDER_IDS.MUAPI;
     this.register(muApiProvider);
     this.register(openAICompatibleProvider);
+    this.register(falProvider);
   }
 
   register(provider) {

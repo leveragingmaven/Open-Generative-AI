@@ -28,6 +28,7 @@ import {
   getDefaultEffectForI2IModel,
   getI2IModelById,
 } from "../models.js";
+import { FAL_MODEL_IDS } from "../lib/providers/FalProvider.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -1013,7 +1014,10 @@ export default function ImageStudio({
   }, [droppedFiles, onFilesHandled, processDroppedImages]);
 
   // ── Derived: current model lists & helpers ───────────────────────────────
-  const currentModels = imageMode ? i2iModels : t2iModels;
+  const currentModels = [
+    ...(imageMode ? i2iModels : t2iModels),
+    ...(imageMode ? [{ id: FAL_MODEL_IDS.IMAGE_TO_IMAGE, name: "FLUX Schnell Redux (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }] : [{ id: FAL_MODEL_IDS.TEXT_TO_IMAGE, name: "FLUX Schnell (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }]),
+  ];
   const currentAspectRatios = imageMode
     ? getAspectRatiosForI2IModel(selectedModelId)
     : getAspectRatiosForModel(selectedModelId);
@@ -1239,6 +1243,7 @@ export default function ImageStudio({
               references: uploadedImageUrls,
               swapUrl: swapImageUrl,
               imageMode: true,
+              providerId: currentModels.find((model) => model.id === selectedModelId)?.provider || "muapi",
               inputs: genParams,
               apiKey,
             }), { legacyExecute: () => generateI2I(apiKey, genParams) });
@@ -1263,6 +1268,7 @@ export default function ImageStudio({
               qualityField: currentQualityField,
               quality: selectedQuality,
               imageMode: false,
+              providerId: currentModels.find((model) => model.id === selectedModelId)?.provider || "muapi",
               inputs: genParams,
               apiKey,
             }), { legacyExecute: () => generateImage(apiKey, genParams) });
