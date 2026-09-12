@@ -53,6 +53,7 @@ function accountForPlatform(accounts, platform) { return accounts.find((account)
 function accountsForPlatform(accounts, platform) { return accounts.filter((account) => account.platform === platform && account.connected !== false); }
 function accountRecordForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform) || null; }
 function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
+function isReadOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB || providerId === PUBLISHING_PROVIDER_IDS.POSTIZ; }
 function connectionUrl(response) { return response?.url || response?.connect_url || response?.connectUrl || response?.authorization_url || response?.authorizationUrl || response?.data?.url || response?.data?.connect_url || null; }
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
@@ -279,7 +280,7 @@ export default function PublishingStudio() {
         return;
       }
       const option = PLATFORM_OPTIONS.find((item) => item.id === platform);
-      if (!option?.enabled && providerId !== PUBLISHING_PROVIDER_IDS.GHL_HUB) {
+      if (!option?.enabled && !isReadOnlyProvider(providerId)) {
         setNotice({ tone: "error", text: `${option?.label || platform} is behind a capability flag until live account validation is complete.` });
         return;
       }
@@ -590,6 +591,7 @@ export default function PublishingStudio() {
           <select aria-label="Account source" value={providerId} onChange={(event) => void switchProvider(event.target.value)} className="min-h-9 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-pink-primary)]">
             <option value={PUBLISHING_PROVIDER_IDS.MUAPI}>MuAPI</option>
             <option value={PUBLISHING_PROVIDER_IDS.GHL_HUB}>MavenSync Hub / GoHighLevel</option>
+            <option value={PUBLISHING_PROVIDER_IDS.POSTIZ}>Postiz</option>
           </select>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -604,12 +606,12 @@ export default function PublishingStudio() {
                   <div className="min-w-0">
                     <h3 className="truncate text-xs font-semibold">{platform.label}</h3>
                     <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{connected ? account.name || account.username || "Connected account" : needsAttention ? "Connection needs a refresh" : platform.enabled ? "Ready to connect" : "Not available yet"}</p>
-                    {connected && providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? <p className="mt-1 text-[8px] text-[var(--ms-color-gold-muted)]">MavenSync Hub / GoHighLevel</p> : null}
+                    {connected && isReadOnlyProvider(providerId) ? <p className="mt-1 text-[8px] text-[var(--ms-color-gold-muted)]">{providerId === PUBLISHING_PROVIDER_IDS.POSTIZ ? "Postiz" : "MavenSync Hub / GoHighLevel"}</p> : null}
                   </div>
                 </div>
                 <div className="mt-auto flex items-center justify-between gap-2">
                   {needsAttention ? <StatusBadge tone="warning">Needs attention</StatusBadge> : connected ? <StatusBadge tone="success">Connected</StatusBadge> : <StatusBadge tone="neutral">Not connected</StatusBadge>}
-                  {providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? null : platform.enabled ? <SecondaryButton type="button" disabled={busyId === `connect:${platform.id}`} onClick={() => connectPlatform(platform.id)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
+                  {isReadOnlyProvider(providerId) ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? null : platform.enabled ? <SecondaryButton type="button" disabled={busyId === `connect:${platform.id}`} onClick={() => connectPlatform(platform.id)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
                 </div>
               </WorkspaceCard>
             );

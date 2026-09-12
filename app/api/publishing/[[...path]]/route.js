@@ -4,7 +4,7 @@ import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
 import { isAgencyModeEnabled } from '@/src/lib/agencyMode';
 import { assertOwnedMuApiAccount, buildMuApiAccountScope, buildMuApiConnectPayload } from '@/src/lib/publishingIdentity';
-import { fetchPostizIntegrations } from '@/src/lib/postizPublishingProxy';
+import { fetchPostizIntegrations, fetchPostizRequest } from '@/src/lib/postizPublishingProxy';
 
 const ROUTES = {
     'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', handler: 'getConnectedAccounts' },
@@ -13,6 +13,8 @@ const ROUTES = {
     'schedule': { methods: ['POST'], capability: 'schedulePost', handler: 'publishMedia' },
     'publish-now': { methods: ['POST'], capability: 'publishNow', handler: 'publishMedia' },
     'scheduled': { methods: ['GET'], capability: 'getScheduledPosts', upstream: '/social/posts' },
+    'media': { methods: ['POST'], capability: 'postizMediaUpload', handler: 'postizMedia' },
+    'posts': { methods: ['POST'], capability: 'postizPosts', handler: 'postizPosts' },
 };
 
 const PLATFORM_PUBLISH_UPSTREAMS = {
@@ -227,6 +229,17 @@ async function handleGetConnectedAccounts(request, identity) {
     });
 }
 
+async function handlePostizRequest(request, upstream) {
+    const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await readJsonBody(request);
+    const result = await fetchPostizRequest({
+        path: upstream,
+        method: request.method,
+        body,
+        requestUrl: requestSearch(request),
+    });
+    return NextResponse.json(result.data, { status: result.status });
+}
+
 async function handlePublishMedia(request, definition, identity) {
     const body = await readJsonBody(request);
     const platform = String(body.platform || '').toLowerCase();
@@ -294,6 +307,8 @@ async function handlePublishingRequest(request, { params }) {
 
     if (definition.handler === 'connectAccount') return handleConnectAccount(request, auth.identity);
     if (definition.handler === 'getConnectedAccounts') return handleGetConnectedAccounts(request, auth.identity);
+    if (definition.handler === 'postizMedia') return handlePostizRequest(request, 'upload-from-url');
+    if (definition.handler === 'postizPosts') return handlePostizRequest(request, 'posts');
     if (definition.handler === 'publishMedia') return handlePublishMedia(request, definition, auth.identity);
     if (definition.handler === 'accountById') return handleAccountById(request, slug.path || []);
     if (definition.handler === 'getPublishingJob') return handleGetPublishingJob(request, slug.path || []);
