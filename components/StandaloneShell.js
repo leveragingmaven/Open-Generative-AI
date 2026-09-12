@@ -784,15 +784,17 @@ const handleTabChange = (tabId) => {
   );
 
   const settingsModal = showSettings && (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
-      <div className="bg-[var(--ms-color-panel)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-modal)] p-8 w-full max-w-sm shadow-[var(--ms-shadow-card-hover)]">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--ms-color-gold-primary)] mb-2">MavenSync Creative OS</p>
-        <h2 className="text-[var(--ms-color-text-primary)] font-bold text-lg mb-2">Settings</h2>
-        <p className="text-[var(--ms-color-text-secondary)] text-[13px] mb-8">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up pointer-events-auto p-4">
+      <div className="bg-[var(--ms-color-panel)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-modal)] p-8 w-full max-w-sm max-h-[calc(100vh-2rem)] min-h-0 flex flex-col overflow-hidden pointer-events-auto shadow-[var(--ms-shadow-card-hover)]">
+        <div className="flex-shrink-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--ms-color-gold-primary)] mb-2">MavenSync Creative OS</p>
+          <h2 className="text-[var(--ms-color-text-primary)] font-bold text-lg mb-2">Settings</h2>
+          <p className="text-[var(--ms-color-text-secondary)] text-[13px] mb-8">
           Manage the secure provider credential used by Agent Execution and Maven Harness.
-        </p>
+          </p>
+        </div>
 
-        <div className="space-y-4 mb-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 space-y-4 mb-8">
           {BYOK_CREDENTIAL_PROVIDERS.map((provider) => {
             const status = byokStatuses[provider];
             const label = provider === 'muapi' ? 'MuAPI' : provider === 'fal' ? 'fal.ai' : provider === 'kie' ? 'Kie.ai' : 'OpenRouter';
