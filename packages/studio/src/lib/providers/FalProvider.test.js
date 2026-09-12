@@ -43,3 +43,22 @@ test("fal provider rejects missing credentials and malformed responses without l
   const malformed = new FalProvider({ pollIntervalMs: 0, fetchImpl: async (_url, options = {}) => options.method === "POST" ? response({ request_id: "req" }) : response({ status: "COMPLETED" }) });
   await assert.rejects(() => malformed.execute({ apiKey: "fal-secret", inputs: { prompt: "x" } }), { code: "provider_response_invalid" });
 });
+
+test("fal upstream status failures log safe phase diagnostics without authorization", async () => {
+  const originalError = console.error;
+  const logs = [];
+  console.error = (...args) => logs.push(args.join(" "));
+  try {
+    const provider = new FalProvider({ fetchImpl: async (url, options = {}) => options.method === "POST"
+      ? response({ request_id: "req-status" })
+      : response({ error_type: "AUTHENTICATION_ERROR", message: "invalid key", api_key: "do-not-log" }, false, 401), pollIntervalMs: 0 });
+    await assert.rejects(() => provider.execute({ apiKey: "fal-secret", operation: "image_generation", inputs: { prompt: "x" } }), { code: "provider_status_failed" });
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /"phase":"status"/);
+  assert.match(logs[0], /"httpStatus":401/);
+  assert.match(logs[0], /AUTHENTICATION_ERROR/);
+  assert.doesNotMatch(logs[0], /fal-secret|Authorization|do-not-log/);
+});

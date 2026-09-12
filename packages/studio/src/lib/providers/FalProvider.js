@@ -51,6 +51,37 @@ async function readJson(response) {
   try { return await response.json(); } catch { return null; }
 }
 
+function safeDiagnosticBody(value, depth = 0) {
+  if (depth > 3) return "[truncated]";
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return value.slice(0, 2000);
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => safeDiagnosticBody(item, depth + 1));
+  if (typeof value === "object") {
+    const output = {};
+    Object.entries(value).slice(0, 40).forEach(([key, item]) => {
+      if (/(authorization|api[_-]?key|token|secret|credential|password)/i.test(key)) output[key] = "[redacted]";
+      else output[key] = safeDiagnosticBody(item, depth + 1);
+    });
+    return output;
+  }
+  return "[unsupported]";
+}
+
+function reportUpstreamFailure({ phase, response, body, url, operation, modelId } = {}) {
+  const diagnostic = {
+    provider: "fal",
+    phase,
+    operation,
+    model: modelId,
+    endpoint: url,
+    httpStatus: response?.status ?? null,
+    falErrorCode: body?.error_type || body?.code || body?.error_code || null,
+    falErrorMessage: typeof body?.error === "string" ? body.error.slice(0, 500) : typeof body?.message === "string" ? body.message.slice(0, 500) : null,
+    body: safeDiagnosticBody(body),
+  };
+  console.error("[fal] upstream request failed", JSON.stringify(diagnostic));
+}
+
 export class FalProvider extends CreativeProvider {
   constructor({ fetchImpl = globalThis.fetch, pollIntervalMs = 1000, maxPolls = 1800 } = {}) {
     super({
@@ -77,11 +108,15 @@ export class FalProvider extends CreativeProvider {
     const headers = { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" };
     let submit;
     try {
-      const response = await this.fetchImpl(`https://queue.fal.run/${modelId}`, {
+      const url = `https://queue.fal.run/${modelId}`;
+      const response = await this.fetchImpl(url, {
         method: "POST", headers, body: JSON.stringify(toInput(request.inputs, imageEdit)), signal: request.signal,
       });
       submit = await readJson(response);
-      if (!response.ok || !submit?.request_id) throw error("provider_request_failed", "fal.ai request submission failed.");
+      if (!response.ok || !submit?.request_id) {
+        reportUpstreamFailure({ phase: "submit", response, body: submit, url, operation, modelId });
+        throw error("provider_request_failed", "fal.ai request submission failed.");
+      }
     } catch (cause) {
       if (cause?.code) throw cause;
       throw error("provider_request_failed", "fal.ai request submission failed.");
@@ -92,9 +127,13 @@ export class FalProvider extends CreativeProvider {
       if (request.signal?.aborted) throw error("provider_execution_cancelled", "Provider execution was cancelled.");
       let status;
       try {
-        const response = await this.fetchImpl(statusUrl(modelId, submit.request_id), { headers, signal: request.signal });
+        const url = statusUrl(modelId, submit.request_id);
+        const response = await this.fetchImpl(url, { headers, signal: request.signal });
         status = await readJson(response);
-        if (!response.ok) throw error("provider_status_failed", "fal.ai status lookup failed.");
+        if (!response.ok) {
+          reportUpstreamFailure({ phase: "status", response, body: status, url, operation, modelId });
+          throw error("provider_status_failed", "fal.ai status lookup failed.");
+        }
       } catch (cause) {
         if (cause?.code) throw cause;
         throw error("provider_status_failed", "fal.ai status lookup failed.");
@@ -106,9 +145,13 @@ export class FalProvider extends CreativeProvider {
     }
 
     try {
-      const response = await this.fetchImpl(responseUrl(modelId, submit.request_id), { headers, signal: request.signal });
+      const url = responseUrl(modelId, submit.request_id);
+      const response = await this.fetchImpl(url, { headers, signal: request.signal });
       const result = await readJson(response);
-      if (!response.ok || !Array.isArray(result?.images) || !result.images.some((image) => image?.url)) throw error("provider_response_invalid", "fal.ai returned no usable image.");
+      if (!response.ok || !Array.isArray(result?.images) || !result.images.some((image) => image?.url)) {
+        reportUpstreamFailure({ phase: "result", response, body: result, url, operation, modelId });
+        throw error("provider_response_invalid", "fal.ai returned no usable image.");
+      }
       return normalizeProviderResponse({
         ...result,
         url: result.images.find((image) => image?.url)?.url,
