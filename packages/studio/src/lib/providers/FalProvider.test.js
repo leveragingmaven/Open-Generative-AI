@@ -19,8 +19,11 @@ test("fal provider submits documented Flux Schnell input and polls the queue", a
   assert.equal(result.providerResponseRef, "req-1");
   assert.equal(calls[0].options.headers.Authorization, "Key fal-secret");
   assert.deepEqual(JSON.parse(calls[0].options.body), { prompt: "A red fox", image_size: "square_hd" });
-  assert.match(calls[1].url, /\/status$/);
-  assert.match(calls[2].url, /\/response$/);
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[1].options.method, "GET");
+  assert.equal(calls[2].options.method, "GET");
+  assert.equal(calls[1].url, "https://queue.fal.run/fal-ai/flux/schnell/requests/req-1");
+  assert.equal(calls[2].url, calls[1].url);
 });
 
 test("fal Redux maps the existing reference image flow", async () => {

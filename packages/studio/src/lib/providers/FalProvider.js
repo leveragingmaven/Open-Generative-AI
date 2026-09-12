@@ -20,12 +20,8 @@ function error(code, message) {
   return result;
 }
 
-function responseUrl(modelId, requestId) {
-  return `https://queue.fal.run/${modelId}/requests/${encodeURIComponent(requestId)}/response`;
-}
-
-function statusUrl(modelId, requestId) {
-  return `https://queue.fal.run/${modelId}/requests/${encodeURIComponent(requestId)}/status`;
+function requestUrl(modelId, requestId) {
+  return `https://queue.fal.run/${modelId}/requests/${encodeURIComponent(requestId)}`;
 }
 
 function toInput(inputs = {}, imageEdit = false) {
@@ -127,8 +123,8 @@ export class FalProvider extends CreativeProvider {
       if (request.signal?.aborted) throw error("provider_execution_cancelled", "Provider execution was cancelled.");
       let status;
       try {
-        const url = statusUrl(modelId, submit.request_id);
-        const response = await this.fetchImpl(url, { headers, signal: request.signal });
+        const url = requestUrl(modelId, submit.request_id);
+        const response = await this.fetchImpl(url, { method: "GET", headers, signal: request.signal });
         status = await readJson(response);
         if (!response.ok) {
           reportUpstreamFailure({ phase: "status", response, body: status, url, operation, modelId });
@@ -145,8 +141,8 @@ export class FalProvider extends CreativeProvider {
     }
 
     try {
-      const url = responseUrl(modelId, submit.request_id);
-      const response = await this.fetchImpl(url, { headers, signal: request.signal });
+      const url = requestUrl(modelId, submit.request_id);
+      const response = await this.fetchImpl(url, { method: "GET", headers, signal: request.signal });
       const result = await readJson(response);
       if (!response.ok || !Array.isArray(result?.images) || !result.images.some((image) => image?.url)) {
         reportUpstreamFailure({ phase: "result", response, body: result, url, operation, modelId });
