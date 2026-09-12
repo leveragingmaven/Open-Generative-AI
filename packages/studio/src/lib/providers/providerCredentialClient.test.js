@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readMuApiCredentialStatus, revokeMuApiCredential, saveMuApiCredential } from "./providerCredentialClient.js";
+import { BYOK_CREDENTIAL_PROVIDERS, readMuApiCredentialStatus, readProviderCredentialStatus, revokeMuApiCredential, revokeProviderCredential, saveMuApiCredential, saveProviderCredential } from "./providerCredentialClient.js";
 
 function response(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -35,4 +35,21 @@ test("credential client revokes and surfaces sanitized endpoint errors", async (
     readMuApiCredentialStatus(async () => response({ error: "Unable to manage provider credential.", code: "provider_credential_request_failed" }, 500)),
     (error) => error.code === "provider_credential_request_failed" && !String(error.message).includes("secret"),
   );
+});
+
+test("all four provider controls use scoped secure endpoints, including fal replace and revoke", async () => {
+  assert.deepEqual(BYOK_CREDENTIAL_PROVIDERS, ["muapi", "kie", "fal", "openrouter"]);
+  const calls = [];
+  const fetcher = async (url, options) => {
+    calls.push({ url, options });
+    return response({ provider: url.split("/").pop(), configured: options.method === "POST", status: options.method === "DELETE" ? "revoked" : "active", apiKey: "must-not-propagate" });
+  };
+  const status = await readProviderCredentialStatus("fal", fetcher);
+  const saved = await saveProviderCredential("fal", "fal-secret", fetcher);
+  const revoked = await revokeProviderCredential("fal", fetcher);
+  assert.equal(status.configured, false);
+  assert.equal(saved.configured, true);
+  assert.equal(revoked.configured, false);
+  assert.deepEqual(calls.map((call) => call.url), ["/api/provider-credentials/fal", "/api/provider-credentials/fal", "/api/provider-credentials/fal"]);
+  assert.equal(JSON.stringify(status).includes("must-not-propagate"), false);
 });

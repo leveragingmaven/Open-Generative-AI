@@ -11,7 +11,7 @@ import CommandBar from '../packages/studio/src/components/CommandBar.jsx';
 import RecoverableErrorBoundary, { RecoverableErrorFallback } from '../packages/studio/src/components/RecoverableErrorBoundary.jsx';
 import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
-import { readMuApiCredentialStatus, revokeMuApiCredential, saveMuApiCredential } from '../packages/studio/src/lib/providers/providerCredentialClient.js';
+import { BYOK_CREDENTIAL_PROVIDERS, readProviderCredentialStatus, revokeProviderCredential, saveProviderCredential } from '../packages/studio/src/lib/providers/providerCredentialClient.js';
 
 const STORAGE_KEY = 'muapi_key';
 function WorkspaceLoading({ label }) {
@@ -275,8 +275,8 @@ const isStudioHome = slug.length === 0 && !idFromParams;
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [byokStatus, setByokStatus] = useState(null);
-  const [byokKey, setByokKey] = useState('');
+  const [byokStatuses, setByokStatuses] = useState({});
+  const [byokKeys, setByokKeys] = useState({});
   const [byokBusy, setByokBusy] = useState(false);
   const [byokError, setByokError] = useState(null);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
@@ -493,7 +493,8 @@ const handleTabChange = (tabId) => {
     setByokError(null);
     setByokBusy(true);
     try {
-      setByokStatus(await readMuApiCredentialStatus());
+      const statuses = await Promise.all(BYOK_CREDENTIAL_PROVIDERS.map(async (provider) => [provider, await readProviderCredentialStatus(provider)]));
+      setByokStatuses(Object.fromEntries(statuses));
     } catch (error) {
       setByokError(error?.message || 'Unable to load MuAPI credential status.');
     } finally {
@@ -501,27 +502,29 @@ const handleTabChange = (tabId) => {
     }
   }, []);
 
-  const saveAgentExecutionCredential = useCallback(async () => {
+  const saveAgentExecutionCredential = useCallback(async (provider) => {
     setByokError(null);
     setByokBusy(true);
     try {
-      setByokStatus(await saveMuApiCredential(byokKey));
-      setByokKey('');
+      const status = await saveProviderCredential(provider, byokKeys[provider] || '');
+      setByokStatuses((current) => ({ ...current, [provider]: status }));
+      setByokKeys((current) => ({ ...current, [provider]: '' }));
     } catch (error) {
-      setByokError(error?.message || 'Unable to save the MuAPI credential.');
+      setByokError(error?.message || `Unable to save the ${provider} credential.`);
     } finally {
       setByokBusy(false);
     }
-  }, [byokKey]);
+  }, [byokKeys]);
 
-  const revokeAgentExecutionCredential = useCallback(async () => {
+  const revokeAgentExecutionCredential = useCallback(async (provider) => {
     setByokError(null);
     setByokBusy(true);
     try {
-      setByokStatus(await revokeMuApiCredential());
+      const status = await revokeProviderCredential(provider);
+      setByokStatuses((current) => ({ ...current, [provider]: status }));
       setByokKey('');
     } catch (error) {
-      setByokError(error?.message || 'Unable to revoke the MuAPI credential.');
+      setByokError(error?.message || `Unable to revoke the ${provider} credential.`);
     } finally {
       setByokBusy(false);
     }
@@ -790,31 +793,36 @@ const handleTabChange = (tabId) => {
         </p>
 
         <div className="space-y-4 mb-8">
-          <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4 space-y-3">
+          {BYOK_CREDENTIAL_PROVIDERS.map((provider) => {
+            const status = byokStatuses[provider];
+            const label = provider === 'muapi' ? 'MuAPI' : provider === 'fal' ? 'fal.ai' : provider === 'kie' ? 'Kie.ai' : 'OpenRouter';
+            const key = byokKeys[provider] || '';
+            return <div key={provider} className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <label htmlFor="agent-execution-muapi-key" className="block text-xs font-bold text-[var(--ms-color-text-muted)]">MuAPI BYOK</label>
-              <span className={`text-[10px] font-semibold ${byokStatus?.configured ? 'text-emerald-400' : 'text-amber-300'}`}>
-                {byokBusy && !byokStatus ? 'Checking…' : byokStatus?.configured ? 'Configured' : 'Not configured'}
+              <label htmlFor={`agent-execution-${provider}-key`} className="block text-xs font-bold text-[var(--ms-color-text-muted)]">{label} BYOK</label>
+              <span className={`text-[10px] font-semibold ${status?.configured ? 'text-emerald-400' : 'text-amber-300'}`}>
+                {byokBusy && !status ? 'Checking…' : status?.configured ? 'Configured' : 'Not configured'}
               </span>
             </div>
             <input
-              id="agent-execution-muapi-key"
+              id={`agent-execution-${provider}-key`}
               type="password"
               autoComplete="off"
-              value={byokKey}
-              onChange={(event) => setByokKey(event.target.value)}
-              placeholder={byokStatus?.configured ? 'Enter a new key to replace it' : 'Enter your MuAPI key'}
+              value={key}
+              onChange={(event) => setByokKeys((current) => ({ ...current, [provider]: event.target.value }))}
+              placeholder={status?.configured ? 'Enter a new key to replace it' : `Enter your ${label} key`}
               className="h-10 w-full rounded-md border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#D4A858]/60"
             />
             <p className="text-[10px] leading-4 text-[var(--ms-color-text-muted)]">Encrypted server-side and scoped to your account. The saved secret is never returned to this browser.</p>
             {byokError && <p role="alert" className="text-[10px] text-red-400">{byokError}</p>}
             <div className="flex gap-2">
-              <button type="button" disabled={byokBusy || !byokKey.trim()} onClick={saveAgentExecutionCredential} className="flex-1 h-9 rounded-md bg-[#D4A858] text-black text-xs font-semibold disabled:opacity-50">
-                {byokStatus?.configured ? 'Replace Key' : 'Save Key'}
+              <button type="button" disabled={byokBusy || !key.trim()} onClick={() => saveAgentExecutionCredential(provider)} className="flex-1 h-9 rounded-md bg-[#D4A858] text-black text-xs font-semibold disabled:opacity-50">
+                {status?.configured ? 'Replace Key' : 'Save Key'}
               </button>
-              {byokStatus?.configured && <button type="button" disabled={byokBusy} onClick={revokeAgentExecutionCredential} className="h-9 rounded-md border border-red-400/30 px-3 text-xs font-semibold text-red-300 disabled:opacity-50">Revoke</button>}
+              {status?.configured && <button type="button" disabled={byokBusy} onClick={() => revokeAgentExecutionCredential(provider)} className="h-9 rounded-md border border-red-400/30 px-3 text-xs font-semibold text-red-300 disabled:opacity-50">Revoke</button>}
             </div>
-          </div>
+          </div>;
+          })}
           {!agencyMode && apiKey && <div className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4">
             <label className="block text-xs font-bold text-[var(--ms-color-text-muted)] mb-2">Browser Studio Key</label>
             <div className="text-[13px] font-mono text-[var(--ms-color-text-primary)]">{apiKey.slice(0, 8)}••••••••••••••••</div>
