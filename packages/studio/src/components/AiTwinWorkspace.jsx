@@ -132,7 +132,7 @@ export default function AiTwinWorkspace({ twinTarget, onTwinTargetHandled, onCre
           </p>
           <button
             onClick={onCreateTwin}
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#D4A858] px-6 py-3 text-sm font-semibold text-black shadow-[0_0_24px_rgba(212,168,88,0.35)] transition hover:brightness-110"
+            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#E82070] px-6 py-3 text-sm font-semibold text-white shadow-[0_0_16px_rgba(232,32,112,0.16)] transition hover:bg-[#F03A8B]"
           >
             Create My AI Twin
           </button>
@@ -152,7 +152,7 @@ export default function AiTwinWorkspace({ twinTarget, onTwinTargetHandled, onCre
           </div>
           <button
             onClick={() => onEditTwin(twin.id)}
-            className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-[#D4A858] px-5 py-2.5 text-sm font-semibold text-black transition hover:brightness-110 md:self-auto"
+            className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-[#E82070] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#F03A8B] md:self-auto"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
             Edit My Twin

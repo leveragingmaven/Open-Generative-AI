@@ -527,7 +527,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
             </div>
             <button
               onClick={startNewTwin}
-              className="group inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#D4A858] px-5 py-3 text-sm font-semibold text-black shadow-[0_0_24px_rgba(212,168,88,0.35)] transition hover:brightness-110"
+              className="group inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#E82070] px-5 py-3 text-sm font-semibold text-white shadow-[0_0_16px_rgba(232,32,112,0.16)] transition hover:bg-[#F03A8B]"
             >
               <SparkIcon className="h-4 w-4" />
               Create New AI Twin
@@ -641,11 +641,11 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                   disabled={i > stepIndex}
                   onClick={() => goToStep(s.id)}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
-                    isActive ? "bg-[#D4A858] text-black" : isPast ? "text-[#D4A858]/80 hover:bg-[#D4A858]/10" : "text-white/30 cursor-not-allowed"
+                    isActive ? "bg-[#E82070] text-white" : isPast ? "text-[#D4A858]/80 hover:bg-[#D4A858]/10" : "text-white/30 cursor-not-allowed"
                   }`}
                 >
-                  <span className={isActive || isPast ? "text-black" : ""}>{isPast ? "✓" : s.step}</span>
-                  <span className={isActive ? "text-black" : ""}>{s.label}</span>
+                  <span className={isActive ? "text-white" : isPast ? "text-[#D4A858]" : ""}>{isPast ? "✓" : s.step}</span>
+                  <span className={isActive ? "text-white" : ""}>{s.label}</span>
                 </button>
               );
             })}
@@ -788,7 +788,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                 <button
                   onClick={() => goToStep("analyze")}
                   disabled={referenceImages.length === 0}
-                  className="rounded-xl bg-[#D4A858] px-5 py-2 text-sm font-semibold text-black transition enabled:hover:brightness-110 disabled:opacity-40"
+                  className="rounded-xl bg-[#E82070] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#F03A8B] disabled:opacity-40"
                 >
                   Analyze Images
                 </button>
@@ -926,7 +926,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                 <button
                   onClick={() => goToStep("generate")}
                   disabled={!draft?.name?.trim()}
-                  className="rounded-xl bg-[#D4A858] px-5 py-2 text-sm font-semibold text-black transition enabled:hover:brightness-110 disabled:opacity-40"
+                  className="rounded-xl bg-[#E82070] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#F03A8B] disabled:opacity-40"
                 >
                   Continue to Generate
                 </button>
@@ -947,7 +947,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                 <button
                   onClick={() => runCandidateGeneration()}
                   disabled={!canGenerate || isGenerating}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#D4A858] px-5 py-2.5 text-sm font-semibold text-black transition enabled:hover:brightness-110 disabled:opacity-40"
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#E82070] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#F03A8B] disabled:opacity-40"
                 >
                   <SparkIcon className="h-4 w-4" />
                   {isGenerating ? "Generating…" : candidates.length ? "Generate More" : "Generate Candidates"}
@@ -1003,7 +1003,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                 <button
                   onClick={handleApproveCandidate}
                   disabled={!selectedCandidateId}
-                  className="rounded-xl bg-[#D4A858] px-5 py-2 text-sm font-semibold text-black transition enabled:hover:brightness-110 disabled:opacity-40"
+                  className="rounded-xl bg-[#E82070] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#F03A8B] disabled:opacity-40"
                 >
                   Review & Approve
                 </button>
@@ -1055,7 +1055,7 @@ export default function AiTwinStudio({ apiKey, autoCreate = false, initialEditTw
                 <button
                   onClick={handleApproveCandidate}
                   disabled={!selectedCandidateId}
-                  className="rounded-xl bg-[#D4A858] px-5 py-2 text-sm font-semibold text-black transition enabled:hover:brightness-110 disabled:opacity-40"
+                  className="rounded-xl bg-[#E82070] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#F03A8B] disabled:opacity-40"
                 >
                   Approve Twin
                 </button>
