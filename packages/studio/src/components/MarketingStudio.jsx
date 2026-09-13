@@ -23,6 +23,7 @@ import {
   promptControlClassName,
   promptMediaButtonClassName,
 } from "./prompt/PromptComposer.jsx";
+import styles from "./MarketingStudio.module.css";
 import { MavenChat } from "./mavensync/MavenChat.jsx";
 import { MavenCanvas } from "./mavensync/MavenCanvas.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
@@ -48,14 +49,14 @@ const SCROLLBAR_STYLE = `
     border-radius: 10px;
   }
   .custom-scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: rgba(34, 211, 238, 0.3);
+    background: var(--ms-color-pink-primary);
   }
 `;
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
 const CheckSvg = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="4">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
     <polyline points="20 6 9 17 4 12" />
   </svg>
 );
@@ -177,10 +178,19 @@ function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = 
   const inputRef = useRef(null);
 
   return (
-    <div className="relative group/slot flex items-center">
+    <div className={`relative group/slot flex items-center ${styles.upload}`}>
       <div
         onClick={() => inputRef.current?.click()}
         title={`Upload ${label}`}
+        role="button"
+        tabIndex={0}
+        aria-label={`Upload ${label}`}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
         className={promptMediaButtonClassName({
           active: Boolean(url),
           className: "cursor-pointer",
@@ -219,6 +229,7 @@ function UploadSlot({ icon, url, progress, label, onUpload, onClear, multiple = 
           </button>
         )}
       </div>
+      <span className={styles.uploadLabel}>{label}{multiple ? ` (${images.length}/6)` : ""}</span>
     </div>
   );
 }
@@ -358,7 +369,7 @@ function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo
   // Solid opaque Creative OS surface so the hero behind the preset dialog never
   // bleeds through, while preserving the popover's rounded corners and shadow.
   const popoverStyle = {
-    backgroundColor: "#1B1B1B",
+    backgroundColor: "var(--ms-color-panel)",
     backdropFilter: "none",
     WebkitBackdropFilter: "none",
   };
@@ -377,7 +388,7 @@ function Dropdown({ isOpen, title, items, selectedId, onSelect, onClose, isVideo
   return (
     <PromptPopover
       ref={ref}
-      className="w-[420px] max-w-[calc(100vw-2rem)]"
+      className={`w-[420px] max-w-[calc(100vw-2rem)] ${styles.popover}`}
       style={popoverStyle}
     >
       <PromptPopoverHeader className="mb-3">{title}</PromptPopoverHeader>
@@ -415,6 +426,7 @@ function SimpleDropdown({ isOpen, title, options, selected, onSelect, onClose })
   return (
     <PromptPopover
       ref={ref}
+      className={styles.popover}
     >
       <PromptPopoverHeader>{title}</PromptPopoverHeader>
       <PromptMenuList>
@@ -637,15 +649,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
   // ── MavenSync chat messages ──────────────────────────────────────────
   const chatMessages = (() => {
-    const msgs = [
-      {
-        id: "welcome",
-        sender: "mavensync",
-        content:
-          "Welcome to Marketing Studio. Describe the ad, product, audience, and format you want MavenSync to produce, then hit Generate.",
-        timestamp: "Marketing Studio",
-      },
-    ];
+    const msgs = [];
     if (prompt.trim()) {
       msgs.push({
         id: "user",
@@ -659,7 +663,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
   // Media / reference upload actions — compact horizontal row above the textarea.
   const composerMediaActions = (
-    <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-2">
+    <div className={styles.mediaRow}>
       <UploadSlot
         label="Product"
         icon={<ProductIcon />}
@@ -697,7 +701,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
   // Uploaded reference thumbnails — previews slot.
   const composerPreviews = additionalImages.length > 0 ? (
-    <div className="flex items-center gap-1.5 px-3 pt-1">
+    <div className={styles.referenceRow}>
       {additionalImages.map((img, idx) => (
         <div key={idx} className="relative group/img flex-shrink-0">
           <img src={img} className="w-9 h-9 rounded-full object-cover border border-white/10" />
@@ -714,7 +718,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
 
   // Generation settings toolbar — compact horizontal row.
   const composerGenerationControls = (
-    <div className="flex items-center flex-nowrap gap-1 min-w-0">
+    <div className={styles.settings}>
       {/* Model */}
       <div className="relative min-w-0 shrink">
         <button
@@ -728,7 +732,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           <PromptChevronIcon />
         </button>
         {dropdown === "model" && (
-          <PromptPopover onClick={(e) => e.stopPropagation()} className="min-w-[260px] max-h-[60vh]">
+          <PromptPopover onClick={(e) => e.stopPropagation()} className={`min-w-[260px] max-h-[60vh] ${styles.popover}`}>
             <PromptPopoverHeader>Video Model</PromptPopoverHeader>
             <PromptMenuList>
               {MARKETING_MODELS.map((model) => (
@@ -860,12 +864,13 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
   );
 
   return (
-    <div className="w-full h-full flex flex-col bg-app-bg relative overflow-hidden">
-      <style>{SCROLLBAR_STYLE}</style>
+    <div className={`w-full h-full flex flex-col bg-app-bg relative overflow-hidden ${view === "ads" ? styles.studio : ""}`}>
+      <style>{SCROLLBAR_STYLE.replaceAll(".custom-scrollbar-thin", `.${styles.studio} .custom-scrollbar-thin`)}</style>
 
       {/* ── CAPABILITY SWITCH ── */}
-      <div className="relative z-10 pt-4 shrink-0">
-        <PromptSegmentedControl>
+      <div className={`relative z-10 shrink-0 ${styles.header}`}>
+        <h1 className={styles.identity}>MAVEN <span>MARKETING STUDIO</span></h1>
+        <PromptSegmentedControl className={styles.modeSwitch}>
           <PromptSegmentOption
             type="button"
             onClick={() => setView("ads")}
@@ -896,12 +901,12 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           more creation controls (Product/Avatar/References + Format/Avatar/Ratio/
           Resolution/Duration/Generate), so the creation workspace sits on the RIGHT
           (60%) and gets the horizontal room, while the canvas preview takes the LEFT (40%). */}
-      <div className="flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-12 gap-6 relative overflow-hidden px-2 pb-4">
+      <div className={`flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-12 gap-6 relative overflow-hidden px-2 pb-4 ${styles.workbench}`}>
         {/* LEFT: 40% Canvas Results — MavenSync Canvas */}
-        <div className="lg:col-span-5 h-full min-h-0">
+        <div className={`lg:col-span-5 h-full min-h-0 ${styles.output}`}>
           <MavenCanvas
             lastPrompt={featuredEntry?.prompt || prompt}
-            className="h-full"
+            className={styles.canvas}
             contentOverride={
               history.length > 0 ? (
                 <div className="space-y-6">
@@ -1042,22 +1047,22 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
         </div>
 
         {/* RIGHT: 60% Chat / Creation Workspace — MavenSync Assistant */}
-        <div className="lg:col-span-7 h-full min-h-0">
+        <div className={`lg:col-span-7 h-full min-h-0 ${styles.creation}`}>
           <MavenChat
             title="Marketing Studio"
             messages={chatMessages}
             onSendMessage={handleGenerate}
             onResetChat={resetToPrompt}
             isProcessing={isGenerating}
-            className="h-full"
-            placeholder="Describe your ad script... Use @image1 for product, @image2 for avatar."
+            className={styles.chat}
+            placeholder="Describe the marketing creative you want Maven to make. Use @image1 for product, @image2 for avatar."
             value={prompt}
             onValueChange={setPrompt}
             composerControls={composerGenerationControls}
             previews={composerPreviews}
             mediaActions={composerMediaActions}
-            messagesClassName="flex-1 min-h-0 overflow-y-auto"
-            composerClassName="shrink-0"
+            messagesClassName={styles.messages}
+            composerClassName={styles.composer}
             variant="flat"
           />
         </div>
