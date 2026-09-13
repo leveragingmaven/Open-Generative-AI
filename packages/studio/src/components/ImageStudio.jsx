@@ -48,7 +48,7 @@ async function downloadImage(url, filename) {
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
 
-function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [], label = null, persistedHistory = null, onHistoryChange = null }) {
+function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [], label = null, persistedHistory = null, onHistoryChange = null, onOpenPickerReady = null }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState([]); // [{url, thumbnail}]
@@ -77,6 +77,13 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [], 
   const fileInputRef = useRef(null);
   const panelRef = useRef(null);
   const triggerRef = useRef(null);
+
+  useEffect(() => {
+    if (!onOpenPickerReady) return undefined;
+    const openPicker = () => fileInputRef.current?.click();
+    onOpenPickerReady(openPicker);
+    return () => onOpenPickerReady(null);
+  }, [onOpenPickerReady]);
 
   // Close on outside click
   useEffect(() => {
@@ -878,11 +885,16 @@ export default function ImageStudio({
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
   const [batchSize, setBatchSize] = useState(1);
   const [localHistory, setLocalHistory] = useState([]); // [{id,url,prompt,model,aspect_ratio,timestamp}]
+  const attachmentPickerRef = useRef(null);
 
   // Use prop history if provided, otherwise local
   const history = historyItems ?? localHistory;
   const mavenSync = useMavenSyncIntegration();
   const { activeCampaign } = useActiveCampaign();
+
+  const handleAttachmentPickerReady = useCallback((openPicker) => {
+    attachmentPickerRef.current = openPicker;
+  }, []);
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
@@ -1369,8 +1381,7 @@ export default function ImageStudio({
           label="Swap Face"
         />
       )}
-      {uploadedImageUrls.length < maxImages && (
-        <UploadButton
+      <UploadButton
           apiKey={apiKey}
           maxImages={maxImages}
           onSelect={handleUploadSelect}
@@ -1378,8 +1389,8 @@ export default function ImageStudio({
           initialUrls={uploadedImageUrls}
           persistedHistory={uploadHistory}
           onHistoryChange={setUploadHistory}
+          onOpenPickerReady={handleAttachmentPickerReady}
         />
-      )}
 
       {/* Model button */}
       <div className="relative">
@@ -1566,6 +1577,7 @@ return (
           value={prompt}
           onValueChange={setPrompt}
           composerControls={composerGenerationControls}
+          onAttach={() => attachmentPickerRef.current?.()}
         />
       </div>
 

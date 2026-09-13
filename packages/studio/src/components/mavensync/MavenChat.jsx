@@ -28,6 +28,7 @@ export function MavenChat({
   composerClassName = "",
   mediaActions,
   variant = "card",
+  onAttach,
 }) {
   const scrollRef = useRef(null);
   const flat = variant === "flat";
@@ -115,6 +116,7 @@ export function MavenChat({
           variant={variant}
           value={value}
           onValueChange={onValueChange}
+          onAttach={onAttach}
         />
       </div>
     </div>

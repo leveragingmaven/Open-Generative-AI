@@ -26,17 +26,18 @@ export async function downloadAsset(url, options = {}) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(blobUrl);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
     return { ok: true, filename, method: "blob" };
   } catch (err) {
-    console.warn("[downloadManager] Blob download failed; opening asset URL instead.", err);
-    const opened = window.open(url, "_blank");
-    if (opened) {
-      opened.opener = null;
-      return { ok: true, filename, method: "open" };
-    }
-    console.error("[downloadManager] Download fallback failed: browser blocked the popup.");
-    return { ok: false, reason: "popup_blocked", error: err };
+    console.warn("[downloadManager] Blob download failed; using direct asset download.", err);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return { ok: true, filename, method: "direct" };
   }
 }

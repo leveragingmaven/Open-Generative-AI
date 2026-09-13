@@ -23,6 +23,7 @@ export function MavenComposer({
   variant = "card",
   value,
   onValueChange,
+  onAttach,
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState("intelligence");
@@ -129,6 +130,7 @@ export function MavenComposer({
           <div className={`flex items-center gap-1 flex-wrap ${flat ? "border-t border-[#252B3B]/50 pt-2" : ""}`}>
             <button
               type="button"
+              onClick={onAttach}
               className="p-2 text-[#64748B] hover:text-[#F3BA4A] rounded-xl hover:bg-[#12151E] transition-colors cursor-pointer"
               title="Attach File"
             >
