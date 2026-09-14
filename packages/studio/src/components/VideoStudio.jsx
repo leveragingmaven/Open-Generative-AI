@@ -2057,6 +2057,7 @@ composerControls={composerGenerationControls}
           allowEmptySubmit
           messagesClassName="max-h-[40%] min-h-0"
           composerClassName="shrink-0 min-w-0"
+          accent="pink"
         />
       </div>
 

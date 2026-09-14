@@ -24,11 +24,25 @@ export function MavenComposer({
   value,
   onValueChange,
   onAttach,
+  accent = "gold",
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState("intelligence");
 
   const flat = variant === "flat";
+  const pinkAccent = accent === "pink";
+  const activeModeClass = pinkAccent
+    ? "bg-[#E82070]/10 text-[#E82070] border border-[#E82070]/20"
+    : "bg-[#F3BA4A]/10 text-[#F3BA4A] border border-[#F3BA4A]/20";
+  const composerBorderClass = pinkAccent
+    ? "border-[#252B3B]/80 focus-within:border-[#E82070]/50 focus-within:shadow-[0_0_16px_rgba(232,32,112,0.1)]"
+    : "border-[#F3BA4A]/40 focus-within:border-[#F3BA4A] focus-within:shadow-[0_0_20px_rgba(243,186,74,0.15)]";
+  const submitClass = pinkAccent
+    ? "bg-[#E82070] text-white hover:bg-[#F03A8B] shadow-[0_0_15px_rgba(232,32,112,0.3)]"
+    : mode === "creative"
+      ? "bg-[#E82070] text-white hover:bg-[#C01358] shadow-[0_0_15px_rgba(232,32,112,0.3)]"
+      : "bg-[#F3BA4A] text-[#0A0C10] hover:bg-[#D97706] shadow-[0_0_15px_rgba(243,186,74,0.3)]";
+  const actionHoverClass = pinkAccent ? "hover:text-[#E82070]" : "hover:text-[#F3BA4A]";
 
   const controlledValue = value !== undefined ? value : text;
   const handleValueChange = onValueChange || setText;
@@ -56,9 +70,11 @@ export function MavenComposer({
             : `
           relative rounded-xl bg-[#1A1E2B]/70 border transition-all duration-200 overflow-hidden
           ${
-            mode === "creative"
-              ? "border-[#E82070]/40 focus-within:border-[#E82070] focus-within:shadow-[0_0_20px_rgba(232,32,112,0.15)]"
-              : "border-[#F3BA4A]/40 focus-within:border-[#F3BA4A] focus-within:shadow-[0_0_20px_rgba(243,186,74,0.15)]"
+            pinkAccent
+              ? composerBorderClass
+              : mode === "creative"
+                ? "border-[#E82070]/40 focus-within:border-[#E82070] focus-within:shadow-[0_0_20px_rgba(232,32,112,0.15)]"
+                : composerBorderClass
           }
         `
         }
@@ -77,12 +93,12 @@ export function MavenComposer({
               onClick={() => setMode("intelligence")}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1 ${
                 mode === "intelligence"
-                  ? "bg-[#F3BA4A]/10 text-[#F3BA4A] border border-[#F3BA4A]/20"
+                  ? activeModeClass
                   : "text-[#64748B] hover:text-[#94A3B8]"
               }`}
             >
-              <Sparkles className="w-3 h-3 text-[#F3BA4A]" />
-              <span>Intelligence</span>
+                <Sparkles className={`w-3 h-3 ${pinkAccent ? "text-[#E82070]" : "text-[#F3BA4A]"}`} />
+                <span>Intelligence</span>
             </button>
             <button
               type="button"
@@ -131,14 +147,14 @@ export function MavenComposer({
             <button
               type="button"
               onClick={onAttach}
-              className="p-2 text-[#64748B] hover:text-[#F3BA4A] rounded-xl hover:bg-[#12151E] transition-colors cursor-pointer"
+              className={`p-2 text-[#64748B] ${actionHoverClass} rounded-xl hover:bg-[#12151E] transition-colors cursor-pointer`}
               title="Attach File"
             >
               <Paperclip className="w-4 h-4" />
             </button>
             <button
               type="button"
-              className="p-2 text-[#64748B] hover:text-[#F3BA4A] rounded-xl hover:bg-[#12151E] transition-colors cursor-pointer"
+              className={`p-2 text-[#64748B] ${actionHoverClass} rounded-xl hover:bg-[#12151E] transition-colors cursor-pointer`}
               title="Voice Input"
             >
               <Mic className="w-4 h-4" />
@@ -152,11 +168,7 @@ export function MavenComposer({
             className={`flex items-center justify-center px-4 py-2.5 rounded-xl font-medium transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               flat ? "mt-2" : ""
             }
-              ${
-                mode === "creative"
-                  ? "bg-[#E82070] text-white hover:bg-[#C01358] shadow-[0_0_15px_rgba(232,32,112,0.3)]"
-                  : "bg-[#F3BA4A] text-[#0A0C10] hover:bg-[#D97706] shadow-[0_0_15px_rgba(243,186,74,0.3)]"
-              }
+              ${submitClass}
             `}
           >
             <Send className="w-4 h-4" />

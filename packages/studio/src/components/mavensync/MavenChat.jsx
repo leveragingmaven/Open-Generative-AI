@@ -29,6 +29,7 @@ export function MavenChat({
   mediaActions,
   variant = "card",
   onAttach,
+  accent = "gold",
 }) {
   const scrollRef = useRef(null);
   const flat = variant === "flat";
@@ -117,6 +118,7 @@ export function MavenChat({
           value={value}
           onValueChange={onValueChange}
           onAttach={onAttach}
+          accent={accent}
         />
       </div>
     </div>

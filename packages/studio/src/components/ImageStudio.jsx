@@ -33,6 +33,8 @@ import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
   PromptChevronIcon,
+  PromptMenuItem,
+  PromptMenuList,
   PromptPopover,
   PromptPopoverHeader,
   PromptQualityIcon,
@@ -1578,6 +1580,7 @@ return (
           onValueChange={setPrompt}
           composerControls={composerGenerationControls}
           onAttach={() => attachmentPickerRef.current?.()}
+          accent="pink"
         />
       </div>
 
