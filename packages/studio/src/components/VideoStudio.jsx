@@ -485,6 +485,10 @@ export default function VideoStudio({
   const textareaRef = useRef(null);
   const dropdownRef = useRef(null);
   const imageFileInputRef = useRef(null);
+  // Paperclip (composer attach) picker. Kept separate from imageFileInputRef,
+  // which belongs to the "+" creative image workflow.
+  const paperclipImageInputRef = useRef(null);
+  const paperclipAttachOptionsRef = useRef(null);
   const endImageFileInputRef = useRef(null);
   const videoFileInputRef = useRef(null);
   const resultVideoRef = useRef(null);
@@ -745,7 +749,7 @@ export default function VideoStudio({
   // ── Derived UI values ────────────────────────────────────────────────────
 
   const applyImageReferenceUrl = useCallback(
-    (url) => {
+    (url, options = {}) => {
       if (!url) return;
 
       setUploadedImageUrl(url);
@@ -777,9 +781,15 @@ export default function VideoStudio({
       const sibling = currentT2V?.family
         ? i2vModels.find((model) => model.family === currentT2V.family)
         : null;
+      // i2vModels[0] is the creative/effects entry ("ai-video-effects"). A plain
+      // reference attachment (paperclip) must land on a normal image-to-video model,
+      // while the "+" creative workflow keeps its existing target unchanged.
+      const preferredModel = options.preferGeneralI2V
+        ? i2vModels.find((model) => model.family !== "effects")
+        : null;
       const targetModel = imageMode
         ? i2vModels.find((model) => model.id === selectedModel)
-        : sibling || i2vModels[0];
+        : preferredModel || sibling || i2vModels[0];
 
       if (!targetModel) return;
 
@@ -828,7 +838,11 @@ export default function VideoStudio({
       setImageProgress(0);
       try {
         const url = await uploadFile(apiKey, file, setImageProgress);
-        applyImageReferenceUrl(url);
+        // Paperclip attaches a plain reference image and must land on a normal
+        // image-to-video model; the "+" workflow leaves this ref empty.
+        const attachOptions = paperclipAttachOptionsRef.current || {};
+        paperclipAttachOptionsRef.current = null;
+        applyImageReferenceUrl(url, attachOptions);
       } catch (err) {
         console.error("[VideoStudio] Image upload failed:", err);
         alert(`Image upload failed: ${err.message}`);
@@ -838,6 +852,24 @@ export default function VideoStudio({
       }
     },
     [apiKey, applyImageReferenceUrl],
+  );
+
+  // Composer paperclip -> plain reference image -> normal image-to-video path.
+  // Reuses the existing hidden input + uploadImageReference plumbing and never
+  // triggers the "+" creative/effects workflow.
+  const openPaperclipImagePicker = useCallback(() => {
+    paperclipImageInputRef.current?.click();
+  }, []);
+
+  const handlePaperclipImageChange = useCallback(
+    (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      paperclipAttachOptionsRef.current = { preferGeneralI2V: true };
+      uploadImageReference(file);
+    },
+    [uploadImageReference],
   );
 
   const processDroppedVideo = useCallback(
@@ -2041,6 +2073,14 @@ const composerPreviews = (
     >
       {/* LEFT: 35% Chat Workspace — MavenSync Assistant */}
       <div className="lg:col-span-4 h-full min-h-0">
+        {/* Paperclip (composer attach): plain reference image for the normal I2V path */}
+        <input
+          ref={paperclipImageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handlePaperclipImageChange}
+        />
         <MavenChat
           title="Video Studio"
           messages={chatMessages}
@@ -2051,6 +2091,7 @@ const composerPreviews = (
           placeholder={promptPlaceholder}
           value={prompt}
           onValueChange={setPrompt}
+          onAttach={openPaperclipImagePicker}
 composerControls={composerGenerationControls}
           previews={composerPreviews}
           mediaActions={composerMediaActions}
