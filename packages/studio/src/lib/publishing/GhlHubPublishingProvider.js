@@ -30,7 +30,7 @@ export function normalizeGhlHubAccount(input = {}) {
     platform,
     name: firstValue(input.name, input.account_name, input.accountName, input.username, input.handle, platform),
     username: firstValue(input.username, input.handle, input.account_name, input.accountName, input.name),
-    avatarUrl: firstValue(input.avatar_url, input.avatarUrl, input.profile_picture_url, input.profilePictureUrl, input.image_url, input.imageUrl) || null,
+    avatarUrl: firstValue(input.avatar, input.avatar_url, input.avatarUrl, input.profile_picture_url, input.profilePictureUrl, input.image_url, input.imageUrl) || null,
     status: input.connected === false || input.is_connected === false ? PUBLISHING_STATUS.CANCELLED : PUBLISHING_STATUS.PUBLISHED,
     connected: input.connected !== false && input.is_connected !== false,
     provider: PUBLISHING_PROVIDER_IDS.GHL_HUB,

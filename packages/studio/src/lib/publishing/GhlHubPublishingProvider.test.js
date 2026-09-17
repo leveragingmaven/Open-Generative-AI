@@ -34,6 +34,29 @@ test("normalizes verified Hub platforms and preserves account IDs exactly", asyn
   assert.equal(accounts[0].provider, PUBLISHING_PROVIDER_IDS.GHL_HUB);
 });
 
+test("normalizes the Hub account avatar field that Hub actually emits", async () => {
+  const provider = new GhlHubPublishingProvider({
+    fetchFn: async () => response({ accounts: [
+      { id: "fb-hub", platform: "facebook", name: "Brand Facebook", avatar: "https://cdn.test/hub-fb.png" },
+      { id: "ig-hub", platform: "instagram", name: "Brand Instagram", avatar: "https://cdn.test/hub-ig.png" },
+      { id: "threads-hub", platform: "threads", username: "@brand", avatar: "https://cdn.test/hub-th.png" },
+      { id: "pin-hub", platform: "pinterest", name: "Brand Pins", avatar: "https://cdn.test/hub-pi.png" },
+      { id: "no-avatar", platform: "facebook", name: "No Image" },
+    ] }),
+  });
+
+  const accounts = await provider.getConnectedAccounts();
+  assert.deepEqual(accounts.map((account) => account.avatarUrl), [
+    "https://cdn.test/hub-fb.png",
+    "https://cdn.test/hub-ig.png",
+    "https://cdn.test/hub-th.png",
+    "https://cdn.test/hub-pi.png",
+    null,
+  ]);
+  assert.equal(accounts[0].platform, "facebook");
+  assert.equal(accounts[4].avatarUrl, null);
+});
+
 test("Hub normalization retains no credentials, location fields, or raw upstream object", async () => {
   const provider = new GhlHubPublishingProvider({
     fetchFn: async () => response({ accounts: [{
