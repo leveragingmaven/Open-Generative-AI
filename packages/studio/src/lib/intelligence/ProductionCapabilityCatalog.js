@@ -2,6 +2,9 @@ import { capabilityRegistry } from "./CapabilityRegistry.js";
 import { providerCapabilityRegistry } from "./ProviderCapabilityRegistry.js";
 import { CAPABILITIES } from "./CapabilityTypes.js";
 import { PROVIDER_CONFIG } from "./config.js";
+import { PROVIDER_IDS } from "../providers/providerTypes.js";
+import { FAL_MODEL_IDS } from "../providers/FalProvider.js";
+import { FAL_ROUTING_MODELS } from "../providers/modelRoutingMetadata.js";
 
 export const PRODUCTION_CAPABILITIES = Object.freeze([
   { id: CAPABILITIES.TEXT_GENERATION, name: "Text and LLM Generation", operation: "text_generation", inputModalities: ["text"], outputModalities: ["text"] },
@@ -65,6 +68,37 @@ export const PRODUCTION_DEPLOYMENTS = Object.freeze([
     quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "image", unitCost: null },
     license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false, referenceImages: true },
     limits: { maxReferenceImages: 14, maxWidth: 4096, maxHeight: 4096 },
+  },
+  {
+    // M2: fal.ai direct BYOK deployments (metadata only). Values mirror the routing
+    // metadata introduced in M1 (`modelRoutingMetadata.js`). `priority` is held below
+    // the MuAPI default (10) so the CapabilityRouter can DISCOVER fal.ai as a candidate
+    // without ever preferring it automatically over the current MuAPI default.
+    id: "fal-flux-schnell-text-to-image",
+    providerId: PROVIDER_IDS.FAL,
+    logicalModel: FAL_ROUTING_MODELS[FAL_MODEL_IDS.TEXT_TO_IMAGE].logicalModel,
+    operation: CAPABILITIES.IMAGE_GENERATION,
+    capabilities: [CAPABILITIES.IMAGE_GENERATION],
+    inputs: ["text"], outputs: ["image"], priority: 8, confidence: 0.8,
+    featureState: "enabled", availability: "available", health: "healthy",
+    quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "image", unitCost: null },
+    license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false },
+    limits: { maxWidth: 4096, maxHeight: 4096 },
+    metadata: { endpointId: FAL_ROUTING_MODELS[FAL_MODEL_IDS.TEXT_TO_IMAGE].endpointId },
+  },
+  {
+    // M2: fal.ai FLUX Schnell Redux (image_editing) — metadata only. See note above.
+    id: "fal-flux-schnell-redux-image-editing",
+    providerId: PROVIDER_IDS.FAL,
+    logicalModel: FAL_ROUTING_MODELS[FAL_MODEL_IDS.IMAGE_TO_IMAGE].logicalModel,
+    operation: CAPABILITIES.IMAGE_EDITING,
+    capabilities: [CAPABILITIES.IMAGE_EDITING],
+    inputs: ["image", "text"], outputs: ["image"], priority: 8, confidence: 0.8,
+    featureState: "enabled", availability: "available", health: "healthy",
+    quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "image", unitCost: null },
+    license: { commercial: true }, supports: { asynchronous: true, polling: true, cancellation: false, referenceImages: true },
+    limits: { maxReferenceImages: 1 },
+    metadata: { endpointId: FAL_ROUTING_MODELS[FAL_MODEL_IDS.IMAGE_TO_IMAGE].endpointId },
   },
   {
     id: "muapi-ai-clipping",
