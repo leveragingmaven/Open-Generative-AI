@@ -30,8 +30,11 @@ test("Dedicated workflow routes are not classified as Studio home", () => {
   assert.ok(workflowPage?.includes("<MavenHomeDashboard />"), "slugless /studio still mounts Maven Home");
   assert.ok(workflowPage?.includes("<WorkflowStudio apiKey={studioApiKey}"), "dedicated workflow routes mount WorkflowStudio");
   assert.match(shellSource, /activeWorkspaceContent = <WorkflowStudio apiKey=\{studioApiKey\}/);
-  assert.match(shellSource, /path\.startsWith\('\/studio\/workflows\/'\)/);
-  assert.match(shellSource, /router\.replace\(`\/workflow\/\$\{urlWorkflowId\}`\)/);
+  assert.match(shellSource, /const getWorkflowInfo = useCallback\(\(\) => \{/);
+  assert.match(shellSource, /const wfIndex = slug\.findIndex\(s => s === 'workflows' \|\| s === 'workflow'\);/);
+  assert.match(shellSource, /id: slug\[wfIndex \+ 1\] \|\| null/);
+  assert.match(shellSource, /const \{ id: urlWorkflowId \} = getWorkflowInfo\(\);/);
+  assert.match(shellSource, /const isEditingWorkflow = \(activeTab === 'workflows' \|\| !!idFromParams\) && urlWorkflowId;/);
 });
 
 test("Workspace overview owns a dedicated route in the navigation registry", () => {
