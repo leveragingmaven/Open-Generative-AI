@@ -8,6 +8,14 @@ import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/inte
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { audioModels, getAudioModelById } from "../models.js";
+import {
+  defaultItemFor,
+  isStructuredInputSchema,
+  normalizePayloadForModel,
+  normalizeStructuredValue,
+  structuredItemLabel,
+  validateModelStructuredInputs,
+} from "../lib/audio/structuredInput.js";
 import { MavenButton } from "./mavensync/MavenButton.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 
@@ -225,6 +233,113 @@ function AudioListUploader({ label, value = [], onChange, apiKey, maxItems = 2 }
             onChange={(url) => handleItemChange(i, url)}
             apiKey={apiKey}
           />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Structured Input Editor (array-of-object fields, e.g. Gemini TTS speakers)
+// Renders the model schema's own properties as labelled inputs so customers
+// never edit raw JSON.
+// ---------------------------------------------------------------------------
+const PlusSmallIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+function StructuredInputEditor({ schema, value, onChange, addSeed }) {
+  const properties = schema?.items?.properties || {};
+  const items = Array.isArray(value) ? value : [];
+  const title = schema?.title || schema?.name || "Items";
+  const canRemove = items.length > 1;
+  const controlClass =
+    "w-full bg-[#121212] border border-[#2C2C2C] rounded-md px-3 py-2 text-sm text-[#FAFAFA] focus:border-[#E82070]/60 focus:outline-none transition-colors";
+
+  const updateItem = (index, property, next) => {
+    onChange(items.map((item, i) => (i === index ? { ...item, [property]: next } : item)));
+  };
+
+  const addItem = () => {
+    onChange([...items, defaultItemFor(schema, items.length, addSeed ? addSeed(items) : {})]);
+  };
+
+  const removeItem = (index) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <label className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+          {title}
+        </label>
+        <button
+          type="button"
+          onClick={addItem}
+          className="text-xs font-semibold text-[#E82070] hover:text-[#E82070]/80 transition-colors uppercase tracking-wider flex items-center gap-1.5"
+        >
+          <PlusSmallIcon /> Add
+        </button>
+      </div>
+
+      {schema?.description && (
+        <p className="text-[11px] text-[#8C8C8C] font-medium leading-relaxed">{schema.description}</p>
+      )}
+
+      <div className="space-y-3">
+        {items.map((item, index) => (
+          <div key={index} className="border border-[#2C2C2C] bg-[#161616] rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-[#FAFAFA] uppercase tracking-wider">
+                {structuredItemLabel(schema, index)}
+              </span>
+              {canRemove && (
+                <button
+                  type="button"
+                  onClick={() => removeItem(index)}
+                  className="text-xs font-semibold text-[#F87171] hover:text-[#F87171]/80 transition-colors uppercase tracking-wider flex items-center gap-1.5"
+                >
+                  <TrashIcon /> Remove
+                </button>
+              )}
+            </div>
+
+            {Object.entries(properties).map(([property, propertySchema]) => {
+              const valueOf = item?.[property] ?? "";
+              return (
+                <div key={property} className="space-y-1.5">
+                  <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                    {propertySchema?.title || property}
+                  </label>
+                  {Array.isArray(propertySchema?.enum) ? (
+                    <select
+                      value={valueOf}
+                      onChange={(event) => updateItem(index, property, event.target.value)}
+                      className={controlClass}
+                    >
+                      <option value="">Select…</option>
+                      {propertySchema.enum.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={valueOf}
+                      onChange={(event) => updateItem(index, property, event.target.value)}
+                      className={controlClass}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         ))}
       </div>
     </div>
@@ -520,8 +635,12 @@ export default function AudioStudio({
     if (!selectedModel) return;
     const initial = {};
     Object.entries(selectedModel.inputs || {}).forEach(([key, schema]) => {
-      // Don't overwrite parameters like vocal upload, list etc. if they are already in state
-      if (params[key] !== undefined) {
+      if (isStructuredInputSchema(schema)) {
+        // Array-of-object inputs always start as arrays, seeded from the model
+        // schema's own example; stale string values are repaired here.
+        initial[key] = normalizeStructuredValue(params[key], schema);
+      } else if (params[key] !== undefined) {
+        // Don't overwrite parameters like vocal upload, list etc. if they are already in state
         initial[key] = params[key];
       } else {
         initial[key] = schema.default !== undefined ? schema.default : "";
@@ -631,13 +750,22 @@ export default function AudioStudio({
       }
     }
 
+    // Structured (array-of-object) inputs must be valid before provider execution
+    const structuredCheck = validateModelStructuredInputs(selectedModel, params);
+    if (structuredCheck.error) {
+      alert(structuredCheck.error);
+      return;
+    }
+
     setIsGenerating(true);
     setGenerateError(null);
 
     try {
       const recipe = buildRecipe("audio", { prompt: params.prompt || "" });
+      // Structured fields are submitted as arrays of objects (normalisePayloadForModel
+      // returns flat-scalar models untouched).
       const audioParams = {
-        ...params,
+        ...normalizePayloadForModel(selectedModel, params),
         ...(params.prompt !== undefined ? { prompt: recipe.prompt } : {}),
         _modelId: selectedModelId,
       };
@@ -781,6 +909,23 @@ export default function AudioStudio({
                     value={params[key] || ""}
                     onChange={(url) => setParams(prev => ({ ...prev, [key]: url }))}
                     apiKey={apiKey}
+                  />
+                );
+              }
+              // Structured array-of-object inputs (e.g. Gemini TTS speakers / dialogue_turns).
+              // Must be handled before the generic string fall-through below.
+              if (isStructuredInputSchema(schema)) {
+                return (
+                  <StructuredInputEditor
+                    key={key}
+                    schema={schema}
+                    value={params[key]}
+                    onChange={(next) => setParams(prev => ({ ...prev, [key]: next }))}
+                    addSeed={(items) => {
+                      if (key !== "dialogue_turns") return {};
+                      const firstSpeaker = Array.isArray(params.speakers) ? params.speakers[0] : null;
+                      return firstSpeaker?.speaker_id ? { speaker_id: firstSpeaker.speaker_id } : {};
+                    }}
                   />
                 );
               }
