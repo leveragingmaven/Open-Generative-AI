@@ -4,6 +4,7 @@ import { requireCreatorIdentity } from '@/src/lib/creatorOsAuth';
 import { requireCreatorOsRateLimit } from '@/src/lib/creatorOsRateLimit';
 import { enrichAgentPredictionResult } from '@/src/lib/agentExecutionProposal';
 import { getAgentChatResponseContext } from '@/src/lib/agentChatResponseContext';
+import { resolveProviderCredential } from '@/src/lib/providerCredentialResolver';
 
 function cleanHeaders(request) {
     const headers = new Headers(request.headers);
@@ -16,13 +17,50 @@ function cleanHeaders(request) {
     return headers;
 }
 
-function getApiKey(request) {
-    if (isAgencyModeEnabled()) {
-        return getServerMuApiKey();
+// Credential source seam for the central MuAPI proxy.
+// Agency Mode always uses the server-owned MuAPI key and never touches a
+// customer credential. Non-agency (authenticated customer) traffic resolves the
+// customer's own encrypted, server-side MuAPI credential from trusted identity
+// only. An incoming browser `x-api-key` header is never a credential source.
+export async function resolveProxyMuApiCredential({
+    identity,
+    agencyMode = isAgencyModeEnabled(),
+    getServerKey = getServerMuApiKey,
+    resolveCredential = resolveProviderCredential,
+} = {}) {
+    if (agencyMode) {
+        return getServerKey();
     }
 
-    // Standalone mode keeps bring-your-own-key behavior through the local proxy.
-    return request.headers.get('x-api-key');
+    return resolveCredential({
+        accountId: identity?.accountId,
+        creatorIdentityKey: identity?.identityKey,
+        providerId: 'muapi',
+    });
+}
+
+export function credentialResolutionErrorResponse(error) {
+    const code = error?.code;
+
+    if (code === 'credential_identity_required' || code === 'creator_os_auth_required') {
+        return NextResponse.json(
+            { error: 'Creator OS authentication required.', code: 'creator_os_auth_required' },
+            { status: 401 }
+        );
+    }
+
+    if (code === 'provider_credential_required:muapi' || code === 'provider_credential_unavailable:muapi') {
+        return NextResponse.json(
+            { error: 'MuAPI BYOK credential is not configured for this account.', code },
+            { status: 503 }
+        );
+    }
+
+    // Do not expose resolver, storage, decryption, or provider details.
+    return NextResponse.json(
+        { error: 'MuAPI credential service is temporarily unavailable.', code: 'muapi_credential_unavailable' },
+        { status: 500 }
+    );
 }
 
 function missingApiKeyResponse() {
@@ -58,30 +96,53 @@ async function toNextResponse(response, { predictionContext = null, isPrediction
     });
 }
 
-async function proxyMuApiRequest(request, { params }) {
+async function proxyMuApiRequest(request, { params }, dependencies) {
+    const {
+        agencyMode = isAgencyModeEnabled(),
+        identity: injectedIdentity,
+        getServerKey = getServerMuApiKey,
+        resolveCredential = resolveProviderCredential,
+        fetchImpl = fetch,
+    } = dependencies || {};
+
     const auth = await requireCreatorIdentity(request);
     if (auth.response) return auth.response;
-    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: isAgencyModeEnabled() });
+    const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: agencyMode });
     if (rateLimit) return rateLimit;
     const slug = await params;
     const targetUrl = buildTargetUrl(request, slug.path);
     const headers = cleanHeaders(request);
-    const apiKey = getApiKey(request);
 
-    if (isAgencyModeEnabled() && !apiKey) {
+    let apiKey;
+    try {
+        apiKey = await resolveProxyMuApiCredential({
+            identity: injectedIdentity || auth.identity,
+            agencyMode,
+            getServerKey,
+            resolveCredential,
+        });
+    } catch (error) {
+        // Never surface resolver internals or credential material to the caller.
+        return credentialResolutionErrorResponse(error);
+    }
+
+    if (agencyMode && !apiKey) {
         return missingApiKeyResponse();
     }
 
-    if (apiKey) {
-        headers.set('x-api-key', apiKey);
+    if (!apiKey) {
+        return credentialResolutionErrorResponse({ code: 'provider_credential_required:muapi' });
     }
+
+    // The credential is always supplied server-side, never from browser headers.
+    headers.set('x-api-key', apiKey);
 
     try {
         const body = request.method === 'GET' || request.method === 'HEAD'
             ? undefined
             : await request.arrayBuffer();
 
-        const response = await fetch(targetUrl, {
+        const response = await fetchImpl(targetUrl, {
             method: request.method,
             headers,
             body,
