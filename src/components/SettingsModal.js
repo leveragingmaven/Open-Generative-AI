@@ -1,7 +1,7 @@
 import { LocalModelManager } from './LocalModelManager.js';
 import { isLocalAIAvailable } from '../lib/localInferenceClient.js';
 import { t } from '../lib/i18n.js';
-import { BYOK_CREDENTIAL_PROVIDERS, readProviderCredentialStatus, saveProviderCredential } from '../../packages/studio/src/lib/providers/providerCredentialClient.js';
+import { BYOK_CREDENTIAL_PROVIDERS, providerIsLaunchAvailable, providerLaunchStatus, readProviderCredentialStatus, saveProviderCredential } from '../../packages/studio/src/lib/providers/providerCredentialClient.js';
 
 export function SettingsModal(onClose) {
     const overlay = document.createElement('div');
@@ -52,8 +52,8 @@ export function SettingsModal(onClose) {
     const apiPanel = document.createElement('div');
     apiPanel.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
-            <p style="font-size:0.7rem;color:rgba(255,255,255,0.55);margin:0;">Configure one or more generation providers. Keys are encrypted and stored server-side for this Creator OS account.</p>
-            ${BYOK_CREDENTIAL_PROVIDERS.map((provider) => `<div><label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.4rem;font-weight:600;text-transform:capitalize;">${provider === 'openrouter' ? 'OpenRouter' : provider === 'muapi' ? 'MuAPI' : provider}</label><input id="settings-api-key-${provider}" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;padding:0.6rem 0.9rem;color:#fff;font-size:0.875rem;outline:none;" placeholder="Leave blank to keep current key"><span id="settings-api-status-${provider}" style="display:block;margin-top:0.25rem;font-size:0.65rem;color:rgba(255,255,255,0.35);">Checking secure status…</span></div>`).join('')}
+            <p style="font-size:0.7rem;color:rgba(255,255,255,0.55);margin:0;">Store provider keys for this Creator OS account. Keys are encrypted and kept server-side. Only the providers marked active below unlock Creator OS media generation today.</p>
+            ${BYOK_CREDENTIAL_PROVIDERS.map((provider) => { const launch = providerLaunchStatus(provider); return `<div><label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.4rem;font-weight:600;">${launch.label}${providerIsLaunchAvailable(provider) ? '' : ' — not active'}</label><input id="settings-api-key-${provider}" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;padding:0.6rem 0.9rem;color:#fff;font-size:0.875rem;outline:none;" placeholder="Leave blank to keep current key"><span style="display:block;margin-top:0.25rem;font-size:0.65rem;color:rgba(255,255,255,0.45);">${launch.detail}</span><span id="settings-api-status-${provider}" style="display:block;margin-top:0.25rem;font-size:0.65rem;color:rgba(255,255,255,0.35);">Checking secure status…</span></div>`; }).join('')}
             <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem;">
                 <button id="settings-cancel-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:none;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.75rem;font-weight:700;cursor:pointer;">${t('common.cancel')}</button>
                 <button id="settings-save-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:var(--color-primary,#22d3ee);color:#000;font-size:0.75rem;font-weight:700;cursor:pointer;border:none;">${t('common.save')}</button>

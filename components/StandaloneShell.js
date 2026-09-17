@@ -11,7 +11,7 @@ import CommandBar from '../packages/studio/src/components/CommandBar.jsx';
 import RecoverableErrorBoundary, { RecoverableErrorFallback } from '../packages/studio/src/components/RecoverableErrorBoundary.jsx';
 import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
-import { BYOK_CREDENTIAL_PROVIDERS, readProviderCredentialStatus, revokeProviderCredential, saveProviderCredential } from '../packages/studio/src/lib/providers/providerCredentialClient.js';
+import { BYOK_CREDENTIAL_PROVIDERS, providerIsLaunchAvailable, providerLaunchStatus, readProviderCredentialStatus, revokeProviderCredential, saveProviderCredential } from '../packages/studio/src/lib/providers/providerCredentialClient.js';
 
 const STORAGE_KEY = 'muapi_key';
 function WorkspaceLoading({ label }) {
@@ -797,15 +797,20 @@ const handleTabChange = (tabId) => {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 space-y-4 mb-8">
           {BYOK_CREDENTIAL_PROVIDERS.map((provider) => {
             const status = byokStatuses[provider];
-            const label = provider === 'muapi' ? 'MuAPI' : provider === 'fal' ? 'fal.ai' : provider === 'kie' ? 'Kie.ai' : 'OpenRouter';
+            const launch = providerLaunchStatus(provider);
+            const label = launch.label;
             const key = byokKeys[provider] || '';
             return <div key={provider} className="bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] rounded-[var(--ms-radius-card-small)] p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <label htmlFor={`agent-execution-${provider}-key`} className="block text-xs font-bold text-[var(--ms-color-text-muted)]">{label} BYOK</label>
+              <label htmlFor={`agent-execution-${provider}-key`} className="block text-xs font-bold text-[var(--ms-color-text-muted)]">
+                {label} BYOK
+                {!providerIsLaunchAvailable(provider) && <span className="ml-2 text-[10px] font-semibold text-amber-300">Not active</span>}
+              </label>
               <span className={`text-[10px] font-semibold ${status?.configured ? 'text-emerald-400' : 'text-amber-300'}`}>
                 {byokBusy && !status ? 'Checking…' : status?.configured ? 'Configured' : 'Not configured'}
               </span>
             </div>
+            <p className="text-[10px] leading-4 text-[var(--ms-color-text-muted)]">{launch.detail}</p>
             <input
               id={`agent-execution-${provider}-key`}
               type="password"

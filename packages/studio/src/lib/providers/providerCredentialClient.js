@@ -1,6 +1,51 @@
 const MUAPI_CREDENTIAL_PATH = "/api/provider-credentials/muapi";
 export const BYOK_CREDENTIAL_PROVIDERS = ["muapi", "kie", "fal", "openrouter"];
 
+// M5: customer-facing launch status for each storable BYOK provider.
+//
+// Credential STORAGE support remains for every provider in
+// BYOK_CREDENTIAL_PROVIDERS (see saveProviderCredential/readProviderCredentialStatus
+// below) and the server-side allowlist is unchanged. This metadata exists only so
+// Settings can state honestly which saved keys currently power working Creator OS
+// media generation.
+export const PROVIDER_LAUNCH_STATUS = Object.freeze({
+  muapi: Object.freeze({
+    label: "MuAPI",
+    state: "available",
+    detail: "Powers Creator OS media generation across the studio — images, video, and audio.",
+  }),
+  fal: Object.freeze({
+    label: "fal.ai",
+    state: "available",
+    detail: "Saving a fal.ai key unlocks the supported fal.ai models (FLUX Schnell and FLUX Schnell Redux) in Image Studio.",
+  }),
+  kie: Object.freeze({
+    label: "Kie.ai",
+    state: "not_available",
+    detail: "Not active yet — a Kie.ai key can be stored, but it does not unlock Creator OS media generation.",
+  }),
+  openrouter: Object.freeze({
+    label: "OpenRouter",
+    state: "not_available",
+    detail: "Not active — OpenRouter is not a Creator OS media generation provider.",
+  }),
+});
+
+export function providerLaunchStatus(provider) {
+  return (
+    PROVIDER_LAUNCH_STATUS[provider] ||
+    Object.freeze({
+      label: provider,
+      state: "not_available",
+      detail: "Not active — this provider does not unlock Creator OS media generation.",
+    })
+  );
+}
+
+export function providerIsLaunchAvailable(provider) {
+  return providerLaunchStatus(provider).state === "available";
+}
+
 async function requestCredential(fetcher, options) {
   const response = await fetcher(options.path || MUAPI_CREDENTIAL_PATH, options);
   let body = {};
