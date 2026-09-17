@@ -29,6 +29,7 @@ import {
   getI2IModelById,
 } from "../models.js";
 import { FAL_MODEL_IDS } from "../lib/providers/FalProvider.js";
+import { effectiveTransport, falRoutingMetadata, withExplicitRouting } from "../lib/providers/modelRoutingMetadata.js";
 import {
   PROMPT_CONTROL_LABEL_CLASS,
   PromptAspectRatioIcon,
@@ -1030,7 +1031,9 @@ export default function ImageStudio({
   // ── Derived: current model lists & helpers ───────────────────────────────
   const currentModels = [
     ...(imageMode ? i2iModels : t2iModels),
-    ...(imageMode ? [{ id: FAL_MODEL_IDS.IMAGE_TO_IMAGE, name: "FLUX Schnell Redux (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }] : [{ id: FAL_MODEL_IDS.TEXT_TO_IMAGE, name: "FLUX Schnell (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }]),
+    ...(imageMode
+      ? [withExplicitRouting({ id: FAL_MODEL_IDS.IMAGE_TO_IMAGE, name: "FLUX Schnell Redux (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }, falRoutingMetadata(FAL_MODEL_IDS.IMAGE_TO_IMAGE))]
+      : [withExplicitRouting({ id: FAL_MODEL_IDS.TEXT_TO_IMAGE, name: "FLUX Schnell (fal.ai)", provider: "fal", inputs: { aspect_ratio: { default: "1:1" } } }, falRoutingMetadata(FAL_MODEL_IDS.TEXT_TO_IMAGE))]),
   ];
   const currentAspectRatios = imageMode
     ? getAspectRatiosForI2IModel(selectedModelId)
@@ -1257,7 +1260,7 @@ export default function ImageStudio({
               references: uploadedImageUrls,
               swapUrl: swapImageUrl,
               imageMode: true,
-              providerId: currentModels.find((model) => model.id === selectedModelId)?.provider || "muapi",
+              providerId: effectiveTransport(currentModels.find((model) => model.id === selectedModelId)),
               inputs: genParams,
               apiKey,
             }), { legacyExecute: () => generateI2I(apiKey, genParams) });
@@ -1282,7 +1285,7 @@ export default function ImageStudio({
               qualityField: currentQualityField,
               quality: selectedQuality,
               imageMode: false,
-              providerId: currentModels.find((model) => model.id === selectedModelId)?.provider || "muapi",
+              providerId: effectiveTransport(currentModels.find((model) => model.id === selectedModelId)),
               inputs: genParams,
               apiKey,
             }), { legacyExecute: () => generateImage(apiKey, genParams) });
