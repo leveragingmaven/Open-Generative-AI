@@ -90,7 +90,7 @@ export async function handleZernioPublishingRequest(request, {
   if (request.method === 'GET' && key === 'profile') {
     try {
       const profile = await ensureZernioProfile({ identity: auth.identity, repository, client });
-      return NextResponse.json({ profile: { name: profile.profileName, status: profile.status } });
+      return NextResponse.json({ profile: { name: profile.profileName } });
     } catch (error) {
       return jsonError(error, 'Unable to load the Maven Social profile.');
     }

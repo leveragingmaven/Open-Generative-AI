@@ -7,6 +7,7 @@ import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
+import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -66,7 +67,6 @@ function accountsForPlatform(accounts, platform) {
 function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
 function isReadOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB || providerId === PUBLISHING_PROVIDER_IDS.POSTIZ; }
 function isAccountOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.ZERNIO; }
-function connectionUrl(response) { return response?.url || response?.connect_url || response?.connectUrl || response?.authorization_url || response?.authorizationUrl || response?.data?.url || response?.data?.connect_url || null; }
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
 
@@ -197,6 +197,16 @@ export default function PublishingStudio() {
     const returnedFromOAuth = window.sessionStorage.getItem(PUBLISHING_OAUTH_RETURN_KEY) === "1";
     if (returnedFromOAuth) window.sessionStorage.removeItem(PUBLISHING_OAUTH_RETURN_KEY);
     const params = new URLSearchParams(window.location.search);
+    const oauthReturn = returnedFromOAuth ? parseOAuthReturn(params) : null;
+    if (oauthReturn?.kind === "success") {
+      setNotice({ tone: "success", text: "Maven Social account connected successfully." });
+    } else if (oauthReturn?.kind === "error") {
+      setNotice({ tone: "error", text: oauthReturn.message });
+    }
+    if (oauthReturn) {
+      const cleanedUrl = cleanOAuthReturnUrl(window.location.href);
+      window.history.replaceState(window.history.state, "", cleanedUrl);
+    }
     const draftId = params.get("draft");
     if (draftId) {
       setFocusedDraftId(draftId);

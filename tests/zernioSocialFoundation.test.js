@@ -3,13 +3,15 @@ import test from 'node:test';
 import { publishingProviderRegistry } from '../packages/studio/src/lib/publishing/PublishingProviderRegistry.js';
 import { PUBLISHING_PROVIDER_IDS } from '../packages/studio/src/lib/publishing/publishingTypes.js';
 import { ZERNIO_CONNECTION_CATALOG, getZernioConnectionOption } from '../packages/studio/src/lib/publishing/zernioConnectionCatalog.js';
-import { InMemoryZernioRepository } from '../src/lib/zernioRepository.js';
+import { InMemoryZernioRepository, newZernioProfileName } from '../src/lib/zernioRepository.js';
 import {
   ensureZernioProfile,
   getTenantZernioAccount,
   getZernioConnectUrl,
   listTenantZernioAccounts,
+  normalizeZernioAccount,
 } from '../src/lib/zernioSocialService.js';
+import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from '../packages/studio/src/lib/publishing/zernioOAuth.js';
 import { handleZernioPublishingRequest } from '../app/api/publishing/zernio/[[...path]]/route.js';
 import { ZernioPublishingProvider } from '../packages/studio/src/lib/publishing/ZernioPublishingProvider.js';
 
@@ -26,7 +28,7 @@ function fakeClient() {
       createProfile: async ({ body }) => {
         calls.push({ method: 'createProfile', body });
         const id = `profile-${profiles.size + 1}`;
-        const profile = { _id: id, name: body.name, status: 'active' };
+        const profile = { _id: id, name: body.name };
         profiles.set(id, profile);
         return { data: { profile } };
       },
@@ -397,6 +399,58 @@ test('Maven Social returns an empty remote schedule during Phase 1 while schedul
     () => provider.schedulePost(),
     (error) => error.code === 'zernio_scheduling_not_available' && error.status === 501,
   );
+});
+
+test('official authUrl is preferred while existing provider URL aliases remain supported', () => {
+  assert.equal(connectionUrl({ authUrl: 'https://zernio.test/auth', url: 'https://other.test' }), 'https://zernio.test/auth');
+  assert.equal(connectionUrl({ url: 'https://provider.test/auth' }), 'https://provider.test/auth');
+  assert.equal(connectionUrl({ authorizationUrl: 'https://provider.test/authorization' }), 'https://provider.test/authorization');
+});
+
+test('official account mappings preserve image, active, reconnect, and native id fields', async () => {
+  const profile = { zernioProfileId: 'profile-a' };
+  const account = normalizeZernioAccount({
+    _id: 'account-a',
+    platform: 'instagram',
+    username: 'brand',
+    displayName: 'Brand',
+    profilePicture: 'https://cdn.test/profile.jpg',
+    isActive: true,
+    needsReconnection: true,
+  }, profile, tenantA);
+
+  assert.equal(account.zernioAccountId, 'account-a');
+  assert.equal(account.profileImageUrl, 'https://cdn.test/profile.jpg');
+  assert.equal(account.isActive, true);
+  assert.equal(account.needsReconnect, true);
+  assert.equal(account.status, 'connected');
+});
+
+test('OAuth return parsing is sanitized and cleanup preserves unrelated navigation', () => {
+  const success = parseOAuthReturn('?connected=instagram&profileId=p1&accountId=a1&username=brand&tab=accounts');
+  assert.deepEqual(success, { kind: 'success', platform: 'instagram', profileId: 'p1', accountId: 'a1', username: 'brand' });
+  assert.equal(cleanOAuthReturnUrl('https://creator.test/studio/publishing?connected=instagram&profileId=p1&tab=accounts#accounts'), 'https://creator.test/studio/publishing?tab=accounts#accounts');
+
+  const failure = parseOAuthReturn('?error=oauth_denied&platform=instagram&error_message=secret-provider-detail');
+  assert.equal(failure.kind, 'error');
+  assert.equal(failure.message, 'Maven Social connection was cancelled or denied.');
+  assert.equal(failure.message.includes('secret-provider-detail'), false);
+});
+
+test('profile conflict recovery validates documented existingProfileId server-side', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = {
+    profiles: {
+      createProfile: async () => ({
+        error: { code: 'profile_name_conflict', details: { existingProfileId: 'profile-existing' } },
+        response: { status: 409 },
+      }),
+      listProfiles: async () => ({ data: { profiles: [{ _id: 'profile-existing', name: newZernioProfileName(tenantA.accountId) }] } }),
+    },
+  };
+  const recovered = await ensureZernioProfile({ identity: tenantA, repository, client });
+  assert.equal(recovered.zernioProfileId, 'profile-existing');
+  assert.equal(recovered.status, 'active');
 });
 
 test('upstream errors are sanitized', async () => {

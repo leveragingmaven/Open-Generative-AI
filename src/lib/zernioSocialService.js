@@ -45,6 +45,9 @@ function unwrapResponse(response, fallback = 'Maven Social is temporarily unavai
     error.code = mapped?.code || 'zernio_upstream_error';
     error.status = mapped?.status || response?.response?.status || 502;
     error.providerStatus = response?.response?.status;
+    // Keep provider metadata internal for narrowly validated recovery only.
+    error.providerCode = providerCode;
+    error.providerDetails = response.error?.details;
     throw error;
   }
   return response?.data || response || {};
@@ -83,7 +86,8 @@ function profileRecord(profile, identity) {
     accountId: String(identity.accountId),
     creatorIdentityKey: identity.creatorIdentityKey,
     profileName: profileNameOf(profile) || newZernioProfileName(identity.accountId),
-    status: profile?.status || 'active',
+    // Local record state only; Zernio's Profile type has no authoritative status field.
+    status: 'active',
   };
 }
 
@@ -92,6 +96,7 @@ function statusOf(account) {
   if (['connected', 'active', 'healthy', 'published'].includes(value)) return 'connected';
   if (['disconnected', 'revoked', 'cancelled', 'canceled', 'failed', 'error'].includes(value)) return 'disconnected';
   if (['needs_reconnect', 'reconnect_required', 'expired', 'invalid'].includes(value)) return 'needs_reconnect';
+  if (account?.isActive === true || account?.is_active === true) return 'connected';
   return account?.isActive === false || account?.is_active === false ? 'disconnected' : 'unknown';
 }
 
@@ -99,6 +104,11 @@ export function normalizeZernioAccount(account = {}, profile, identity) {
   const zernioAccountId = account?._id || account?.id || account?.accountId || account?.account_id;
   if (zernioAccountId === undefined || zernioAccountId === null || zernioAccountId === '') return null;
   const status = statusOf(account);
+  const isActive = typeof account.isActive === 'boolean'
+    ? account.isActive
+    : typeof account.is_active === 'boolean'
+      ? account.is_active
+      : status !== 'disconnected';
   return {
     zernioAccountId: String(zernioAccountId),
     zernioProfileId: String(profile.zernioProfileId),
@@ -107,10 +117,13 @@ export function normalizeZernioAccount(account = {}, profile, identity) {
     platform: String(account.platform || account.network || account.type || '').toLowerCase(),
     username: account.username || account.handle || null,
     displayName: account.displayName || account.display_name || account.name || null,
-    profileImageUrl: account.profileImageUrl || account.profile_image_url || account.avatar || account.avatarUrl || null,
+    profileImageUrl: account.profilePicture ?? account.profileImageUrl ?? account.profile_image_url ?? account.avatar ?? account.avatarUrl ?? null,
     status,
-    isActive: account.isActive !== false && account.is_active !== false && status !== 'disconnected',
-    needsReconnect: status === 'needs_reconnect' || account.needsReconnect === true || account.needs_reconnect === true,
+    isActive,
+    needsReconnect: account.needsReconnection === true
+      || account.needsReconnect === true
+      || account.needs_reconnect === true
+      || status === 'needs_reconnect',
   };
 }
 
@@ -131,12 +144,22 @@ export function sanitizeZernioAccount(account = {}) {
 export function sanitizeZernioProfile(profile = {}) {
   return {
     name: profile.profileName,
-    status: profile.status,
   };
 }
 
 function isProfileConflict(error) {
-  return error?.status === 409 || error?.statusCode === 409 || error?.code === 'profile_name_conflict' || error?.body?.code === 'profile_name_conflict';
+  return error?.status === 409
+    || error?.statusCode === 409
+    || error?.code === 'profile_name_conflict'
+    || error?.providerCode === 'profile_name_conflict'
+    || error?.body?.code === 'profile_name_conflict';
+}
+
+function existingProfileIdOf(error) {
+  return error?.providerDetails?.existingProfileId
+    || error?.body?.details?.existingProfileId
+    || error?.details?.existingProfileId
+    || null;
 }
 
 export async function ensureZernioProfile({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
@@ -151,8 +174,14 @@ export async function ensureZernioProfile({ identity, repository = new MySqlZern
     return repository.saveProfile({ ...profile, ...owner });
   } catch (error) {
     if (!isProfileConflict(error) || !client.profiles?.listProfiles) throw sanitizeZernioError(error, 'Unable to create the Maven Social profile.');
+    const existingProfileId = existingProfileIdOf(error);
+    if (!existingProfileId) throw sanitizeZernioError(error, 'Unable to create the Maven Social profile.');
     const profiles = listOf(unwrapResponse(await client.profiles.listProfiles(), 'Unable to load Maven Social profiles.'), 'profiles');
-    const matching = profiles.find((candidate) => profileNameOf(candidate) === profileName);
+    // Validate the provider-reported ID against a fresh server-side profile list and the expected name.
+    const matching = profiles.find((candidate) => (
+      String(profileIdOf(candidate)) === String(existingProfileId)
+      && profileNameOf(candidate) === profileName
+    ));
     if (!matching) throw sanitizeZernioError(error, 'Unable to create the Maven Social profile.');
     const profile = profileRecord(matching, owner);
     return repository.saveProfile({ ...profile, ...owner });
