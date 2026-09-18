@@ -5,6 +5,7 @@ export const PUBLISHING_PROVIDER_IDS = {
   MUAPI: "muapi",
   GHL_HUB: "ghl_hub",
   POSTIZ: "postiz",
+  ZERNIO: "zernio",
 };
 
 export const PUBLISHING_STATUS = {

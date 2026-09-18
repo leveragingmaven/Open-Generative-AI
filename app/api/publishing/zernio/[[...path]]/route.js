@@ -1,0 +1,125 @@
+import { NextResponse } from 'next/server.js';
+import { requireCreatorIdentity } from '../../../../../src/lib/creatorOsAuth.js';
+import { requireCreatorOsRateLimit } from '../../../../../src/lib/creatorOsRateLimit.js';
+import { getZernioClient } from '../../../../../src/lib/zernioClient.js';
+import { MySqlZernioRepository } from '../../../../../src/lib/zernioRepository.js';
+import {
+  ensureZernioProfile,
+  getZernioConnectUrl,
+  listTenantZernioAccounts,
+  sanitizeZernioError,
+} from '../../../../../src/lib/zernioSocialService.js';
+
+function jsonError(error, fallback = 'Maven Social is temporarily unavailable.') {
+  const safe = sanitizeZernioError(error, fallback);
+  return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
+}
+
+function routeKey(path = []) {
+  if (path.length === 0) return '';
+  if (path.join('/') === 'accounts') return 'accounts';
+  if (path.join('/') === 'accounts/connect') return 'accounts/connect';
+  if (path.join('/') === 'profile') return 'profile';
+  if (path[0] === 'accounts' && path.length === 2) return 'accounts/:accountId';
+  return path.join('/');
+}
+
+function sameOriginRedirect(request, value) {
+  const origin = new URL(request.url).origin;
+  if (!value) return `${origin}/studio/publishing`;
+  try {
+    const url = new URL(value, origin);
+    if (url.origin !== origin) {
+      const error = new Error('OAuth return URL must remain inside Creator OS.');
+      error.code = 'zernio_invalid_redirect';
+      error.status = 400;
+      throw error;
+    }
+    return url.toString();
+  } catch (error) {
+    if (error.code === 'zernio_invalid_redirect') throw error;
+    const invalid = new Error('OAuth return URL is invalid.');
+    invalid.code = 'zernio_invalid_redirect';
+    invalid.status = 400;
+    throw invalid;
+  }
+}
+
+async function body(request) {
+  try { return await request.json(); } catch { return {}; }
+}
+
+export async function handleZernioPublishingRequest(request, {
+  params,
+  authenticate = requireCreatorIdentity,
+  rateLimit = requireCreatorOsRateLimit,
+  repository = new MySqlZernioRepository(),
+  client = getZernioClient(),
+} = {}) {
+  const auth = await authenticate(request);
+  if (auth.response) return auth.response;
+  const limited = rateLimit(request, auth.identity, { agencyFunded: false });
+  if (limited) return limited;
+
+  const resolvedParams = await params;
+  const key = routeKey(resolvedParams?.path || []);
+  if (request.method === 'GET' && key === 'profile') {
+    try {
+      const profile = await ensureZernioProfile({ identity: auth.identity, repository, client });
+      return NextResponse.json({ profile: { name: profile.profileName, status: profile.status } });
+    } catch (error) {
+      return jsonError(error, 'Unable to load the Maven Social profile.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'accounts') {
+    try {
+      return NextResponse.json(await listTenantZernioAccounts({ identity: auth.identity, repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social accounts.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'accounts/:accountId') {
+    try {
+      const result = await listTenantZernioAccounts({ identity: auth.identity, repository, client });
+      const requestedId = String(resolvedParams.path[1]);
+      const account = result.accounts.find((candidate) => String(candidate.id) === requestedId);
+      if (!account) {
+        const error = new Error('The requested social account is not available to this tenant.');
+        error.code = 'zernio_account_not_owned';
+        error.status = 403;
+        throw error;
+      }
+      return NextResponse.json({ account });
+    } catch (error) {
+      return jsonError(error, 'Unable to load the requested Maven Social account.');
+    }
+  }
+
+  if (request.method === 'POST' && key === 'accounts/connect') {
+    try {
+      const input = await body(request);
+      const result = await getZernioConnectUrl({
+        identity: auth.identity,
+        platform: input.platform,
+        redirectUrl: sameOriginRedirect(request, input.redirectTo || input.redirect_to),
+        repository,
+        client,
+      });
+      return NextResponse.json(result);
+    } catch (error) {
+      return jsonError(error, 'Unable to start the Maven Social account connection.');
+    }
+  }
+
+  return NextResponse.json({ error: 'Maven Social route not found.', code: 'not_found' }, { status: 404 });
+}
+
+export async function GET(request, context) {
+  return handleZernioPublishingRequest(request, context);
+}
+
+export async function POST(request, context) {
+  return handleZernioPublishingRequest(request, context);
+}

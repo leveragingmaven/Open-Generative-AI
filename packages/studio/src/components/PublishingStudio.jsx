@@ -54,6 +54,7 @@ function accountsForPlatform(accounts, platform) { return accounts.filter((accou
 function accountRecordForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform) || null; }
 function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
 function isReadOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB || providerId === PUBLISHING_PROVIDER_IDS.POSTIZ; }
+function isAccountOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.ZERNIO; }
 function connectionUrl(response) { return response?.url || response?.connect_url || response?.connectUrl || response?.authorization_url || response?.authorizationUrl || response?.data?.url || response?.data?.connect_url || null; }
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
@@ -219,6 +220,10 @@ export default function PublishingStudio() {
   ])], [accounts, drafts, history]);
 
   const createDraft = (asset) => {
+    if (isAccountOnlyProvider(providerId)) {
+      setNotice({ tone: "neutral", text: "Maven Social account connection is available now; publishing will be enabled in a later phase." });
+      return null;
+    }
     try {
       const draft = centerRef.current.createDraftFromAsset(asset);
       setFocusedDraftId(draft.id);
@@ -232,6 +237,10 @@ export default function PublishingStudio() {
   };
 
   const createBlankDraft = () => {
+    if (isAccountOnlyProvider(providerId)) {
+      setNotice({ tone: "neutral", text: "Maven Social account connection is available now; publishing will be enabled in a later phase." });
+      return null;
+    }
     try {
       const draft = centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
       setFocusedDraftId(draft.id);
@@ -369,6 +378,10 @@ export default function PublishingStudio() {
   };
 
   const scheduleDraft = async (draft) => {
+    if (isAccountOnlyProvider(providerId)) {
+      setNotice({ tone: "neutral", text: "Maven Social scheduling will be enabled in a later phase." });
+      return;
+    }
     if (!scheduleValue) {
       setNotice({ tone: "error", text: "Choose a date and time before scheduling." });
       return;
@@ -422,6 +435,10 @@ export default function PublishingStudio() {
   };
 
   const publishDraft = async (draft) => {
+    if (isAccountOnlyProvider(providerId)) {
+      setNotice({ tone: "neutral", text: "Maven Social publishing will be enabled in a later phase." });
+      return;
+    }
     if (!window.confirm(`Publish ${draftField(draft, "title") || "this draft"} now?`)) return;
     setBusyId(draft.id);
     setNotice(null);
@@ -592,8 +609,10 @@ export default function PublishingStudio() {
             <option value={PUBLISHING_PROVIDER_IDS.MUAPI}>MuAPI</option>
             <option value={PUBLISHING_PROVIDER_IDS.GHL_HUB}>MavenSync Hub / GoHighLevel</option>
             <option value={PUBLISHING_PROVIDER_IDS.POSTIZ}>Postiz</option>
+            <option value={PUBLISHING_PROVIDER_IDS.ZERNIO}>Maven Social</option>
           </select>
         </div>
+        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social account connection is ready. Publishing and scheduling will be added in a later phase.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {PLATFORM_OPTIONS.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
             const account = accountRecordForPlatform(accounts, platform.id);

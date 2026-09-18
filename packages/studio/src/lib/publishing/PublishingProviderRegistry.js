@@ -1,6 +1,7 @@
 import { muApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { ghlHubPublishingProvider } from "./GhlHubPublishingProvider.js";
 import { postizPublishingProvider } from "./PostizPublishingProvider.js";
+import { zernioPublishingProvider } from "./ZernioPublishingProvider.js";
 import { PUBLISHING_PROVIDER_IDS } from "./publishingTypes.js";
 
 export class PublishingProviderRegistry {
@@ -10,6 +11,7 @@ export class PublishingProviderRegistry {
     this.register(muApiPublishingProvider);
     this.register(ghlHubPublishingProvider);
     this.register(postizPublishingProvider);
+    this.register(zernioPublishingProvider);
   }
 
   register(provider) {
