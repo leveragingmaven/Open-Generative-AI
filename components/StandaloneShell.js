@@ -881,13 +881,14 @@ const handleTabChange = (tabId) => {
                 <a
                   href="/studio"
                   aria-label="Back to Dashboard"
-                  className="hidden md:flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] font-semibold text-white/60 hover:text-white transition-colors"
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-[#1B1B1B] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 transition-colors hover:border-[#D4A858]/40 hover:bg-[#232323] hover:text-white"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M19 12H5" />
                     <path d="M12 19l-7-7 7-7" />
                   </svg>
-                  <span>Dashboard</span>
+                  <span className="hidden sm:inline">Back to Dashboard</span>
+                  <span className="sm:hidden">Dashboard</span>
                 </a>
               )}
 <div className="min-w-0 border-l border-[#D4A858]/50 pl-3">
