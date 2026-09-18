@@ -684,6 +684,13 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
                 </svg>
                 All Workflows
               </button>
+              <button
+                onClick={() => router.push("/studio")}
+                className="text-xs font-bold text-white/50 hover:text-white transition-colors"
+                type="button"
+              >
+                Dashboard
+              </button>
 
               <div className="h-4 w-[1px] bg-white/10" />
 
@@ -747,6 +754,14 @@ export default function WorkflowStudio({ apiKey, isHeaderVisible = true, onToggl
                type="button"
             >
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <button
+              onClick={() => router.push("/studio")}
+              className="px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white/50 hover:text-white transition-colors"
+              title="Return to Creator OS Dashboard"
+              type="button"
+            >
+              Dashboard
             </button>
             
             <div className="h-4 w-[1px] bg-white/10" />
