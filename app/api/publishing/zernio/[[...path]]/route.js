@@ -24,8 +24,32 @@ function routeKey(path = []) {
   return path.join('/');
 }
 
+function firstHeaderValue(request, name) {
+  return request.headers.get(name)?.split(',')[0]?.trim() || '';
+}
+
+function forwardedOrigin(request) {
+  const requestOrigin = new URL(request.url);
+  const forwarded = firstHeaderValue(request, 'forwarded');
+  const forwardedParameters = forwarded
+    ? Object.fromEntries(forwarded.split(';').map((part) => {
+      const separator = part.indexOf('=');
+      if (separator < 0) return [part.trim().toLowerCase(), ''];
+      return [part.slice(0, separator).trim().toLowerCase(), part.slice(separator + 1).trim().replace(/^"|"$/g, '')];
+    }))
+    : {};
+  const protocol = forwardedParameters.proto || firstHeaderValue(request, 'x-forwarded-proto') || requestOrigin.protocol.slice(0, -1);
+  const host = forwardedParameters.host || firstHeaderValue(request, 'x-forwarded-host') || requestOrigin.host;
+  if (!['http', 'https'].includes(protocol) || !host || /[\\/?#@]/.test(host)) return requestOrigin.origin;
+  try {
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return requestOrigin.origin;
+  }
+}
+
 function sameOriginRedirect(request, value) {
-  const origin = new URL(request.url).origin;
+  const origin = forwardedOrigin(request);
   if (!value) return `${origin}/studio/publishing`;
   try {
     const url = new URL(value, origin);

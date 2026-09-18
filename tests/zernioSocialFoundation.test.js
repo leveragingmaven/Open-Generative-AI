@@ -230,6 +230,131 @@ test('route connect ignores browser profile and returns no profile identifier or
   assert.equal(call.input.query.profileId, 'profile-1');
 });
 
+test('valid production Publishing redirect uses the public reverse-proxy origin', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const browserRedirect = 'https://creator.example/studio/publishing?tab=accounts#instagram';
+  const request = new Request('http://creator-os:3000/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-forwarded-host': 'creator.example',
+      'x-forwarded-proto': 'https',
+    },
+    body: JSON.stringify({ platform: 'instagram', redirectTo: browserRedirect }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await response.json();
+  const call = client.calls.find((item) => item.method === 'getConnectUrl');
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.authUrl, 'https://zernio.test/connect/instagram');
+  assert.equal(call.input.query.redirect_url, browserRedirect);
+});
+
+test('reverse-proxy Forwarded header also determines the public Creator OS origin', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const request = new Request('http://creator-os:3000/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      forwarded: 'for=198.51.100.7;proto=https;host=creator.example',
+    },
+    body: JSON.stringify({ platform: 'instagram', redirectTo: '/studio/publishing' }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const call = client.calls.find((item) => item.method === 'getConnectUrl');
+
+  assert.equal(response.status, 200);
+  assert.equal(call.input.query.redirect_url, 'https://creator.example/studio/publishing');
+});
+
+test('relative Publishing redirect is resolved within the trusted public origin', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const request = new Request('https://creator.example/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'instagram', redirect_to: '/studio/publishing?connected=instagram' }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const call = client.calls.find((item) => item.method === 'getConnectUrl');
+
+  assert.equal(response.status, 200);
+  assert.equal(call.input.query.redirect_url, 'https://creator.example/studio/publishing?connected=instagram');
+});
+
+test('malicious external Publishing redirect is rejected without contacting Zernio', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const request = new Request('http://creator-os:3000/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-forwarded-host': 'creator.example',
+      'x-forwarded-proto': 'https',
+    },
+    body: JSON.stringify({ platform: 'instagram', redirectTo: 'https://evil.example/steal' }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.code, 'zernio_invalid_redirect');
+  assert.equal(payload.error, 'Unable to start the Maven Social account connection.');
+  assert.equal(client.calls.length, 0);
+});
+
+test('malformed Publishing redirect is rejected without leaking its contents', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const malformed = 'https://[malformed.example/secret-token';
+  const request = new Request('https://creator.example/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'instagram', redirectTo: malformed }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.code, 'zernio_invalid_redirect');
+  assert.equal(payload.error, 'Unable to start the Maven Social account connection.');
+  assert.equal(JSON.stringify(payload).includes('secret-token'), false);
+  assert.equal(client.calls.length, 0);
+});
+
 test('SDK provider errors preserve a safe actionable code without leaking credentials', async () => {
   const repository = new InMemoryZernioRepository();
   const client = {
