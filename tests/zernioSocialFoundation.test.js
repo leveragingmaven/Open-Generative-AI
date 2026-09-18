@@ -11,6 +11,7 @@ import {
   listTenantZernioAccounts,
 } from '../src/lib/zernioSocialService.js';
 import { handleZernioPublishingRequest } from '../app/api/publishing/zernio/[[...path]]/route.js';
+import { ZernioPublishingProvider } from '../packages/studio/src/lib/publishing/ZernioPublishingProvider.js';
 
 const tenantA = { accountId: 'account-a', identityKey: 'creator-a' };
 const tenantB = { accountId: 'account-b', identityKey: 'creator-b' };
@@ -227,6 +228,50 @@ test('route connect ignores browser profile and returns no profile identifier or
   assert.equal(payload.profileId, undefined);
   assert.equal(payload.ZERNIO_API_KEY, undefined);
   assert.equal(call.input.query.profileId, 'profile-1');
+});
+
+test('SDK provider errors preserve a safe actionable code without leaking credentials', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = {
+    profiles: {
+      createProfile: async () => ({
+        error: {
+          code: 'PAYMENT_REQUIRED',
+          reason: 'twitter_passthrough',
+          error: 'Bearer sk_do_not_expose',
+        },
+        response: { status: 402 },
+      }),
+    },
+  };
+  const request = new Request('https://creator.test/api/publishing/zernio/accounts/connect', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'instagram' }),
+  });
+  const response = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['accounts', 'connect'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 402);
+  assert.equal(payload.code, 'zernio_payment_required');
+  assert.equal(payload.error, 'Maven Social requires provider billing setup before this connection can start.');
+  assert.equal(JSON.stringify(payload).includes('sk_do_not_expose'), false);
+  assert.equal(await repository.getProfile(tenantA), null);
+});
+
+test('Maven Social returns an empty remote schedule during Phase 1 while scheduling stays disabled', async () => {
+  const provider = new ZernioPublishingProvider({ fetchFn: async () => { throw new Error('must not fetch'); } });
+  assert.deepEqual(await provider.getScheduledPosts(), []);
+  assert.throws(
+    () => provider.schedulePost(),
+    (error) => error.code === 'zernio_scheduling_not_available' && error.status === 501,
+  );
 });
 
 test('upstream errors are sanitized', async () => {

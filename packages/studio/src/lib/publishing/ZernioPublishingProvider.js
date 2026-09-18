@@ -52,6 +52,11 @@ export class ZernioPublishingProvider extends PublishingProvider {
     });
   }
 
+  getScheduledPosts() {
+    // Phase 1 exposes account management only; an empty remote history is intentional.
+    return [];
+  }
+
   schedulePost() {
     throw new PublishingError('Maven Social scheduling will be enabled in a later phase.', {
       code: 'zernio_scheduling_not_available',

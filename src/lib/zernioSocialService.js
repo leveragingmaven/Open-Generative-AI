@@ -14,8 +14,44 @@ function requiredIdentity(identity) {
   return { accountId, identityKey: creatorIdentityKey, creatorIdentityKey };
 }
 
-function dataOf(response) {
+const SAFE_PROVIDER_ERRORS = {
+  PAYMENT_REQUIRED: {
+    code: 'zernio_payment_required',
+    status: 402,
+    message: 'Maven Social requires provider billing setup before this connection can start.',
+  },
+  PLATFORM_BETA_RESTRICTED: {
+    code: 'zernio_platform_beta_restricted',
+    status: 403,
+    message: 'This Maven Social platform is currently restricted by the provider.',
+  },
+  insufficient_permissions: {
+    code: 'zernio_insufficient_permissions',
+    status: 403,
+    message: 'The Maven Social API key does not have permission for this connection.',
+  },
+};
+
+function providerErrorCode(response) {
+  const candidate = response?.error?.code || response?.error?.error?.code || response?.error?.reason;
+  return typeof candidate === 'string' ? candidate.trim() : '';
+}
+
+function unwrapResponse(response, fallback = 'Maven Social is temporarily unavailable.') {
+  if (response?.error) {
+    const providerCode = providerErrorCode(response);
+    const mapped = SAFE_PROVIDER_ERRORS[providerCode];
+    const error = new Error(mapped?.message || fallback);
+    error.code = mapped?.code || 'zernio_upstream_error';
+    error.status = mapped?.status || response?.response?.status || 502;
+    error.providerStatus = response?.response?.status;
+    throw error;
+  }
   return response?.data || response || {};
+}
+
+function dataOf(response) {
+  return unwrapResponse(response);
 }
 
 function listOf(response, key) {
@@ -115,7 +151,7 @@ export async function ensureZernioProfile({ identity, repository = new MySqlZern
     return repository.saveProfile({ ...profile, ...owner });
   } catch (error) {
     if (!isProfileConflict(error) || !client.profiles?.listProfiles) throw sanitizeZernioError(error, 'Unable to create the Maven Social profile.');
-    const profiles = listOf(await client.profiles.listProfiles(), 'profiles');
+    const profiles = listOf(unwrapResponse(await client.profiles.listProfiles(), 'Unable to load Maven Social profiles.'), 'profiles');
     const matching = profiles.find((candidate) => profileNameOf(candidate) === profileName);
     if (!matching) throw sanitizeZernioError(error, 'Unable to create the Maven Social profile.');
     const profile = profileRecord(matching, owner);
@@ -142,7 +178,7 @@ export async function getZernioConnectUrl({ identity, platform, redirectUrl, rep
   const query = { profileId: profile.zernioProfileId };
   if (redirectUrl) query.redirect_url = redirectUrl;
   const response = await client.connect.getConnectUrl({ path: { platform: option.zernioPlatform }, query });
-  const data = dataOf(response);
+  const data = unwrapResponse(response, 'Unable to start the Maven Social account connection.');
   const authUrl = data.authUrl || data.authorizationUrl || data.url;
   if (!authUrl) throw sanitizeZernioError({ code: 'zernio_invalid_connect_response' }, 'Zernio did not return a connection URL.');
   return { authUrl: String(authUrl), state: data.state || null };
@@ -152,7 +188,7 @@ export async function listTenantZernioAccounts({ identity, repository = new MySq
   const owner = requiredIdentity(identity);
   const profile = await ensureZernioProfile({ identity: owner, repository, client });
   const response = await client.accounts.listAccounts({ query: { profileId: profile.zernioProfileId } });
-  const accounts = listOf(response, 'accounts')
+  const accounts = listOf(unwrapResponse(response, 'Unable to load Maven Social accounts.'), 'accounts')
     .map((account) => normalizeZernioAccount(account, profile, owner))
     .filter(Boolean);
   const stored = await repository.saveAccounts({ ...owner, zernioProfileId: profile.zernioProfileId, accounts });
@@ -183,10 +219,11 @@ export async function getTenantZernioAccount({ identity, zernioAccountId, reposi
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safe = new Error(fallback);
-  safe.code = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_invalid_redirect'].includes(error?.code)
+  const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
+  const safe = new Error(safeProviderCode ? error.message : fallback);
+  safe.code = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code)
     ? error.code
     : 'zernio_upstream_error';
-  safe.status = error?.status === 401 || error?.status === 403 || error?.status === 501 ? error.status : error?.status === 400 || error?.code === 'zernio_invalid_redirect' ? 400 : 502;
+  safe.status = [400, 401, 402, 403, 501].includes(error?.status) ? error.status : 502;
   return safe;
 }
