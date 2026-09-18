@@ -1,5 +1,6 @@
 import { getZernioClient } from './zernioClient.js';
 import { MySqlZernioRepository, newZernioProfileName } from './zernioRepository.js';
+import { getZernioConnectionOption, isZernioSpecialConnection } from '../../packages/studio/src/lib/publishing/zernioConnectionCatalog.js';
 
 function requiredIdentity(identity) {
   const accountId = String(identity?.accountId || '').trim();
@@ -124,17 +125,23 @@ export async function ensureZernioProfile({ identity, repository = new MySqlZern
 
 export async function getZernioConnectUrl({ identity, platform, redirectUrl, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
-  const normalizedPlatform = String(platform || '').trim().toLowerCase();
-  if (!normalizedPlatform) {
-    const error = new Error('Social platform is required.');
-    error.code = 'zernio_platform_required';
+  const option = getZernioConnectionOption(platform);
+  if (!option) {
+    const error = new Error('The requested Maven Social platform is not supported.');
+    error.code = 'zernio_platform_not_supported';
     error.status = 400;
+    throw error;
+  }
+  if (isZernioSpecialConnection(option)) {
+    const error = new Error('This Maven Social connection flow is not available yet.');
+    error.code = 'zernio_special_connection_not_available';
+    error.status = 501;
     throw error;
   }
   const profile = await ensureZernioProfile({ identity: owner, repository, client });
   const query = { profileId: profile.zernioProfileId };
   if (redirectUrl) query.redirect_url = redirectUrl;
-  const response = await client.connect.getConnectUrl({ path: { platform: normalizedPlatform }, query });
+  const response = await client.connect.getConnectUrl({ path: { platform: option.zernioPlatform }, query });
   const data = dataOf(response);
   const authUrl = data.authUrl || data.authorizationUrl || data.url;
   if (!authUrl) throw sanitizeZernioError({ code: 'zernio_invalid_connect_response' }, 'Zernio did not return a connection URL.');
@@ -177,9 +184,9 @@ export async function getTenantZernioAccount({ identity, zernioAccountId, reposi
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
   const safe = new Error(fallback);
-  safe.code = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_invalid_redirect'].includes(error?.code)
+  safe.code = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_invalid_redirect'].includes(error?.code)
     ? error.code
     : 'zernio_upstream_error';
-  safe.status = error?.status === 401 || error?.status === 403 ? error.status : error?.status === 400 || error?.code === 'zernio_invalid_redirect' ? 400 : 502;
+  safe.status = error?.status === 401 || error?.status === 403 || error?.status === 501 ? error.status : error?.status === 400 || error?.code === 'zernio_invalid_redirect' ? 400 : 502;
   return safe;
 }

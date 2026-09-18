@@ -6,6 +6,7 @@ import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -21,7 +22,7 @@ import {
   WorkspaceSection,
 } from "./experience/ExperienceComponents.jsx";
 
-const PLATFORM_OPTIONS = [
+const LEGACY_PLATFORM_OPTIONS = [
   { id: "instagram", label: "Instagram", enabled: true },
   { id: "tiktok", label: "TikTok", enabled: true },
   { id: "youtube", label: "YouTube", enabled: true },
@@ -49,9 +50,19 @@ function Icon({ type, size = 18 }) {
 function assetUrl(asset) { return asset?.url || asset?.generatedFiles?.[0] || asset?.previewUrl || null; }
 function assetTitle(asset) { return asset?.title || asset?.name || asset?.description || "Untitled Asset"; }
 function assetType(asset) { return asset?.type || asset?.kind || asset?.metadata?.assetType || "creative"; }
-function accountForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform && account.connected !== false) || null; }
-function accountsForPlatform(accounts, platform) { return accounts.filter((account) => account.platform === platform && account.connected !== false); }
-function accountRecordForPlatform(accounts, platform) { return accounts.find((account) => account.platform === platform) || null; }
+function providerPlatformId(platform) {
+  if (platform?.zernioPlatform) return platform.zernioPlatform;
+  if (platform && typeof platform === "object") return platform.id;
+  return getZernioConnectionOption(platform)?.zernioPlatform || platform;
+}
+function accountForPlatform(accounts, platform) {
+  const providerPlatform = providerPlatformId(platform);
+  return accounts.find((account) => account.platform === providerPlatform && account.connected !== false) || null;
+}
+function accountsForPlatform(accounts, platform) {
+  const providerPlatform = providerPlatformId(platform);
+  return accounts.filter((account) => account.platform === providerPlatform && account.connected !== false);
+}
 function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
 function isReadOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB || providerId === PUBLISHING_PROVIDER_IDS.POSTIZ; }
 function isAccountOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.ZERNIO; }
@@ -117,6 +128,9 @@ export default function PublishingStudio() {
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleValue, setScheduleValue] = useState("");
   const libraryPublishPath = "/studio/asset-library?mode=publish&returnTo=publishing";
+  const platformOptions = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO
+    ? ZERNIO_CONNECTION_CATALOG
+    : LEGACY_PLATFORM_OPTIONS;
 
   const publishingViews = [
     { id: "create", label: "Create", detail: "Choose creative work" },
@@ -288,26 +302,35 @@ export default function PublishingStudio() {
         setNotice({ tone: "error", text: "Choose a destination from the same publishing provider as this draft." });
         return;
       }
-      const option = PLATFORM_OPTIONS.find((item) => item.id === platform);
-      if (!option?.enabled && !isReadOnlyProvider(providerId)) {
-        setNotice({ tone: "error", text: `${option?.label || platform} is behind a capability flag until live account validation is complete.` });
+      const option = platformOptions.find((item) => item.key === platform || item.id === platform || item.zernioPlatform === platform);
+      if (!option) {
+        setNotice({ tone: "error", text: "This platform is not available for the selected provider." });
         return;
       }
+      if (providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && !option.connectable) {
+        setNotice({ tone: "neutral", text: `${option.label} connection setup is coming separately.` });
+        return;
+      }
+      if (option.enabled === false && !isReadOnlyProvider(providerId)) {
+        setNotice({ tone: "error", text: `${option.label || platform} is behind a capability flag until live account validation is complete.` });
+        return;
+      }
+      const draftPlatform = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO ? option.key : platform;
       const current = draft.platforms || [];
-      const platforms = current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform];
-      const account = accountForPlatform(accounts, platform);
-      if (!current.includes(platform) && !account) {
+      const platforms = current.includes(draftPlatform) ? current.filter((item) => item !== draftPlatform) : [...current, draftPlatform];
+      const account = accountForPlatform(accounts, option);
+      if (!current.includes(draftPlatform) && !account) {
         setNotice({ tone: "error", text: `Connect a ${option.label} account before selecting it for publishing.` });
         return;
       }
       const accountIds = { ...(draft.accountIds || {}) };
       const platformOverrides = { ...(draft.platformOverrides || {}) };
-      if (platforms.includes(platform)) {
-        accountIds[platform] = account.id;
-        platformOverrides[platform] = { ...(platformOverrides[platform] || {}), accountId: account.id, accountName: account.name };
+      if (platforms.includes(draftPlatform)) {
+        accountIds[draftPlatform] = account.id;
+        platformOverrides[draftPlatform] = { ...(platformOverrides[draftPlatform] || {}), accountId: account.id, accountName: account.name };
       } else {
-        delete accountIds[platform];
-        delete platformOverrides[platform];
+        delete accountIds[draftPlatform];
+        delete platformOverrides[draftPlatform];
       }
       centerRef.current.updateDraftPlatforms(draft.id, platforms, { accountIds, platformOverrides });
       setNotice({ tone: "success", text: "Publishing destinations updated." });
@@ -346,9 +369,14 @@ export default function PublishingStudio() {
   };
 
   const connectPlatform = async (platform) => {
-    const option = PLATFORM_OPTIONS.find((item) => item.id === platform);
-    if (!option?.enabled) {
-      setNotice({ tone: "error", text: `${option?.label || platform} is behind a capability flag until live validation is complete.` });
+    const option = platformOptions.find((item) => item.key === platform || item.id === platform || item.zernioPlatform === platform);
+    if (!option) return;
+    if (providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && !option.connectable) {
+      setNotice({ tone: "neutral", text: `${option.label} connection setup is coming separately.` });
+      return;
+    }
+    if (option.enabled === false) {
+      setNotice({ tone: "error", text: `${option.label || platform} is behind a capability flag until live validation is complete.` });
       return;
     }
     setBusyId(`connect:${platform}`);
@@ -526,7 +554,7 @@ export default function PublishingStudio() {
                   <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
                   <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedDraft.assets.length} {focusedDraft.assets.length === 1 ? "asset" : "assets"}</span><span>·</span><button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
                 </div>
-                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{PLATFORM_OPTIONS.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = PLATFORM_OPTIONS.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
+                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
                  <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date and time</span><input aria-label="Schedule date and time" type="datetime-local" min={dateTimeInputValue(new Date())} value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} className="mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" /></label><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button><span className="text-[10px] text-[var(--ms-color-text-muted)]">Timezone: {focusedDraft.timezone || "UTC"}</span></div>}
@@ -535,7 +563,7 @@ export default function PublishingStudio() {
              ) : <EmptyState title="Start a new post" description="Write a text-only post or optionally attach an existing image or video from the Creative Library." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
           </WorkspaceSection>
           <WorkspaceSection title="Live Preview" description="A quiet preview of the selected post and destination.">
-            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{PLATFORM_OPTIONS.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
+            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
           </WorkspaceSection>
         </div>
       )}
@@ -614,23 +642,28 @@ export default function PublishingStudio() {
         </div>
         {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social account connection is ready. Publishing and scheduling will be added in a later phase.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {PLATFORM_OPTIONS.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
-            const account = accountRecordForPlatform(accounts, platform.id);
-            const connected = Boolean(account?.connected !== false && account);
-            const needsAttention = Boolean(account && (!connected || [PUBLISHING_STATUS.FAILED, PUBLISHING_STATUS.CANCELLED, PUBLISHING_STATUS.UNKNOWN].includes(account.status)));
+          {platformOptions.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
+            const platformKey = platform.key || platform.id;
+            const allPlatformAccounts = accounts.filter((account) => account.platform === providerPlatformId(platform));
+            const platformAccounts = allPlatformAccounts.filter((account) => account.connected !== false);
+            const account = platformAccounts[0] || null;
+            const connected = platformAccounts.length > 0;
+            const needsAttention = allPlatformAccounts.some((account) => !account.connected || [PUBLISHING_STATUS.FAILED, PUBLISHING_STATUS.CANCELLED, PUBLISHING_STATUS.UNKNOWN].includes(account.status));
+            const specialFlow = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && !platform.connectable;
             return (
               <WorkspaceCard key={platform.id} className="flex min-h-40 flex-col gap-3">
                 <div className="flex items-center gap-3">
                   {account?.avatarUrl ? <img src={account.avatarUrl} alt="" className="h-10 w-10 shrink-0 rounded-[var(--ms-radius-card-small)] object-cover" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="platform" /></span>}
                   <div className="min-w-0">
                     <h3 className="truncate text-xs font-semibold">{platform.label}</h3>
-                    <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{connected ? account.name || account.username || "Connected account" : needsAttention ? "Connection needs a refresh" : platform.enabled ? "Ready to connect" : "Not available yet"}</p>
+                    <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{connected ? `${platformAccounts.length} connected account${platformAccounts.length === 1 ? "" : "s"}` : needsAttention ? "Connection needs a refresh" : specialFlow ? "Connection setup coming separately" : platform.availability === "beta" ? "Beta availability" : platform.availability === "billing_may_be_required" ? "Provider payment setup may be required" : platform.enabled ? "Ready to connect" : "Not available yet"}</p>
+                    {allPlatformAccounts.length > 0 ? <p className="mt-1 truncate text-[8px] text-[var(--ms-color-text-muted)]">{allPlatformAccounts.map((account) => account.displayName || account.username || account.id).join(" · ")}</p> : null}
                     {connected && isReadOnlyProvider(providerId) ? <p className="mt-1 text-[8px] text-[var(--ms-color-gold-muted)]">{providerId === PUBLISHING_PROVIDER_IDS.POSTIZ ? "Postiz" : "MavenSync Hub / GoHighLevel"}</p> : null}
                   </div>
                 </div>
                 <div className="mt-auto flex items-center justify-between gap-2">
-                  {needsAttention ? <StatusBadge tone="warning">Needs attention</StatusBadge> : connected ? <StatusBadge tone="success">Connected</StatusBadge> : <StatusBadge tone="neutral">Not connected</StatusBadge>}
-                  {isReadOnlyProvider(providerId) ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? null : platform.enabled ? <SecondaryButton type="button" disabled={busyId === `connect:${platform.id}`} onClick={() => connectPlatform(platform.id)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
+                  {needsAttention ? <StatusBadge tone="warning">Needs attention</StatusBadge> : connected ? <StatusBadge tone="success">Connected</StatusBadge> : specialFlow ? <StatusBadge tone="neutral">Setup coming</StatusBadge> : <StatusBadge tone="neutral">Not connected</StatusBadge>}
+                  {isReadOnlyProvider(providerId) ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{platformAccounts.length > 1 ? `${platformAccounts.length} accounts` : "Connected"}</span> : specialFlow ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Coming separately</span> : platform.enabled !== false ? <SecondaryButton type="button" disabled={busyId === `connect:${platformKey}`} onClick={() => connectPlatform(platformKey)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
                 </div>
               </WorkspaceCard>
             );
@@ -685,7 +718,7 @@ export default function PublishingStudio() {
                 <fieldset className="mt-4 border-t border-[var(--ms-color-border-subtle)] pt-4">
                   <legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Publishing destinations</legend>
                   <div className="flex flex-wrap gap-2">
-                    {PLATFORM_OPTIONS.map((platform) => {
+                    {platformOptions.map((platform) => {
                       const checked = draft.platforms.includes(platform.id);
                       const account = accountForPlatform(accounts, platform.id);
                       const disabled = !platform.enabled || (!checked && !account);
@@ -695,7 +728,7 @@ export default function PublishingStudio() {
                   {draft.platforms.length ? (
                     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {draft.platforms.map((platform) => {
-                        const option = PLATFORM_OPTIONS.find((item) => item.id === platform);
+                        const option = platformOptions.find((item) => item.id === platform);
                         const platformAccounts = accountsForPlatform(accounts, platform);
                         const selectedAccount = draft.accountIds?.[platform] || draft.platformOverrides?.[platform]?.accountId || "";
                         return (
