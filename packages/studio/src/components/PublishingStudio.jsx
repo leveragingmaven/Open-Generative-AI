@@ -244,10 +244,6 @@ export default function PublishingStudio() {
   ])], [accounts, drafts, history]);
 
   const createDraft = (asset) => {
-    if (isAccountOnlyProvider(providerId)) {
-      setNotice({ tone: "neutral", text: "Maven Social account connection is available now; publishing will be enabled in a later phase." });
-      return null;
-    }
     try {
       const draft = centerRef.current.createDraftFromAsset(asset);
       setFocusedDraftId(draft.id);
@@ -261,10 +257,6 @@ export default function PublishingStudio() {
   };
 
   const createBlankDraft = () => {
-    if (isAccountOnlyProvider(providerId)) {
-      setNotice({ tone: "neutral", text: "Maven Social account connection is available now; publishing will be enabled in a later phase." });
-      return null;
-    }
     try {
       const draft = centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
       setFocusedDraftId(draft.id);
@@ -473,17 +465,19 @@ export default function PublishingStudio() {
   };
 
   const publishDraft = async (draft) => {
-    if (isAccountOnlyProvider(providerId)) {
-      setNotice({ tone: "neutral", text: "Maven Social publishing will be enabled in a later phase." });
-      return;
-    }
     if (!window.confirm(`Publish ${draftField(draft, "title") || "this draft"} now?`)) return;
     setBusyId(draft.id);
     setNotice(null);
     try {
       const savedDraft = saveDraftEdits(draft, { silent: true });
-      await centerRef.current.publishDraft(savedDraft.id);
-      setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} was sent to Publishing.` });
+      const result = await centerRef.current.publishDraft(savedDraft.id);
+      if (result.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED) {
+        setNotice({ tone: "warning", text: `${savedDraft.title || "Draft"} was partially published. Review the platform results.` });
+      } else if (result.status === PUBLISHING_STATUS.FAILED) {
+        setNotice({ tone: "error", text: `${savedDraft.title || "Draft"} could not be published.` });
+      } else {
+        setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} was published successfully.` });
+      }
     } catch (error) {
       setNotice({ tone: "error", text: error.message || "Unable to publish draft." });
     } finally {
@@ -515,7 +509,7 @@ export default function PublishingStudio() {
       />
 
       {activeCampaign && <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3"><StatusBadge tone="gold" dot>Campaign context</StatusBadge><span className="truncate text-xs font-semibold">{activeCampaign.name}</span></div>}
-      {notice && <div role={notice.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-[var(--ms-radius-card-small)] border px-4 py-3 text-xs ${notice.tone === "error" ? "border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] text-[var(--ms-color-error)]" : "border-[rgba(99,197,155,0.3)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"}`}>{notice.text}</div>}
+      {notice && <div role={notice.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-[var(--ms-radius-card-small)] border px-4 py-3 text-xs ${notice.tone === "error" ? "border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] text-[var(--ms-color-error)]" : notice.tone === "warning" ? "border-[rgba(212,168,88,0.35)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-muted)]" : "border-[rgba(99,197,155,0.3)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"}`}>{notice.text}</div>}
       {accountsError && <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{accountsError.code === "hub_session_expired" ? "MavenSync Hub is not connected. Reconnect through MavenSync Hub, then refresh this page." : accountsError.message}</div>}
       {remoteHistoryError && <div role="status" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-4 py-3 text-xs text-[var(--ms-color-gold-muted)]">{remoteHistoryError}</div>}
       {loadError ? <ErrorState className="mt-5" title="Publishing Center unavailable" description={loadError} /> : null}
@@ -650,7 +644,7 @@ export default function PublishingStudio() {
             <option value={PUBLISHING_PROVIDER_IDS.ZERNIO}>Maven Social</option>
           </select>
         </div>
-        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social account connection is ready. Publishing and scheduling will be added in a later phase.</p> : null}
+        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social Publish Now is available for connected accounts. Scheduling remains unavailable in this phase.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {platformOptions.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
             const platformKey = platform.key || platform.id;

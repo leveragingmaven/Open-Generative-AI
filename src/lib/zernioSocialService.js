@@ -1,5 +1,9 @@
+import crypto from 'node:crypto';
+import net from 'node:net';
 import { getZernioClient } from './zernioClient.js';
 import { MySqlZernioRepository, newZernioProfileName } from './zernioRepository.js';
+import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
+import { resolveZernioMedia, unsafeAddress } from './zernioMediaResolver.js';
 import { getZernioConnectionOption, isZernioSpecialConnection } from '../../packages/studio/src/lib/publishing/zernioConnectionCatalog.js';
 
 function requiredIdentity(identity) {
@@ -227,7 +231,7 @@ export async function listTenantZernioAccounts({ identity, repository = new MySq
   };
 }
 
-export async function getTenantZernioAccount({ identity, zernioAccountId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+export async function getTenantZernioAccount({ identity, zernioAccountId, expectedPlatform, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
   const id = String(zernioAccountId || '').trim();
   if (!id) {
@@ -244,15 +248,111 @@ export async function getTenantZernioAccount({ identity, zernioAccountId, reposi
     error.status = 403;
     throw error;
   }
+  if (expectedPlatform && String(account.platform).toLowerCase() !== String(expectedPlatform).toLowerCase()) {
+    const error = new Error('The selected Maven Social account does not match the requested platform.');
+    error.code = 'zernio_account_platform_mismatch';
+    error.status = 400;
+    throw error;
+  }
+  if (account.isActive === false || account.needsReconnect) {
+    const error = new Error('Reconnect the selected Maven Social account before publishing.');
+    error.code = 'zernio_account_not_connected';
+    error.status = 409;
+    throw error;
+  }
   return sanitizeZernioAccount(account);
 }
 
+function canonicalPublishInput({ assetIds = [], platforms = [], accountIds = {} } = {}) {
+  const canonicalAccounts = Object.entries(accountIds || {})
+    .map(([platform, accountId]) => [String(platform).trim().toLowerCase(), String(accountId || '').trim()])
+    .sort(([left], [right]) => left.localeCompare(right));
+  return {
+    assetIds: [...new Set(assetIds.map(String))].sort(),
+    platforms: [...new Set(platforms.map((value) => String(value).trim().toLowerCase()))].sort(),
+    accountIds: Object.fromEntries(canonicalAccounts),
+  };
+}
+
+export function stablePublishRequestId({ identity, draftId, content, assetIds, platforms, accountIds }) {
+  const canonical = canonicalPublishInput({ assetIds, platforms, accountIds });
+  const payload = JSON.stringify({
+    accountId: String(identity.accountId),
+    creatorIdentityKey: String(identity.creatorIdentityKey),
+    draftId: String(draftId || ''),
+    content: String(content || ''),
+    ...canonical,
+  });
+  return `maven-social-${crypto.createHash('sha256').update(payload).digest('hex')}`;
+}
+
+function validatePresignedUploadUrl(value) {
+  let url;
+  try { url = new URL(String(value || '')); } catch { throw Object.assign(new Error('Maven Social returned an invalid media upload target.'), { code: 'zernio_media_unavailable', status: 502 }); }
+  if (url.protocol !== 'https:' || url.username || url.password || /^(localhost|.*\.localhost)$/i.test(url.hostname) || (net.isIP(url.hostname) && unsafeAddress(url.hostname))) {
+    throw Object.assign(new Error('Maven Social returned an unsafe media upload target.'), { code: 'zernio_media_unavailable', status: 502 });
+  }
+  return url;
+}
+
+function safePlatformFailure(platform, status, message, url = null) {
+  return { platform, status: String(status || 'failed').toLowerCase(), url: url || null, error: message ? `${platform} publishing failed.` : null };
+}
+
+function sanitizePublishResponse(data, platforms, httpStatus) {
+  const post = data?.post || data?.existingPost || {};
+  const returned = Array.isArray(post.platforms) ? post.platforms : [];
+  const providerResults = Array.isArray(data?.platformResults) ? data.platformResults : [];
+  const platformResults = platforms.map((platform) => {
+    const result = returned.find((item) => String(item.platform).toLowerCase() === String(platform).toLowerCase()) || providerResults.find((item) => String(item.platform).toLowerCase() === String(platform).toLowerCase());
+    const failedMessage = result?.status === 'failed' ? (result?.error || 'provider failure') : (result?.status === 'published' || result?.platformPostUrl ? null : result?.error);
+    return safePlatformFailure(platform, result?.status, failedMessage, result?.platformPostUrl || null);
+  });
+  const successes = platformResults.filter((item) => item.status === 'published');
+  const failures = platformResults.filter((item) => item.status === 'failed');
+  const status = httpStatus === 207 || String(post.status).toLowerCase() === 'partial' ? (successes.length ? 'partially_published' : 'failed') : (post.status === 'published' || (platformResults.length && !failures.length) ? 'published' : 'failed');
+  if (status === 'failed' && failures.length === 0) platformResults.forEach((item) => { item.status = 'failed'; item.error = `${item.platform} publishing failed.`; });
+  return { status, postId: post._id || null, platformResults, publishedUrls: returned.filter((item) => item.platformPostUrl).map((item) => item.platformPostUrl), httpStatus: status === 'partially_published' ? 207 : status === 'published' ? (httpStatus || 201) : 502 };
+}
+
+export async function publishZernioNow({ identity, draftId, content = '', assetIds = [], platforms = [], accountIds = {}, repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
+  const owner = requiredIdentity(identity);
+  const selectedPlatforms = [...new Set(platforms.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
+  if (!selectedPlatforms.length) throw Object.assign(new Error('Choose at least one Maven Social destination.'), { code: 'zernio_publish_invalid', status: 400 });
+  const mediaItems = [];
+  for (const assetId of assetIds) {
+    const media = await resolveZernioMedia({ identity: owner, assetId, assetRepository: assetRepository || new MySqlCreativeAssetRepository(), fetcher, lookup, allowlist: mediaAllowlist });
+    if (media.mode === 'publicUrl') mediaItems.push({ url: media.url, type: media.contentType.startsWith('video/') ? 'video' : media.contentType === 'application/pdf' ? 'document' : 'image' });
+    else {
+      const presigned = unwrapResponse(await client.media.getMediaPresignedUrl({ body: { filename: media.filename, contentType: media.contentType, size: media.sizeBytes } }), 'Unable to prepare Maven Social media.');
+      if (!presigned?.uploadUrl || !presigned?.publicUrl) throw Object.assign(new Error('Maven Social did not return a valid media upload target.'), { code: 'zernio_media_unavailable', status: 502 });
+      const uploadUrl = validatePresignedUploadUrl(presigned.uploadUrl);
+      const upload = await fetcher(uploadUrl, { method: 'PUT', headers: { 'Content-Type': media.contentType }, body: media.body, redirect: 'manual' });
+      if (!upload.ok) throw Object.assign(new Error('Maven Social media upload failed.'), { code: 'zernio_media_upload_failed', status: 502 });
+      mediaItems.push({ url: presigned.publicUrl, type: media.contentType.startsWith('video/') ? 'video' : media.contentType === 'application/pdf' ? 'document' : 'image' });
+    }
+  }
+  const targets = [];
+  for (const platform of selectedPlatforms) {
+    const option = getZernioConnectionOption(platform);
+    if (!option || isZernioSpecialConnection(option)) throw Object.assign(new Error('This Maven Social platform is not available for Publish Now.'), { code: 'zernio_platform_not_supported', status: 400 });
+    const selectedId = accountIds[platform] || accountIds[option.zernioPlatform];
+    const account = await getTenantZernioAccount({ identity: owner, zernioAccountId: selectedId, expectedPlatform: option.zernioPlatform, repository, client });
+    targets.push({ platform: option.zernioPlatform, accountId: account.id });
+  }
+  if (!String(content || '').trim() && !mediaItems.length) throw Object.assign(new Error('Add text or creative media before publishing.'), { code: 'zernio_publish_invalid', status: 400 });
+  const requestId = stablePublishRequestId({ identity: owner, draftId, content, assetIds, platforms: selectedPlatforms, accountIds });
+  const response = await client.posts.createPost({ headers: { 'x-request-id': requestId }, body: { ...(String(content || '').trim() ? { content: String(content) } : {}), ...(mediaItems.length ? { mediaItems } : {}), platforms: targets, publishNow: true } });
+  if (response?.error) throw unwrapResponse(response, 'Maven Social could not publish this post.');
+  const httpStatus = response?.response?.status || response?.status || (response?.data?.existingPost ? 200 : 201);
+  return sanitizePublishResponse(response?.data || response, targets.map((target) => target.platform), httpStatus);
+}
+
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
+  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
   const safe = new Error(safeProviderCode ? error.message : fallback);
-  safe.code = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code)
-    ? error.code
-    : 'zernio_upstream_error';
-  safe.status = [400, 401, 402, 403, 501].includes(error?.status) ? error.status : 502;
+  safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';
+  safe.status = [400, 401, 402, 403, 409, 501].includes(error?.status) ? error.status : 502;
   return safe;
 }

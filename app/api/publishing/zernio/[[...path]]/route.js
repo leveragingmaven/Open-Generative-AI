@@ -3,10 +3,12 @@ import { requireCreatorIdentity } from '../../../../../src/lib/creatorOsAuth.js'
 import { requireCreatorOsRateLimit } from '../../../../../src/lib/creatorOsRateLimit.js';
 import { getZernioClient } from '../../../../../src/lib/zernioClient.js';
 import { MySqlZernioRepository } from '../../../../../src/lib/zernioRepository.js';
+import { MySqlCreativeAssetRepository } from '../../../../../src/lib/creativeAssetRepository.js';
 import {
   ensureZernioProfile,
   getZernioConnectUrl,
   listTenantZernioAccounts,
+  publishZernioNow,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
 
@@ -19,6 +21,7 @@ function routeKey(path = []) {
   if (path.length === 0) return '';
   if (path.join('/') === 'accounts') return 'accounts';
   if (path.join('/') === 'accounts/connect') return 'accounts/connect';
+  if (path.join('/') === 'posts') return 'posts';
   if (path.join('/') === 'profile') return 'profile';
   if (path[0] === 'accounts' && path.length === 2) return 'accounts/:accountId';
   return path.join('/');
@@ -78,6 +81,7 @@ export async function handleZernioPublishingRequest(request, {
   authenticate = requireCreatorIdentity,
   rateLimit = requireCreatorOsRateLimit,
   repository = new MySqlZernioRepository(),
+  assetRepository = null,
   client = getZernioClient(),
 } = {}) {
   const auth = await authenticate(request);
@@ -118,6 +122,31 @@ export async function handleZernioPublishingRequest(request, {
       return NextResponse.json({ account });
     } catch (error) {
       return jsonError(error, 'Unable to load the requested Maven Social account.');
+    }
+  }
+
+  if (request.method === 'POST' && key === 'posts') {
+    try {
+      const input = await body(request);
+      const result = await publishZernioNow({
+        identity: auth.identity,
+        draftId: input.draftId,
+        content: input.content,
+        assetIds: Array.isArray(input.assetIds) ? input.assetIds : [],
+        platforms: Array.isArray(input.platforms) ? input.platforms : [],
+        accountIds: input.accountIds && typeof input.accountIds === 'object' ? input.accountIds : {},
+        repository,
+        assetRepository: assetRepository || (Array.isArray(input.assetIds) && input.assetIds.length ? new MySqlCreativeAssetRepository() : undefined),
+        client,
+      });
+      return NextResponse.json({
+        status: result.status,
+        postId: result.postId,
+        platformResults: result.platformResults,
+        publishedUrls: result.publishedUrls,
+      }, { status: result.httpStatus });
+    } catch (error) {
+      return jsonError(error, 'Unable to publish with Maven Social.');
     }
   }
 

@@ -1,6 +1,6 @@
 import { PublishingProvider } from './PublishingProvider.js';
 import { PublishingError } from './publishingErrors.js';
-import { PUBLISHING_PROVIDER_IDS } from './publishingTypes.js';
+import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, normalizePublishingDraft, normalizePublishingJob } from './publishingTypes.js';
 
 export class ZernioPublishingProvider extends PublishingProvider {
   constructor(options = {}) {
@@ -45,10 +45,55 @@ export class ZernioPublishingProvider extends PublishingProvider {
     });
   }
 
-  publishNow() {
-    throw new PublishingError('Maven Social publishing will be enabled in a later phase.', {
-      code: 'zernio_publishing_not_available',
-      status: 501,
+  createDraft(input = {}) {
+    return normalizePublishingDraft({ ...input, provider: this.id });
+  }
+
+  updateDraft(input = {}) {
+    return normalizePublishingDraft({ ...input, provider: this.id, updatedAt: new Date().toISOString() });
+  }
+
+  deleteDraft(draftId) {
+    return { ok: true, draftId };
+  }
+
+  async publishNow(draft = {}) {
+    const assetIds = Array.isArray(draft.assetIds)
+      ? draft.assetIds
+      : (Array.isArray(draft.assets) ? draft.assets.map((asset) => asset.assetId || asset.id).filter(Boolean) : []);
+    const response = await this.request('/posts', {
+      method: 'POST',
+      body: {
+        draftId: draft.id,
+        content: draft.caption || draft.description || draft.title || '',
+        assetIds,
+        platforms: Array.isArray(draft.platforms) ? draft.platforms : [],
+        accountIds: draft.accountIds || draft.platformAccountIds || {},
+      },
+    });
+    const status = response.status === 'published'
+      ? PUBLISHING_STATUS.PUBLISHED
+      : response.status === 'partially_published'
+        ? PUBLISHING_STATUS.PARTIALLY_PUBLISHED
+        : PUBLISHING_STATUS.FAILED;
+    const platformResults = Object.fromEntries((response.platformResults || []).map((result) => [result.platform, {
+      platform: result.platform,
+      status: result.status === 'published' ? PUBLISHING_STATUS.PUBLISHED : PUBLISHING_STATUS.FAILED,
+      publishedUrl: result.url || result.platformPostUrl || null,
+      error: result.error || null,
+    }]));
+    return normalizePublishingJob({
+      id: response.postId || draft.id,
+      draftId: draft.id,
+      provider: this.id,
+      platforms: draft.platforms || [],
+      status,
+      providerPostId: response.postId || null,
+      providerPostIds: response.postId ? { zernio: response.postId } : {},
+      publishedUrls: response.publishedUrls || [],
+      platformResults,
+      error: status === PUBLISHING_STATUS.FAILED ? 'Maven Social publishing failed.' : null,
+      raw: { status, postId: response.postId || null, platformResults },
     });
   }
 
