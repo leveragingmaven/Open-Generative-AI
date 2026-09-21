@@ -297,3 +297,38 @@ test("views and category filters derive from the authoritative catalog", () => {
   const before = catalog.length; assert.equal(filterAgentCatalog(catalog, { category: "Video" }).every((x) => x.categories.includes("Video")), true); assert.equal(catalog.length, before);
   assert.equal(catalog.some((x) => x.stableId === "r"), true); assert.equal(catalog.some((x) => x.stableId === "product-hero-photographer"), true);
 });
+
+test("remote templates without category metadata derive one from their own wording", () => {
+  const remote = adaptRemoteAgentTemplate({
+    agent_id: "r-photo",
+    name: "Product Hero Photographer",
+    description: "Product hero photography with a branded visual style",
+  }, { sourceCatalog: "templates" });
+
+  // Upstream templates frequently omit category entirely; they must not all
+  // collapse into the "General" fallback, which left every category tab empty.
+  assert.notEqual(remote.category, "General");
+  assert.equal(remote.categories.includes(remote.category), true);
+  assert.deepEqual(filterAgentCatalog([remote], { category: remote.category }).map((x) => x.id), ["r-photo"]);
+  // "General" stays a catch-all bucket, so the template remains discoverable there too.
+  assert.equal(remote.categories.includes("General"), true);
+});
+
+test("explicit upstream categories remain authoritative over derivation", () => {
+  const remote = adaptRemoteAgentTemplate({
+    agent_id: "r-explicit",
+    name: "Podcast Producer",
+    description: "Produces podcast episodes and audio show notes",
+    categories: ["Audio", "Strategy"],
+    category: "Strategy",
+  }, { sourceCatalog: "templates" });
+
+  assert.equal(remote.category, "Strategy");
+  assert.deepEqual(remote.categories, ["Audio", "Strategy"]);
+});
+
+test("templates whose wording matches no category still fall back to General", () => {
+  const remote = adaptRemoteAgentTemplate({ agent_id: "r-none", name: "Zzz Qqq", description: "Zzz qqq" }, { sourceCatalog: "templates" });
+  assert.equal(remote.category, "General");
+  assert.deepEqual(remote.categories, ["General"]);
+});

@@ -1,4 +1,4 @@
-import { listFeaturedAgentTemplates } from "./AgentProfile.js";
+import { detectAgentCategory, listFeaturedAgentTemplates } from "./AgentProfile.js";
 
 const REMOTE_FEED_ORDER = ["templates", "featured"];
 
@@ -42,7 +42,13 @@ export function adaptRemoteAgentTemplate(template = {}, { sourceCatalog = "templ
   const iconUrl = template.icon_url || template.image_url || template.iconUrl || template.icon || null;
   const remoteSkills = Array.isArray(template.skills) ? template.skills.map(cloneSkill) : [];
   const suppliedCategories = Array.isArray(template.categories) ? template.categories.filter(Boolean) : [];
-  const category = template.category || suppliedCategories[0] || "General";
+  const declaredCategory = template.category || suppliedCategories[0] || null;
+  // Upstream feeds usually send no category at all. Falling straight through to
+  // "General" stranded every remote template outside the category tabs, so
+  // derive one from the template's own wording before defaulting.
+  const category = declaredCategory
+    || detectAgentCategory(`${name} ${template.specialty || ""} ${template.description || ""}`.trim())
+    || "General";
   const categories = suppliedCategories.length
     ? Array.from(new Set([...suppliedCategories, ...(template.category ? [template.category] : [])]))
     : Array.from(new Set([category, "General"]));
