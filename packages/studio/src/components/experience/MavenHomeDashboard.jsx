@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   clearStoredDashboardSessionId,
   createDesignAgentConversationClient,
@@ -96,6 +98,9 @@ function AttentionTile({ icon, label, value, zeroDetail, actionHref, actionLabel
 
 function MavenBubble({ message, streaming }) {
   const isUser = message.role === "user";
+  const markdownComponents = {
+    a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
+  };
   return (
     <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
@@ -110,7 +115,15 @@ function MavenBubble({ message, streaming }) {
             : "rounded-bl-sm border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] text-[var(--ms-color-text-primary)]"
         }`}
       >
-        {message.content || ""}
+        {isUser ? (
+          message.content || ""
+        ) : (
+          <div className={styles.markdown}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
+              {message.content || ""}
+            </ReactMarkdown>
+          </div>
+        )}
         {streaming && (
           <span className="ml-1 inline-flex gap-0.5 align-middle">
             <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
