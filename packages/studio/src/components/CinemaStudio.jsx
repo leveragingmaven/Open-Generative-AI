@@ -907,7 +907,7 @@ export default function CinemaStudio({
               <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">What cinematic scene are you creating?</span>
             </h1>
             <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              What would you shoot with infinite budget? Control cameras, lighting, lenses, and prompt high-end cinematic scenes.
+              Bring your vision to life with cinematic AI tools. Control cameras, lighting, lenses, and prompt high-end cinematic scenes.
             </p>
           </div>
         )}
