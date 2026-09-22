@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { FEATURED_AGENT_TEMPLATES } from "./AgentProfile.js";
 import {
   adaptRemoteAgentTemplate,
@@ -334,6 +337,33 @@ test("two successful 200 feeds both fulfill, so the full fallback condition neve
   assert.deepEqual(results.map((result) => result.status), ["fulfilled", "fulfilled"]);
   assert.deepEqual(statuses, { templates: "fulfilled", featured: "fulfilled" });
   assert.equal(failures, 0);
+});
+
+test("Agent catalog feed timeout is 30 seconds, not 15", () => {
+  // The timeout constant lives in the AgentStudio component (the only caller
+  // of startAgentCatalogFeedRequest); plain node --test cannot render JSX, so
+  // assert the configured value from the component source.
+  const componentPath = join(dirname(fileURLToPath(import.meta.url)), "../../components/AgentStudio.jsx");
+  const source = readFileSync(componentPath, "utf8");
+  const match = source.match(/CATALOG_REQUEST_TIMEOUT_MS = (\d+(?:_\d+)*)/);
+  assert.ok(match, "CATALOG_REQUEST_TIMEOUT_MS constant must exist in AgentStudio.jsx");
+  assert.equal(Number(match[1].replaceAll("_", "")), 30_000);
+});
+
+test("a successful response inside the 30-second catalog timeout still fulfills", async () => {
+  let records = [];
+  let failures = 0;
+  const request = startAgentCatalogFeedRequest({
+    load: async () => [{ agent_id: "slow-but-ok", name: "Slow But OK" }],
+    timeoutMs: 30_000,
+    onFulfilled: (value) => { records = adaptRemoteAgentTemplates(value, { sourceCatalog: "featured", isFeatured: true }); },
+    onRejected: () => { failures += 1; },
+  });
+  const result = await request.promise;
+  assert.equal(result.status, "fulfilled");
+  assert.equal(failures, 0);
+  assert.equal(records[0].agent_id, "slow-but-ok");
+  assert.equal(records[0].sourceCatalog, "featured");
 });
 
 test("feed cleanup aborts an outstanding request safely", async () => {

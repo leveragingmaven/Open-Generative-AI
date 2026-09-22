@@ -43,7 +43,10 @@ import {
 } from "../lib/agents/index.js";
 
 const MAIN_TABS = ["all", "featured", "my-agents", "my-chats"];
-const CATALOG_REQUEST_TIMEOUT_MS = 15_000;
+// Production captures show the Featured feed legitimately completing around
+// the 15s boundary (~15.0s HTTP 200), which the old timeout misclassified as
+// "unavailable". 30s still bounds a genuinely stalled request.
+const CATALOG_REQUEST_TIMEOUT_MS = 30_000;
 
 function initialRemoteFeedState() {
   return {
