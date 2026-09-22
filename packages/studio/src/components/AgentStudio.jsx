@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 
 import { getPublishedAgents, getTemplateAgents } from "../muapi.js";
 import {
-  adaptRemoteAgentTemplate,
+  adaptRemoteAgentTemplates,
   filterAgentCatalog,
   mergeAgentTemplates,
   startAgentCatalogFeedRequest,
@@ -271,12 +271,13 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
       apiKey,
       timeoutMs: CATALOG_REQUEST_TIMEOUT_MS,
       onFulfilled: (value) => {
-        const records = (Array.isArray(value) ? value : [])
-          .filter((template) => template && (template.name || template.title))
-          .map((template) => adaptRemoteAgentTemplate(template, {
-            sourceCatalog: feed.key,
-            isFeatured: feed.isFeatured,
-          }));
+        // startAgentCatalogFeedRequest routes any throw from this callback into
+        // onRejected, so the per-record adaptation must never throw: one bad
+        // upstream record is skipped instead of rejecting the whole feed.
+        const records = adaptRemoteAgentTemplates(value, {
+          sourceCatalog: feed.key,
+          isFeatured: feed.isFeatured,
+        });
         updateFeed(feed.key, { records, status: "fulfilled", error: null });
       },
       onRejected: (error) => {

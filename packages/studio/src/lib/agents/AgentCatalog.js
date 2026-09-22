@@ -85,6 +85,26 @@ export function adaptRemoteAgentTemplate(template = {}, { sourceCatalog = "templ
   };
 }
 
+// AgentStudio marks a feed "rejected" whenever its success callback throws, so
+// one un-adaptable upstream record inside an otherwise-valid HTTP 200 payload
+// used to fail the whole feed (and trigger the full fallback banner). Adapt
+// records one at a time and skip any that cannot be adapted.
+export function adaptRemoteAgentTemplates(templates = [], options = {}) {
+  const list = Array.isArray(templates) ? templates : [];
+  const records = [];
+  for (const template of list) {
+    if (!template || (!template.name && !template.title)) continue;
+    try {
+      records.push(adaptRemoteAgentTemplate(template, options));
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("AgentCatalog: skipped un-adaptable remote agent template", error);
+      }
+    }
+  }
+  return records;
+}
+
 export function normalizeAgentTemplate(input = {}, source = "remote") {
   const stableId = input.agent_id || input.id || input.remoteId || null;
   const name = input.name || input.title || "Unnamed Agent";

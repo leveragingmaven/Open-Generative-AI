@@ -3,6 +3,7 @@ import test from "node:test";
 import { FEATURED_AGENT_TEMPLATES } from "./AgentProfile.js";
 import {
   adaptRemoteAgentTemplate,
+  adaptRemoteAgentTemplates,
   filterAgentCatalog,
   mergeAgentTemplates,
   normalizeAgentTemplate,
@@ -274,6 +275,65 @@ test("both timeouts terminate loading and retain exactly the eight locals", asyn
   assert.equal(pending, 0);
   assert.equal(failures, 2);
   assert.equal(mergeAgentTemplates([], FEATURED_AGENT_TEMPLATES).length, 8);
+});
+
+test("a success-callback throw is reported as a feed rejection (the 200-to-fallback conversion path)", async () => {
+  // Production failure mode: startAgentCatalogFeedRequest runs onFulfilled
+  // inside its settled-status chain, so an exception thrown while processing a
+  // successful HTTP 200 payload is routed to onRejected. AgentStudio's former
+  // inline pipeline threw exactly here when one upstream record could not be
+  // adapted (a non-string truthy name reaching name.charAt in
+  // adaptRemoteAgentTemplate), flipping a fully successful feed to "rejected".
+  let failures = 0;
+  const request = startAgentCatalogFeedRequest({
+    load: async () => [{ agent_id: "r1", name: "Valid" }],
+    timeoutMs: 1_000,
+    onFulfilled: () => {
+      throw new TypeError("name.charAt is not a function");
+    },
+    onRejected: () => { failures += 1; },
+  });
+  const result = await request.promise;
+  assert.equal(result.status, "rejected");
+  assert.equal(failures, 1);
+});
+
+test("a successful 200 feed with one un-adaptable record stays fulfilled and keeps the adaptable records", async () => {
+  // The fix: adaptation runs per record and skips un-adaptable ones, so a
+  // populated HTTP 200 array can no longer reject the feed or trigger the full
+  // "upstream unavailable" banner.
+  let records = [];
+  let failures = 0;
+  const request = startAgentCatalogFeedRequest({
+    load: async () => [
+      { agent_id: "good-1", name: "Good One" },
+      { agent_id: "poison", name: 12345 },
+      { agent_id: "good-2", name: "Good Two" },
+    ],
+    timeoutMs: 1_000,
+    onFulfilled: (value) => { records = adaptRemoteAgentTemplates(value, { sourceCatalog: "templates" }); },
+    onRejected: () => { failures += 1; },
+  });
+  const result = await request.promise;
+  assert.equal(result.status, "fulfilled");
+  assert.equal(failures, 0);
+  assert.deepEqual(records.map((record) => record.agent_id), ["good-1", "good-2"]);
+  assert.equal(records[0].sourceCatalog, "templates");
+});
+
+test("two successful 200 feeds both fulfill, so the full fallback condition never triggers", async () => {
+  const statuses = { templates: null, featured: null };
+  let failures = 0;
+  const requests = ["templates", "featured"].map((key) => startAgentCatalogFeedRequest({
+    load: async () => [{ agent_id: key, name: `${key} agent` }],
+    timeoutMs: 1_000,
+    onFulfilled: () => { statuses[key] = "fulfilled"; },
+    onRejected: () => { statuses[key] = "rejected"; failures += 1; },
+  }));
+  const results = await Promise.all(requests.map((request) => request.promise));
+  assert.deepEqual(results.map((result) => result.status), ["fulfilled", "fulfilled"]);
+  assert.deepEqual(statuses, { templates: "fulfilled", featured: "fulfilled" });
+  assert.equal(failures, 0);
 });
 
 test("feed cleanup aborts an outstanding request safely", async () => {
