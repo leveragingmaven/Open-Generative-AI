@@ -240,6 +240,38 @@ export default function MavenHomeDashboard() {
   const recentAssets = useMemo(() => [...assets].sort((a, b) => assetTimestamp(b) - assetTimestamp(a)).slice(0, 3), [assets]);
   const needsApprovalCount = campaigns.filter((campaign) => (campaign.status || "") === "review").length;
   const inProgressCount = campaigns.filter((campaign) => ["generating", "queued", "planning"].includes(campaign.status || "")).length;
+  const hasMavenConversation = mavenMessages.length > 0;
+  const mavenComposer = (
+    <form className={`${styles.composer} ${hasMavenConversation ? styles.composerCompact : ""}`} onSubmit={submitMavenMessage}>
+      <label htmlFor="maven-creation-prompt" className={styles.promptLabel}>{hasMavenConversation ? "Continue your conversation with Maven" : "What would you like Maven to create?"}</label>
+      <textarea
+        id="maven-creation-prompt"
+        value={mavenMessage}
+        onChange={(event) => setMavenMessage(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            event.currentTarget.form.requestSubmit();
+          }
+        }}
+        placeholder="Describe your idea, your audience, or the story you want to tell…"
+        aria-describedby="maven-composer-status"
+        disabled={!mavenReady || mavenBusy}
+        rows={hasMavenConversation ? 2 : 3}
+      />
+      <div className={styles.composerFooter}>
+        <span id="maven-composer-status" role="status">
+          {mavenBusy ? "Maven is creating a response…" : mavenReady ? "Create with Maven" : "Maven chat is unavailable right now. You can still open a studio above."}
+        </span>
+        <button
+          type="submit"
+          aria-label={mavenBusy ? "Maven is responding" : "Send message to MavenSync"}
+          disabled={!mavenReady || mavenBusy || !mavenMessage.trim()}
+          className={styles.send}
+        ><Icon type="arrow" size={18} /></button>
+      </div>
+    </form>
+  );
 
   return (
     <ExperiencePage className={styles.page}>
@@ -260,35 +292,7 @@ export default function MavenHomeDashboard() {
           </details>
         </nav>
 
-        <form className={styles.composer} onSubmit={submitMavenMessage}>
-          <label htmlFor="maven-creation-prompt" className={styles.promptLabel}>What would you like Maven to create?</label>
-          <textarea
-            id="maven-creation-prompt"
-            value={mavenMessage}
-            onChange={(event) => setMavenMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                event.currentTarget.form.requestSubmit();
-              }
-            }}
-            placeholder="Describe your idea, your audience, or the story you want to tell…"
-            aria-describedby="maven-composer-status"
-            disabled={!mavenReady || mavenBusy}
-            rows={3}
-          />
-          <div className={styles.composerFooter}>
-            <span id="maven-composer-status" role="status">
-              {mavenBusy ? "Maven is creating a response…" : mavenReady ? "Create with Maven" : "Maven chat is unavailable right now. You can still open a studio above."}
-            </span>
-            <button
-              type="submit"
-              aria-label={mavenBusy ? "Maven is responding" : "Send message to MavenSync"}
-              disabled={!mavenReady || mavenBusy || !mavenMessage.trim()}
-              className={styles.send}
-            ><Icon type="arrow" size={18} /></button>
-          </div>
-        </form>
+        {!hasMavenConversation && mavenComposer}
 
         <nav aria-label="Creative context" className={styles.contextRow}>
           <a href="/studio/knowledge-center"><Icon type="content" size={13} /> Open Knowledge Center</a>
@@ -298,16 +302,19 @@ export default function MavenHomeDashboard() {
           {SECONDARY_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
         </nav>
 
-        {mavenMessages.length > 0 && (
-          <section aria-label="Maven conversation" className={styles.conversation}>
-            <h2>Your conversation with Maven</h2>
-            <div ref={mavenTranscriptRef} className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
-              {mavenMessages.map((message, index) => (
-                <MavenBubble key={`${index}-${message.role}`} message={message}
-                  streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"} />
-              ))}
-            </div>
-          </section>
+        {hasMavenConversation && (
+          <>
+            <section aria-label="Maven conversation" className={styles.conversation}>
+              <h2>Your conversation with Maven</h2>
+              <div ref={mavenTranscriptRef} className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
+                {mavenMessages.map((message, index) => (
+                  <MavenBubble key={`${index}-${message.role}`} message={message}
+                    streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"} />
+                ))}
+              </div>
+            </section>
+            {mavenComposer}
+          </>
         )}
       </section>
 

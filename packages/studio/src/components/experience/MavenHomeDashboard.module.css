@@ -102,6 +102,22 @@
   border-color: var(--ms-color-pink-primary);
   box-shadow: 0 0 0 1px var(--ms-color-pink-primary), 0 12px 40px #0003;
 }
+.composerCompact {
+  margin-top: 14px;
+  padding: 14px 16px 10px;
+  border-radius: 16px;
+  box-shadow: none;
+}
+.composerCompact .promptLabel {
+  font-size: 14px;
+}
+.composerCompact textarea {
+  min-height: 52px;
+  margin-top: 8px;
+}
+.composerCompact .composerFooter {
+  margin-top: 8px;
+}
 .promptLabel {
   display: block;
   font-size: clamp(18px, 2.3vw, 23px);
