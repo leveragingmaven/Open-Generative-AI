@@ -56,7 +56,7 @@ export default function AgentCreateClient({ userData }) {
   return (
     <CreateAgentPage
       useUser={useUser}
-      usedIn="studio"
+      usedIn="muapiapp"
     />
   );
 }

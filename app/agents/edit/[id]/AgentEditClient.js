@@ -56,7 +56,7 @@ export default function AgentEditClient({ userData }) {
   return (
     <EditAgentPage
       useUser={useUser}
-      usedIn="studio"
+      usedIn="muapiapp"
     />
   );
 }

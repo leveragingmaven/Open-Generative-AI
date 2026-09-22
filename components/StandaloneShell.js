@@ -131,6 +131,11 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = 
 
   const select = (item) => {
     setOpen(false);
+    // Agents leaves the Studio shell for the real executing /agents/* experience.
+    if (item.id === "agents" && item.route === "/studio/agents") {
+      onNavigate("/agents/create");
+      return;
+    }
     onNavigate(item.route);
   };
 
@@ -358,8 +363,21 @@ const [characterTarget, setCharacterTarget] = useState(null);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [visibleTabs]);
 
-const handleTabChange = (tabId) => {
+// Creator OS Agents routes into the real executing Agents experience
+  // (ai-agent + /api/agent-execution) instead of the deterministic Studio
+  // Agents workspace. The /agents/* tree has no index page, so the entry
+  // point is the real create flow at /agents/create, which leads into
+  // /agents/[agent_id] chats and /agents/edit/[id].
+  const navigateToTab = (tabId) => {
+    if (tabId === "agents") {
+      router.push("/agents/create");
+      return;
+    }
     router.push(`/studio/${tabId}`);
+  };
+
+  const handleTabChange = (tabId) => {
+    navigateToTab(tabId);
     setActiveTab(tabId);
   };
 
@@ -406,10 +424,18 @@ const handleTabChange = (tabId) => {
       if (isStudioHome) {
         // Leaving the dashboard must re-route through Next so `slug` updates and
         // `isStudioHome` flips — matching the dashboard Quick Create `<a href>` contract.
-        router.push(route);
+        if (tabId === "agents") {
+          // Agents routes into the real executing /agents/* experience.
+          router.push("/agents/create");
+        } else {
+          router.push(route);
+        }
       } else {
         handleTabChange(tabId);
       }
+    } else if (route === "/studio/agents") {
+      // Agents routes into the real executing /agents/* experience.
+      router.push("/agents/create");
     } else {
       router.push(route);
     }
