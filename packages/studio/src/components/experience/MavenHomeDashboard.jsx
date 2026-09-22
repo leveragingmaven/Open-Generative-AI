@@ -133,7 +133,6 @@ export default function MavenHomeDashboard() {
   const [mavenReady, setMavenReady] = useState(false);
   const [mavenSessionId, setMavenSessionId] = useState(null);
   const mavenClientRef = useRef(null);
-  const mavenTranscriptRef = useRef(null);
   const moreRef = useRef(null);
 
   useEffect(() => {
@@ -166,12 +165,6 @@ export default function MavenHomeDashboard() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    // Scroll the transcript only; restoring history must not pull the home page down.
-    const transcript = mavenTranscriptRef.current;
-    if (transcript) transcript.scrollTop = transcript.scrollHeight;
-  }, [mavenMessages, mavenBusy]);
 
   const submitMavenMessage = async (event) => {
     event.preventDefault();
@@ -303,18 +296,16 @@ export default function MavenHomeDashboard() {
         </nav>
 
         {hasMavenConversation && (
-          <>
             <section aria-label="Maven conversation" className={styles.conversation}>
               <h2>Your conversation with Maven</h2>
-              <div ref={mavenTranscriptRef} className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
+              <div className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
                 {mavenMessages.map((message, index) => (
                   <MavenBubble key={`${index}-${message.role}`} message={message}
                     streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"} />
                 ))}
               </div>
+              {mavenComposer}
             </section>
-            {mavenComposer}
-          </>
         )}
       </section>
 
