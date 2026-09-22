@@ -11,7 +11,10 @@ export class ZernioPublishingProvider extends PublishingProvider {
 
   async request(path, options = {}) {
     if (!this.fetchFn) throw new PublishingError('Maven Social is unavailable.', { code: 'zernio_fetch_unavailable' });
-    const response = await this.fetchFn(`${this.apiBase}${path}`, {
+    const query = new URLSearchParams(
+      Object.entries(options.query || {}).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+    ).toString();
+    const response = await this.fetchFn(`${this.apiBase}${path}${query ? `?${query}` : ''}`, {
       method: options.method || 'GET',
       credentials: 'include',
       headers: { 'content-type': 'application/json', ...(options.headers || {}) },
@@ -30,6 +33,16 @@ export class ZernioPublishingProvider extends PublishingProvider {
   async getConnectedAccounts() {
     const response = await this.request('/accounts');
     return Array.isArray(response.accounts) ? response.accounts : [];
+  }
+
+  async listInboxConversations(query = {}) {
+    return await this.request('/inbox/conversations', { query });
+  }
+
+  async getInboxMessages(conversationId, query = {}) {
+    const id = String(conversationId || '').trim();
+    if (!id) throw new PublishingError('A conversation is required.', { code: 'zernio_conversation_id_required', status: 400 });
+    return await this.request(`/inbox/conversations/${encodeURIComponent(id)}/messages`, { query });
   }
 
   connectAccount(platformOrPayload, options = {}) {

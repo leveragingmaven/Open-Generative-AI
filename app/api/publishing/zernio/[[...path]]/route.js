@@ -8,6 +8,8 @@ import {
   ensureZernioProfile,
   getZernioConnectUrl,
   listTenantZernioAccounts,
+  listTenantZernioConversations,
+  getTenantZernioMessages,
   publishZernioNow,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
@@ -23,6 +25,8 @@ function routeKey(path = []) {
   if (path.join('/') === 'accounts/connect') return 'accounts/connect';
   if (path.join('/') === 'posts') return 'posts';
   if (path.join('/') === 'profile') return 'profile';
+  if (path.join('/') === 'inbox/conversations') return 'inbox/conversations';
+  if (path[0] === 'inbox' && path[1] === 'conversations' && path.length === 4 && path[3] === 'messages') return 'inbox/conversations/:conversationId/messages';
   if (path[0] === 'accounts' && path.length === 2) return 'accounts/:accountId';
   return path.join('/');
 }
@@ -122,6 +126,29 @@ export async function handleZernioPublishingRequest(request, {
       return NextResponse.json({ account });
     } catch (error) {
       return jsonError(error, 'Unable to load the requested Maven Social account.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'inbox/conversations') {
+    try {
+      return NextResponse.json(await listTenantZernioConversations({ identity: auth.identity, repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social inbox conversations.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'inbox/conversations/:conversationId/messages') {
+    try {
+      const accountId = new URL(request.url).searchParams.get('accountId');
+      return NextResponse.json(await getTenantZernioMessages({
+        identity: auth.identity,
+        conversationId: resolvedParams.path[2],
+        accountId,
+        repository,
+        client,
+      }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social conversation messages.');
     }
   }
 

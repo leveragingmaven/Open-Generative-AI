@@ -99,6 +99,16 @@ function statusTone(status) {
   return "neutral";
 }
 
+function inboxDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function inboxParticipant(conversation) {
+  return conversation.participantName || conversation.participantId || "Unknown participant";
+}
+
 function AssetPreview({ asset }) {
   const url = assetUrl(asset);
   const type = assetType(asset).toLowerCase();
@@ -125,6 +135,14 @@ export default function PublishingStudio() {
   const [draftEdits, setDraftEdits] = useState({});
   const [focusedDraftId, setFocusedDraftId] = useState(null);
   const [activeView, setActiveView] = useState("create");
+  const [inboxConversations, setInboxConversations] = useState([]);
+  const [selectedInboxConversation, setSelectedInboxConversation] = useState(null);
+  const [inboxMessages, setInboxMessages] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxMessagesLoading, setInboxMessagesLoading] = useState(false);
+  const [inboxError, setInboxError] = useState(null);
+  const [inboxMessagesError, setInboxMessagesError] = useState(null);
+  const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleValue, setScheduleValue] = useState("");
   const libraryPublishPath = "/studio/asset-library?mode=publish&returnTo=publishing";
@@ -134,6 +152,7 @@ export default function PublishingStudio() {
 
   const publishingViews = [
     { id: "create", label: "Create", detail: "Choose creative work" },
+    { id: "inbox", label: "Inbox", detail: "Read conversations" },
     { id: "calendar", label: "Calendar", detail: "See what is scheduled" },
     { id: "queue", label: "Queue", detail: "Review drafts and actions" },
     { id: "accounts", label: "Accounts", detail: "Manage destinations" },
@@ -216,6 +235,63 @@ export default function PublishingStudio() {
     if (returnedFromOAuth) void refreshConnectedAccounts(center);
     return () => { centerRef.current = null; };
   }, []);
+
+  const loadInboxMessages = async (conversation, center = centerRef.current) => {
+    if (!conversation || !center) return;
+    const requestId = inboxRequestRef.current + 1;
+    inboxRequestRef.current = requestId;
+    setSelectedInboxConversation(conversation);
+    setInboxMessages([]);
+    setInboxMessagesError(null);
+    setInboxMessagesLoading(true);
+    try {
+      const response = await center.getInboxMessages(conversation.id, { accountId: conversation.accountId, sortOrder: "asc" });
+      if (requestId !== inboxRequestRef.current) return;
+      setInboxMessages(Array.isArray(response.messages) ? response.messages : []);
+    } catch (error) {
+      if (requestId !== inboxRequestRef.current) return;
+      setInboxMessagesError(error);
+    } finally {
+      if (requestId === inboxRequestRef.current) setInboxMessagesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView !== "inbox") return undefined;
+    if (providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO) {
+      setInboxConversations([]);
+      setSelectedInboxConversation(null);
+      setInboxMessages([]);
+      setInboxError(null);
+      return undefined;
+    }
+    const center = centerRef.current;
+    let cancelled = false;
+    setInboxLoading(true);
+    setInboxError(null);
+    setSelectedInboxConversation(null);
+    setInboxMessages([]);
+    void (async () => {
+      try {
+        const response = await center.listInboxConversations();
+        if (cancelled) return;
+        const conversations = Array.isArray(response.conversations) ? response.conversations : [];
+        setInboxConversations(conversations);
+        if (conversations[0]) await loadInboxMessages(conversations[0], center);
+      } catch (error) {
+        if (!cancelled) {
+          setInboxConversations([]);
+          setInboxError(error);
+        }
+      } finally {
+        if (!cancelled) setInboxLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      inboxRequestRef.current += 1;
+    };
+  }, [activeView, providerId]);
 
   useEffect(() => {
     const refreshOnReturn = () => {
@@ -548,6 +624,50 @@ export default function PublishingStudio() {
           ))}
         </div>
       </nav>
+
+      {activeView === "inbox" && (
+        providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO ? (
+          <WorkspaceSection title="Maven Social Inbox" description="Read connected Zernio conversations inside Publishing Studio.">
+            <EmptyState title="Select Maven Social" description="Choose Maven Social as the account source in Accounts before opening the Inbox." icon={<Icon type="platform" />} />
+          </WorkspaceSection>
+        ) : (
+          <WorkspaceSection title="Maven Social Inbox" description="Read-only conversations from your connected Zernio accounts.">
+            {inboxLoading ? <LoadingState title="Loading Inbox" description="Gathering conversations from Maven Social..." /> : inboxError ? <ErrorState title="Inbox unavailable" description={inboxError.message || "Unable to load Maven Social conversations."} /> : inboxConversations.length === 0 ? <EmptyState title="No conversations yet" description="Connected Zernio conversations will appear here when available." icon={<Icon type="platform" />} /> : (
+              <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.5fr)]">
+                <div className="space-y-2" aria-label="Maven Social conversations">
+                  {inboxConversations.map((conversation) => (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      onClick={() => void loadInboxMessages(conversation)}
+                      className={`w-full rounded-[var(--ms-radius-card-small)] border p-3 text-left transition-colors ${selectedInboxConversation?.id === conversation.id ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.1)]" : "border-[var(--ms-color-border-subtle)] bg-black/10 hover:border-[var(--ms-color-border-emphasized)]"}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="truncate text-xs font-semibold">{inboxParticipant(conversation)}</p>
+                        {conversation.unreadCount > 0 ? <span className="shrink-0 rounded-full bg-[var(--ms-color-pink-primary)] px-2 py-0.5 text-[9px] font-semibold text-black">{conversation.unreadCount}</span> : null}
+                      </div>
+                      <p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{conversation.platform || ""}{conversation.accountUsername ? ` · ${conversation.accountUsername}` : ""}</p>
+                      <p className="mt-2 line-clamp-2 text-[10px] leading-4 text-[var(--ms-color-text-secondary)]">{conversation.lastMessage || "No message preview"}</p>
+                      {conversation.updatedTime ? <p className="mt-2 text-[9px] text-[var(--ms-color-text-muted)]">{inboxDate(conversation.updatedTime)}</p> : null}
+                    </button>
+                  ))}
+                </div>
+                <WorkspaceCard className="min-h-80 p-4">
+                  {!selectedInboxConversation ? <EmptyState title="Select a conversation" description="Choose a conversation to view its messages." /> : inboxMessagesLoading ? <LoadingState title="Loading conversation" description="Gathering messages..." /> : inboxMessagesError ? <ErrorState title="Conversation unavailable" description={inboxMessagesError.message || "Unable to load this conversation."} /> : inboxMessages.length === 0 ? <EmptyState title="No messages" description="This conversation has no messages available to display." /> : (
+                    <div className="space-y-3" aria-label={`Messages with ${inboxParticipant(selectedInboxConversation)}`}>
+                      <div className="border-b border-[var(--ms-color-border-subtle)] pb-3"><p className="text-sm font-semibold">{inboxParticipant(selectedInboxConversation)}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{selectedInboxConversation.platform || ""}{selectedInboxConversation.accountUsername ? ` · ${selectedInboxConversation.accountUsername}` : ""}</p></div>
+                      {inboxMessages.map((message) => {
+                        const outgoing = message.direction === "outgoing";
+                        return <div key={message.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${outgoing ? "rounded-br-sm bg-[var(--ms-color-pink-primary)] text-white" : "rounded-bl-sm border border-[var(--ms-color-border-subtle)] bg-black/15 text-[var(--ms-color-text-primary)]"}`}><div className="flex items-center justify-between gap-3 text-[9px] opacity-70"><span>{message.senderName || message.senderId || message.direction || "Unknown sender"}</span>{message.createdAt ? <time dateTime={message.createdAt}>{inboxDate(message.createdAt)}</time> : null}</div><p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5">{message.message || ""}</p></div></div>;
+                      })}
+                    </div>
+                  )}
+                </WorkspaceCard>
+              </div>
+            )}
+          </WorkspaceSection>
+        )
+      )}
 
       {activeView === "create" && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] lg:items-start">

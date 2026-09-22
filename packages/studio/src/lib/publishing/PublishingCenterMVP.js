@@ -238,6 +238,16 @@ export class PublishingCenterMVP {
     return await this.publishingProvider.getConnectedAccounts();
   }
 
+  async listInboxConversations() {
+    if (!this.publishingProvider.listInboxConversations) return { conversations: [] };
+    return await this.publishingProvider.listInboxConversations();
+  }
+
+  async getInboxMessages(conversationId, query = {}) {
+    if (!this.publishingProvider.getInboxMessages) return { messages: [] };
+    return await this.publishingProvider.getInboxMessages(conversationId, query);
+  }
+
   async connectAccount(platform, options = {}) {
     if (!this.publishingProvider.connectAccount) throw new Error("Connected accounts are unavailable");
     return await this.publishingProvider.connectAccount({

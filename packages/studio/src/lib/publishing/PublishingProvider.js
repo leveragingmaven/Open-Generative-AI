@@ -18,6 +18,14 @@ export class PublishingProvider {
     return this.notImplemented("getConnectedAccounts");
   }
 
+  listInboxConversations() {
+    return this.notImplemented("listInboxConversations");
+  }
+
+  getInboxMessages() {
+    return this.notImplemented("getInboxMessages");
+  }
+
   disconnectAccount() {
     return this.notImplemented("disconnectAccount");
   }

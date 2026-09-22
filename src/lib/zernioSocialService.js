@@ -231,6 +231,124 @@ export async function listTenantZernioAccounts({ identity, repository = new MySq
   };
 }
 
+function inboxCollection(response) {
+  const data = dataOf(response);
+  const conversations = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  return {
+    conversations,
+    pagination: data?.pagination || null,
+    meta: data?.meta || null,
+  };
+}
+
+function sanitizeZernioConversation(conversation = {}) {
+  return {
+    id: conversation.id,
+    accountId: conversation.accountId,
+    platform: conversation.platform,
+    accountUsername: conversation.accountUsername,
+    participantId: conversation.participantId,
+    participantName: conversation.participantName,
+    participantPicture: conversation.participantPicture,
+    participantVerifiedType: conversation.participantVerifiedType,
+    lastMessage: conversation.lastMessage,
+    updatedTime: conversation.updatedTime,
+    status: conversation.status,
+    unreadCount: conversation.unreadCount,
+    threadControl: conversation.threadControl,
+    url: conversation.url,
+    instagramProfile: conversation.instagramProfile,
+    metadata: conversation.metadata,
+  };
+}
+
+function sanitizeZernioMessage(message = {}) {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    accountId: message.accountId,
+    platform: message.platform,
+    message: message.message,
+    senderId: message.senderId,
+    senderName: message.senderName,
+    senderVerifiedType: message.senderVerifiedType,
+    direction: message.direction,
+    createdAt: message.createdAt,
+    subject: message.subject,
+    deliveryStatus: message.deliveryStatus,
+    sentAt: message.sentAt,
+    deliveredAt: message.deliveredAt,
+    readAt: message.readAt,
+    isEdited: message.isEdited,
+    isDeleted: message.isDeleted,
+    attachments: Array.isArray(message.attachments) ? message.attachments : [],
+    metadata: message.metadata,
+  };
+}
+
+export async function listTenantZernioConversations({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const owner = requiredIdentity(identity);
+  const profile = await ensureZernioProfile({ identity: owner, repository, client });
+  const accounts = await listTenantZernioAccounts({ identity: owner, repository, client });
+  const ownedAccountIds = new Set(accounts.accounts.map((account) => String(account.id)));
+  const response = await client.messages.listInboxConversations({ query: { profileId: profile.zernioProfileId } });
+  const result = inboxCollection(response);
+  return {
+    conversations: result.conversations
+      .filter((conversation) => conversation?.id && ownedAccountIds.has(String(conversation.accountId)))
+      .map(sanitizeZernioConversation),
+    pagination: result.pagination,
+    meta: result.meta,
+  };
+}
+
+export async function getTenantZernioMessages({ identity, conversationId, accountId, limit, cursor, sortOrder, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const owner = requiredIdentity(identity);
+  const id = String(conversationId || '').trim();
+  if (!id) {
+    const error = new Error('Zernio conversation id is required.');
+    error.code = 'zernio_conversation_id_required';
+    error.status = 400;
+    throw error;
+  }
+  const requestedAccountId = String(accountId || '').trim();
+  if (!requestedAccountId) {
+    const error = new Error('Zernio account id is required for this conversation.');
+    error.code = 'zernio_account_id_required';
+    error.status = 400;
+    throw error;
+  }
+  await listTenantZernioAccounts({ identity: owner, repository, client });
+  const account = await getTenantZernioAccount({
+    identity: owner,
+    zernioAccountId: requestedAccountId,
+    repository,
+    client,
+  });
+  const conversations = await listTenantZernioConversations({ identity: owner, repository, client });
+  const conversation = conversations.conversations.find((item) => (
+    String(item.id) === id && String(item.accountId) === String(account.id)
+  ));
+  if (!conversation) {
+    const error = new Error('The requested conversation is not available to this tenant.');
+    error.code = 'zernio_conversation_not_owned';
+    error.status = 403;
+    throw error;
+  }
+  const query = { accountId: account.id };
+  if (limit !== undefined) query.limit = limit;
+  if (cursor) query.cursor = cursor;
+  if (sortOrder) query.sortOrder = sortOrder;
+  const response = await client.messages.getInboxConversationMessages({ path: { conversationId: id }, query });
+  const data = dataOf(response);
+  return {
+    messages: (Array.isArray(data?.messages) ? data.messages : []).map(sanitizeZernioMessage),
+    pagination: data?.pagination || null,
+    sortOrderApplied: data?.sortOrderApplied || null,
+    lastUpdated: data?.lastUpdated || null,
+  };
+}
+
 export async function getTenantZernioAccount({ identity, zernioAccountId, expectedPlatform, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
   const id = String(zernioAccountId || '').trim();
@@ -349,7 +467,7 @@ export async function publishZernioNow({ identity, draftId, content = '', assetI
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
+  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
   const safe = new Error(safeProviderCode ? error.message : fallback);
   safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';
