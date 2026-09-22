@@ -248,6 +248,11 @@ export class PublishingCenterMVP {
     return await this.publishingProvider.getInboxMessages(conversationId, query);
   }
 
+  async sendInboxMessage(conversationId, message, query = {}) {
+    if (!this.publishingProvider.sendInboxMessage) return { success: false };
+    return await this.publishingProvider.sendInboxMessage(conversationId, message, query);
+  }
+
   async connectAccount(platform, options = {}) {
     if (!this.publishingProvider.connectAccount) throw new Error("Connected accounts are unavailable");
     return await this.publishingProvider.connectAccount({

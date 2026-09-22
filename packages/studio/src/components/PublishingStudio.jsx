@@ -142,6 +142,9 @@ export default function PublishingStudio() {
   const [inboxMessagesLoading, setInboxMessagesLoading] = useState(false);
   const [inboxError, setInboxError] = useState(null);
   const [inboxMessagesError, setInboxMessagesError] = useState(null);
+  const [inboxReply, setInboxReply] = useState("");
+  const [inboxReplySending, setInboxReplySending] = useState(false);
+  const [inboxReplyError, setInboxReplyError] = useState(null);
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleValue, setScheduleValue] = useState("");
@@ -243,6 +246,8 @@ export default function PublishingStudio() {
     setSelectedInboxConversation(conversation);
     setInboxMessages([]);
     setInboxMessagesError(null);
+    setInboxReply("");
+    setInboxReplyError(null);
     setInboxMessagesLoading(true);
     try {
       const response = await center.getInboxMessages(conversation.id, { accountId: conversation.accountId, sortOrder: "asc" });
@@ -253,6 +258,25 @@ export default function PublishingStudio() {
       setInboxMessagesError(error);
     } finally {
       if (requestId === inboxRequestRef.current) setInboxMessagesLoading(false);
+    }
+  };
+
+  const sendInboxReply = async (event) => {
+    event.preventDefault();
+    const conversation = selectedInboxConversation;
+    const text = inboxReply.trim();
+    if (!conversation || !text || inboxReplySending) return;
+    setInboxReplySending(true);
+    setInboxReplyError(null);
+    try {
+      const result = await centerRef.current.sendInboxMessage(conversation.id, text, { accountId: conversation.accountId });
+      if (result?.success === false) throw new Error("Maven Social did not accept the message.");
+      setInboxReply("");
+      await loadInboxMessages(conversation);
+    } catch (error) {
+      setInboxReplyError(error);
+    } finally {
+      setInboxReplySending(false);
     }
   };
 
@@ -653,13 +677,19 @@ export default function PublishingStudio() {
                   ))}
                 </div>
                 <WorkspaceCard className="min-h-80 p-4">
-                  {!selectedInboxConversation ? <EmptyState title="Select a conversation" description="Choose a conversation to view its messages." /> : inboxMessagesLoading ? <LoadingState title="Loading conversation" description="Gathering messages..." /> : inboxMessagesError ? <ErrorState title="Conversation unavailable" description={inboxMessagesError.message || "Unable to load this conversation."} /> : inboxMessages.length === 0 ? <EmptyState title="No messages" description="This conversation has no messages available to display." /> : (
-                    <div className="space-y-3" aria-label={`Messages with ${inboxParticipant(selectedInboxConversation)}`}>
+                  {!selectedInboxConversation ? <EmptyState title="Select a conversation" description="Choose a conversation to view its messages." /> : (
+                    <div className="flex min-h-72 flex-col" aria-label={`Messages with ${inboxParticipant(selectedInboxConversation)}`}>
                       <div className="border-b border-[var(--ms-color-border-subtle)] pb-3"><p className="text-sm font-semibold">{inboxParticipant(selectedInboxConversation)}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{selectedInboxConversation.platform || ""}{selectedInboxConversation.accountUsername ? ` · ${selectedInboxConversation.accountUsername}` : ""}</p></div>
-                      {inboxMessages.map((message) => {
-                        const outgoing = message.direction === "outgoing";
-                        return <div key={message.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${outgoing ? "rounded-br-sm bg-[var(--ms-color-pink-primary)] text-white" : "rounded-bl-sm border border-[var(--ms-color-border-subtle)] bg-black/15 text-[var(--ms-color-text-primary)]"}`}><div className="flex items-center justify-between gap-3 text-[9px] opacity-70"><span>{message.senderName || message.senderId || message.direction || "Unknown sender"}</span>{message.createdAt ? <time dateTime={message.createdAt}>{inboxDate(message.createdAt)}</time> : null}</div><p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5">{message.message || ""}</p></div></div>;
-                      })}
+                      <div className="min-h-32 flex-1 space-y-3 py-4">
+                        {inboxMessagesLoading ? <LoadingState title="Loading conversation" description="Gathering messages..." /> : inboxMessagesError ? <ErrorState title="Conversation unavailable" description={inboxMessagesError.message || "Unable to load this conversation."} /> : inboxMessages.length === 0 ? <EmptyState title="No messages" description="This conversation has no messages available to display." /> : inboxMessages.map((message) => {
+                          const outgoing = message.direction === "outgoing";
+                          return <div key={message.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${outgoing ? "rounded-br-sm bg-[var(--ms-color-pink-primary)] text-white" : "rounded-bl-sm border border-[var(--ms-color-border-subtle)] bg-black/15 text-[var(--ms-color-text-primary)]"}`}><div className="flex items-center justify-between gap-3 text-[9px] opacity-70"><span>{message.senderName || message.senderId || message.direction || "Unknown sender"}</span>{message.createdAt ? <time dateTime={message.createdAt}>{inboxDate(message.createdAt)}</time> : null}</div><p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5">{message.message || ""}</p></div></div>;
+                        })}
+                      </div>
+                      <form onSubmit={sendInboxReply} className="border-t border-[var(--ms-color-border-subtle)] pt-3">
+                        {inboxReplyError ? <p role="alert" className="mb-2 text-[10px] text-[var(--ms-color-error)]">{inboxReplyError.message || "Unable to send reply."}</p> : null}
+                        <div className="flex items-end gap-2"><textarea aria-label="Reply to conversation" value={inboxReply} onChange={(event) => setInboxReply(event.target.value)} disabled={inboxReplySending} rows={2} className="min-h-16 flex-1 resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-2 text-xs leading-5 text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-pink-primary)]" placeholder="Write a reply..." /><PrimaryButton type="submit" disabled={inboxReplySending || !inboxReply.trim()} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{inboxReplySending ? "Sending..." : "Send"}</PrimaryButton></div>
+                      </form>
                     </div>
                   )}
                 </WorkspaceCard>

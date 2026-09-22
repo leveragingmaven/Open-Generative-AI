@@ -26,6 +26,10 @@ export class PublishingProvider {
     return this.notImplemented("getInboxMessages");
   }
 
+  sendInboxMessage() {
+    return this.notImplemented("sendInboxMessage");
+  }
+
   disconnectAccount() {
     return this.notImplemented("disconnectAccount");
   }

@@ -10,6 +10,7 @@ import {
   listTenantZernioAccounts,
   listTenantZernioConversations,
   getTenantZernioMessages,
+  sendTenantZernioMessage,
   publishZernioNow,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
@@ -149,6 +150,23 @@ export async function handleZernioPublishingRequest(request, {
       }));
     } catch (error) {
       return jsonError(error, 'Unable to load Maven Social conversation messages.');
+    }
+  }
+
+  if (request.method === 'POST' && key === 'inbox/conversations/:conversationId/messages') {
+    try {
+      const input = await body(request);
+      const result = await sendTenantZernioMessage({
+        identity: auth.identity,
+        conversationId: resolvedParams.path[2],
+        accountId: input.accountId,
+        message: input.message,
+        repository,
+        client,
+      });
+      return NextResponse.json(result);
+    } catch (error) {
+      return jsonError(error, 'Unable to send the Maven Social message.');
     }
   }
 

@@ -11,7 +11,7 @@ function response(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function fakeClient({ messagesError = null } = {}) {
+function fakeClient({ messagesError = null, sendError = null } = {}) {
   const calls = [];
   const profiles = new Map();
   const accounts = new Map();
@@ -64,6 +64,11 @@ function fakeClient({ messagesError = null } = {}) {
           },
         };
       },
+      sendInboxMessage: async ({ path, body }) => {
+        calls.push({ method: 'sendInboxMessage', path, body });
+        if (sendError) return sendError;
+        return { data: { success: true, data: { messageId: 'sent-message-1', conversationId: path.conversationId } } };
+      },
     },
   };
 }
@@ -79,10 +84,14 @@ test('Zernio provider uses Creator OS Inbox routes and never exposes provider cr
 
   await provider.listInboxConversations();
   await provider.getInboxMessages('conversation/a', { accountId: 'account-a', sortOrder: 'asc' });
+  await provider.sendInboxMessage('conversation/a', 'Hello from the operator', { accountId: 'account-a' });
 
   assert.equal(calls[0].url, '/api/publishing/zernio/inbox/conversations');
   assert.match(calls[1].url, /\/api\/publishing\/zernio\/inbox\/conversations\/conversation%2Fa\/messages\?/);
   assert.match(calls[1].url, /accountId=account-a/);
+  assert.equal(calls[2].url, '/api/publishing/zernio/inbox/conversations/conversation%2Fa/messages');
+  assert.equal(calls[2].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[2].options.body), { accountId: 'account-a', message: 'Hello from the operator' });
   assert.equal(JSON.stringify(calls).includes('ZERNIO_API_KEY'), false);
 });
 
@@ -133,6 +142,99 @@ test('Inbox route rejects a missing conversation id without contacting the upstr
   assert.equal(result.status, 400);
   assert.equal(payload.code, 'zernio_conversation_id_required');
   assert.equal(client.calls.some((call) => call.method === 'getInboxConversationMessages'), false);
+});
+
+test('Inbox route sends a tenant-owned reply and returns only safe send metadata', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const request = new Request('https://creator.test/api/publishing/zernio/inbox/conversations/conversation-a/messages', {
+    method: 'POST',
+    body: JSON.stringify({ accountId: 'z-account-a', message: '  Thanks for reaching out.  ' }),
+  });
+  const result = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', 'conversation-a', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await result.json();
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(payload, { success: true, messageId: 'sent-message-1', conversationId: 'conversation-a' });
+  assert.deepEqual(client.calls.find((call) => call.method === 'sendInboxMessage').body, { accountId: 'z-account-a', message: 'Thanks for reaching out.' });
+  assert.equal(JSON.stringify(payload).includes('ZERNIO_API_KEY'), false);
+});
+
+test('Inbox route rejects empty replies and foreign conversations before sending upstream', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const emptyRequest = new Request('https://creator.test/api/publishing/zernio/inbox/conversations/conversation-a/messages', { method: 'POST', body: JSON.stringify({ accountId: 'z-account-a', message: '   ' }) });
+  const emptyResult = await handleZernioPublishingRequest(emptyRequest, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', 'conversation-a', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  assert.equal(emptyResult.status, 400);
+  assert.equal((await emptyResult.json()).code, 'zernio_message_required');
+
+  const foreignRequest = new Request('https://creator.test/api/publishing/zernio/inbox/conversations/conversation-other/messages', { method: 'POST', body: JSON.stringify({ accountId: 'z-account-a', message: 'Do not send' }) });
+  const foreignResult = await handleZernioPublishingRequest(foreignRequest, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', 'conversation-other', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  assert.equal(foreignResult.status, 403);
+  assert.equal((await foreignResult.json()).code, 'zernio_conversation_not_owned');
+  assert.equal(client.calls.some((call) => call.method === 'sendInboxMessage'), false);
+});
+
+test('Inbox route sanitizes send failures and never exposes provider credentials', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient({ sendError: { error: { code: 'provider_failure', error: 'Bearer sk_secret_should_not_escape' }, response: { status: 503 } } });
+  const request = new Request('https://creator.test/api/publishing/zernio/inbox/conversations/conversation-a/messages', { method: 'POST', body: JSON.stringify({ accountId: 'z-account-a', message: 'Hello' }) });
+  const result = await handleZernioPublishingRequest(request, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', 'conversation-a', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  const payload = await result.json();
+
+  assert.equal(result.status, 502);
+  assert.equal(payload.code, 'zernio_upstream_error');
+  assert.equal(JSON.stringify(payload).includes('sk_secret_should_not_escape'), false);
+});
+
+test('Inbox route rejects missing account and conversation ids for replies', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const missingAccount = new Request('https://creator.test/api/publishing/zernio/inbox/conversations/conversation-a/messages', { method: 'POST', body: JSON.stringify({ message: 'Hello' }) });
+  const accountResult = await handleZernioPublishingRequest(missingAccount, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', 'conversation-a', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  assert.equal(accountResult.status, 400);
+  assert.equal((await accountResult.json()).code, 'zernio_account_id_required');
+
+  const missingConversation = new Request('https://creator.test/api/publishing/zernio/inbox/conversations//messages', { method: 'POST', body: JSON.stringify({ accountId: 'z-account-a', message: 'Hello' }) });
+  const conversationResult = await handleZernioPublishingRequest(missingConversation, {
+    params: Promise.resolve({ path: ['inbox', 'conversations', '', 'messages'] }),
+    authenticate: async () => ({ identity: tenantA, response: null }),
+    rateLimit: () => null,
+    repository,
+    client,
+  });
+  assert.equal(conversationResult.status, 400);
+  assert.equal((await conversationResult.json()).code, 'zernio_conversation_id_required');
 });
 
 test('Inbox route sanitizes upstream failures and does not leak provider details', async () => {

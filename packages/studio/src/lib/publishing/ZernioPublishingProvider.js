@@ -45,6 +45,17 @@ export class ZernioPublishingProvider extends PublishingProvider {
     return await this.request(`/inbox/conversations/${encodeURIComponent(id)}/messages`, { query });
   }
 
+  async sendInboxMessage(conversationId, message, query = {}) {
+    const id = String(conversationId || '').trim();
+    const text = String(message || '').trim();
+    if (!id) throw new PublishingError('A conversation is required.', { code: 'zernio_conversation_id_required', status: 400 });
+    if (!text) throw new PublishingError('Message text is required.', { code: 'zernio_message_required', status: 400 });
+    return await this.request(`/inbox/conversations/${encodeURIComponent(id)}/messages`, {
+      method: 'POST',
+      body: { accountId: query.accountId, message: text },
+    });
+  }
+
   connectAccount(platformOrPayload, options = {}) {
     const payload = typeof platformOrPayload === 'string'
       ? { platform: platformOrPayload, redirectTo: options.redirectTo }
