@@ -145,9 +145,12 @@ function Icon({ type, size = 18 }) {
 }
 
 function AssetMedia({ asset, className = "" }) {
-  const url = assetUrl(asset);
+  const [imageFailed, setImageFailed] = useState(false);
   const kind = assetType(asset).toLowerCase();
-  if (url && kind.includes("image")) return <img src={url} alt={assetTitle(asset)} className={`h-full w-full object-cover ${className}`} />;
+  // Saved assets may carry a separate thumbnail reference; prefer it when the
+  // primary file reference does not render, and fall back to the placeholder.
+  const url = kind.includes("image") ? (asset?.thumbnail || assetUrl(asset)) : assetUrl(asset);
+  if (url && kind.includes("image") && !imageFailed) return <img src={url} alt={assetTitle(asset)} onError={() => setImageFailed(true)} className={`h-full w-full object-cover ${className}`} />;
   if (url && kind.includes("video")) return <video src={url} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
   if (url && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={url} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
   return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={25} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em]">{kind}</span></div>;
@@ -184,6 +187,8 @@ export default function AssetLibraryStudio() {
   const [loadError, setLoadError] = useState(null);
   const [serverWarning, setServerWarning] = useState(null);
   const [publishingSelectMode, setPublishingSelectMode] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
+  const [localIds, setLocalIds] = useState(() => new Set());
   const [publishingNotice, setPublishingNotice] = useState(null);
 
   const reload = async () => {
@@ -193,6 +198,10 @@ export default function AssetLibraryStudio() {
       if (archiveFilter === "current") filters.archived = false;
       if (archiveFilter === "archived") filters.archived = true;
       const loaded = await service.listWithDurableAssets({ campaignId: activeCampaign?.id });
+      // Only assets with a stored local record (canonical + legacy) can be
+      // removed through the existing local adapter. Durable-only cards merged
+      // in from /api/creative-assets get no Remove control.
+      setLocalIds(new Set(service.list({ includeLegacy: true }).map((asset) => asset.id)));
       setAllAssets(loaded.assets);
       setAssets(service.search({ ...filters, assets: loaded.assets }));
       setLoadError(null);
@@ -239,6 +248,21 @@ export default function AssetLibraryStudio() {
     if (!selected) return;
     service.setFavorite(selected.id, !selected.favorite);
     reload();
+  };
+
+  // Removes a single saved creation through the existing AssetManager storage
+  // layer (adapter.removeAsset); no new persistence mechanism.
+  const handleRemove = (asset) => {
+    if (!asset?.id || removingId) return;
+    if (!window.confirm("Remove this asset from your library?")) return;
+    setRemovingId(asset.id);
+    try {
+      localAssetManager.removeAsset(asset.id);
+    } finally {
+      if (selectedId === asset.id) setSelectedId(null);
+      setRemovingId(null);
+      reload();
+    }
   };
 
   const handleCreate = () => {
@@ -328,7 +352,7 @@ export default function AssetLibraryStudio() {
       </WorkspaceHero>
 
       <WorkspaceSection title="Continue Working" description="Return to the most recently updated assets in this library view.">
-        {continueWorking.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{continueWorking.map((asset) => <WorkspaceCard as="button" type="button" interactive key={asset.id} onClick={() => router.push(studioRouteForAsset(asset))} className="flex min-h-24 items-center gap-3 text-left"><div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-black/20"><AssetMedia asset={asset} /></div><div className="min-w-0"><p className="truncate text-xs font-semibold">{assetTitle(asset)}</p><p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{STUDIO_LABELS[assetStudioKey(asset)] || assetType(asset)}{asset.model ? ` · ${asset.model}` : ""}</p><p className="mt-2 text-[9px] text-[var(--ms-color-gold-muted)]">{relativeTime(assetTimestamp(asset)) || "Date not recorded"}</p></div></WorkspaceCard>)}</div> : <EmptyState title="Your creative queue is ready" description="Create an asset and your most recent work will appear here." icon={<Icon type="asset" />} action={<PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Open Create</PrimaryButton>} />}
+        {continueWorking.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{continueWorking.map((asset) => <WorkspaceCard as="button" type="button" interactive key={asset.id} onClick={() => router.push(studioRouteForAsset(asset))} className="flex min-h-24 items-center gap-3 text-left"><div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-black/20"><AssetMedia asset={asset} /></div><div className="min-w-0"><p className="truncate text-xs font-semibold">{assetTitle(asset)}</p><p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{STUDIO_LABELS[assetStudioKey(asset)] || assetType(asset)}{asset.model ? ` · ${asset.model}` : ""}</p><p className="mt-2 text-[9px] text-[var(--ms-color-gold-muted)]">{relativeTime(assetTimestamp(asset)) || "Date not recorded"}</p></div></WorkspaceCard>)}</div> : <EmptyState title="Your creative queue is ready" description="Create an asset and your most recent work will appear here." icon={<Icon type="asset" />} action={<PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Start creating</PrimaryButton>} />}
       </WorkspaceSection>
 
       {collections.length > 0 && (
@@ -351,7 +375,7 @@ export default function AssetLibraryStudio() {
 
       <WorkspaceSection title="Asset Grid" description={publishingSelectMode ? `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} available for publishing selection.` : `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
         {serverWarning ? <p className="mb-3 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)]">{serverWarning}</p> : null}
-        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <AssetCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />)}</div>}
+        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <div key={asset.id} className="relative"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />{localIds.has(asset.id) && <button type="button" onClick={() => handleRemove(asset)} disabled={removingId === asset.id} title="Remove from library" aria-label={`Remove ${assetTitle(asset)} from your library`} className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 transition-colors hover:border-[rgba(239,107,114,0.5)] hover:bg-[rgba(239,107,114,0.25)] hover:text-[var(--ms-color-error)] disabled:opacity-50"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}</div>)}</div>}
       </WorkspaceSection>
 
       {selected && (
