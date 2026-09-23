@@ -144,6 +144,10 @@ export default function PublishingStudio() {
   const [inboxMessagesError, setInboxMessagesError] = useState(null);
   const [inboxReply, setInboxReply] = useState("");
   const [inboxReplySending, setInboxReplySending] = useState(false);
+  const [automations, setAutomations] = useState([]);
+  const [automationDraft, setAutomationDraft] = useState(null);
+  const [automationSaving, setAutomationSaving] = useState(false);
+  const [automationError, setAutomationError] = useState(null);
   const [inboxReplyError, setInboxReplyError] = useState(null);
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
@@ -155,7 +159,8 @@ export default function PublishingStudio() {
 
   const publishingViews = [
     { id: "create", label: "Create", detail: "Choose creative work" },
-    { id: "inbox", label: "Inbox", detail: "Read conversations" },
+    { id: "inbox", label: "Inbox", detail: "Manage conversations" },
+    { id: "automations", label: "Automations", detail: "Turn comments into DMs" },
     { id: "calendar", label: "Calendar", detail: "See what is scheduled" },
     { id: "queue", label: "Queue", detail: "Review drafts and actions" },
     { id: "accounts", label: "Accounts", detail: "Manage destinations" },
@@ -277,6 +282,55 @@ export default function PublishingStudio() {
       setInboxReplyError(error);
     } finally {
       setInboxReplySending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView !== "automations" || providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO) return undefined;
+    let cancelled = false;
+    setAutomationError(null);
+    void centerRef.current.listAutomations().then((items) => {
+      if (!cancelled) setAutomations(items);
+    }).catch((error) => {
+      if (!cancelled) setAutomationError(error);
+    });
+    return () => { cancelled = true; };
+  }, [activeView, providerId]);
+
+  const beginAutomation = () => {
+    setAutomationError(null);
+    setAutomationDraft({ id: null, name: "", accountId: "", keyword: "", dmMessage: "", isActive: true });
+  };
+
+  const saveAutomation = async (event) => {
+    event.preventDefault();
+    if (!automationDraft || automationSaving) return;
+    setAutomationSaving(true);
+    setAutomationError(null);
+    try {
+      const input = { name: automationDraft.name, accountId: automationDraft.accountId, keyword: automationDraft.keyword, dmMessage: automationDraft.dmMessage, isActive: automationDraft.isActive };
+      const result = automationDraft.id
+        ? await centerRef.current.updateAutomation(automationDraft.id, input)
+        : await centerRef.current.createAutomation(input);
+      const saved = result.automation;
+      setAutomations((current) => automationDraft.id ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current]);
+      setAutomationDraft(null);
+      setNotice({ tone: "success", text: "Automation saved and synced to Maven Social." });
+    } catch (error) {
+      setAutomationError(error);
+    } finally {
+      setAutomationSaving(false);
+    }
+  };
+
+  const deleteAutomation = async (automation) => {
+    if (!window.confirm(`Delete ${automation.name || "this automation"}?`)) return;
+    try {
+      await centerRef.current.deleteAutomation(automation.id);
+      setAutomations((current) => current.filter((item) => item.id !== automation.id));
+      setNotice({ tone: "success", text: "Automation deleted." });
+    } catch (error) {
+      setAutomationError(error);
     }
   };
 
@@ -655,7 +709,7 @@ export default function PublishingStudio() {
             <EmptyState title="Select Maven Social" description="Choose Maven Social as the account source in Accounts before opening the Inbox." icon={<Icon type="platform" />} />
           </WorkspaceSection>
         ) : (
-          <WorkspaceSection title="Maven Social Inbox" description="Read-only conversations from your connected Zernio accounts.">
+          <WorkspaceSection title="Maven Social Inbox" description="Manage conversations from your connected social accounts.">
             {inboxLoading ? <LoadingState title="Loading Inbox" description="Gathering conversations from Maven Social..." /> : inboxError ? <ErrorState title="Inbox unavailable" description={inboxError.message || "Unable to load Maven Social conversations."} /> : inboxConversations.length === 0 ? <EmptyState title="No conversations yet" description="Connected Zernio conversations will appear here when available." icon={<Icon type="platform" />} /> : (
               <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.5fr)]">
                 <div className="space-y-2" aria-label="Maven Social conversations">
@@ -697,6 +751,22 @@ export default function PublishingStudio() {
             )}
           </WorkspaceSection>
         )
+      )}
+
+      {activeView === "automations" && (
+        <WorkspaceSection title="Maven Social Automations" description="Set up a simple comment keyword that sends a private message automatically.">
+          {providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO ? <EmptyState title="Select Maven Social" description="Choose Maven Social as the account source in Accounts before configuring automations." /> : <>
+            <div className="mb-5 flex items-center justify-between gap-3"><p className="max-w-xl text-xs leading-5 text-[var(--ms-color-text-secondary)]">When someone comments a keyword, Maven Social can send them a private message. Rules are stored and executed by the connected social provider.</p><PrimaryButton type="button" onClick={beginAutomation} className="min-h-9 shrink-0 px-4 py-2 text-xs">+ New Automation</PrimaryButton></div>
+            {automationError ? <p role="alert" className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] p-3 text-xs text-[var(--ms-color-error)]">{automationError.message || "Unable to load automations."}</p> : null}
+            {automationDraft ? <form onSubmit={saveAutomation} className="mb-5 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-gold-primary)] bg-black/10 p-5">
+              <div className="grid gap-4 md:grid-cols-2"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Automation name</span><input required value={automationDraft.name} onChange={(event) => setAutomationDraft({ ...automationDraft, name: event.target.value })} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white" placeholder="Homebuyer Guide" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Social account</span><select required value={automationDraft.accountId} onChange={(event) => setAutomationDraft({ ...automationDraft, accountId: event.target.value })} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white"><option value="">Choose Instagram or Facebook account</option>{accounts.filter((account) => ["instagram", "facebook"].includes(account.platform) && account.connected !== false).map((account) => <option key={account.id} value={account.id}>{account.displayName || account.username || account.id} · {account.platform}</option>)}</select></label></div>
+              <div className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">When</p><p className="mt-2 text-sm font-semibold">Someone comments:</p><input required value={automationDraft.keyword} onChange={(event) => setAutomationDraft({ ...automationDraft, keyword: event.target.value })} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs font-semibold uppercase text-white" placeholder="GUIDE" /><p className="mt-2 text-[10px] text-[var(--ms-color-text-muted)]">Contains keyword · case-insensitive</p></div>
+              <div className="my-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-[var(--ms-color-gold-muted)]">Then</div><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Send DM</span><textarea required value={automationDraft.dmMessage} onChange={(event) => setAutomationDraft({ ...automationDraft, dmMessage: event.target.value })} rows={4} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white" placeholder="Thanks for commenting! Here's the guide you asked for: [link]" /></label>
+              <label className="mt-4 inline-flex items-center gap-2 text-xs"><input type="checkbox" checked={automationDraft.isActive} onChange={(event) => setAutomationDraft({ ...automationDraft, isActive: event.target.checked })} /> Active</label><div className="mt-5 flex gap-2"><PrimaryButton type="submit" disabled={automationSaving} className="min-h-9 px-4 py-2 text-xs">{automationSaving ? "Saving..." : "Save Automation"}</PrimaryButton><SecondaryButton type="button" onClick={() => setAutomationDraft(null)} className="min-h-9 px-4 py-2 text-xs">Cancel</SecondaryButton></div>
+            </form> : null}
+            {automations.length ? <div className="space-y-3">{automations.map((automation) => <WorkspaceCard key={automation.id} className="flex flex-wrap items-center gap-4"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{automation.name}</h3><StatusBadge tone={automation.isActive ? "success" : "neutral"}>{automation.isActive ? "Active" : "Paused"}</StatusBadge></div><p className="mt-2 text-[10px] text-[var(--ms-color-text-secondary)]">When someone comments <strong>{automation.keywords?.[0] || "a keyword"}</strong>, send a DM: “{automation.dmMessage}”</p></div><div className="flex gap-2"><SecondaryButton type="button" onClick={() => setAutomationDraft({ id: automation.id, name: automation.name || "", accountId: automation.accountId || "", keyword: automation.keywords?.[0] || "", dmMessage: automation.dmMessage || "", isActive: automation.isActive !== false })} className="min-h-8 px-3 py-2 text-[10px]">Edit</SecondaryButton><button type="button" onClick={() => void deleteAutomation(automation)} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)]">Delete</button></div></WorkspaceCard>)}</div> : !automationDraft ? <EmptyState title="No automations yet" description="Create a comment keyword automation to start sending helpful private messages." /> : null}
+          </>}
+        </WorkspaceSection>
       )}
 
       {activeView === "create" && (

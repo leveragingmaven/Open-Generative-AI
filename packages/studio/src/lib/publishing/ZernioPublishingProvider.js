@@ -35,6 +35,23 @@ export class ZernioPublishingProvider extends PublishingProvider {
     return Array.isArray(response.accounts) ? response.accounts : [];
   }
 
+  async listAutomations() {
+    const response = await this.request('/automations');
+    return Array.isArray(response.automations) ? response.automations : [];
+  }
+
+  async createAutomation(input) {
+    return await this.request('/automations', { method: 'POST', body: input });
+  }
+
+  async updateAutomation(id, input) {
+    return await this.request(`/automations/${encodeURIComponent(String(id))}`, { method: 'PATCH', body: input });
+  }
+
+  async deleteAutomation(id) {
+    return await this.request(`/automations/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+  }
+
   async listInboxConversations(query = {}) {
     return await this.request('/inbox/conversations', { query });
   }

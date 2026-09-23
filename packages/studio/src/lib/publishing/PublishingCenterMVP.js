@@ -238,6 +238,26 @@ export class PublishingCenterMVP {
     return await this.publishingProvider.getConnectedAccounts();
   }
 
+  async listAutomations() {
+    if (!this.publishingProvider.listAutomations) return [];
+    return await this.publishingProvider.listAutomations();
+  }
+
+  async createAutomation(input) {
+    if (!this.publishingProvider.createAutomation) throw new PublishingValidationError("Automations are unavailable for this account source.");
+    return await this.publishingProvider.createAutomation(input);
+  }
+
+  async updateAutomation(id, input) {
+    if (!this.publishingProvider.updateAutomation) throw new PublishingValidationError("Automations are unavailable for this account source.");
+    return await this.publishingProvider.updateAutomation(id, input);
+  }
+
+  async deleteAutomation(id) {
+    if (!this.publishingProvider.deleteAutomation) throw new PublishingValidationError("Automations are unavailable for this account source.");
+    return await this.publishingProvider.deleteAutomation(id);
+  }
+
   async listInboxConversations() {
     if (!this.publishingProvider.listInboxConversations) return { conversations: [] };
     return await this.publishingProvider.listInboxConversations();

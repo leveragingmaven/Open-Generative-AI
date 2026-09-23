@@ -11,6 +11,10 @@ import {
   listTenantZernioConversations,
   getTenantZernioMessages,
   sendTenantZernioMessage,
+  listTenantCommentAutomations,
+  createTenantCommentAutomation,
+  updateTenantCommentAutomation,
+  deleteTenantCommentAutomation,
   publishZernioNow,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
@@ -27,6 +31,8 @@ function routeKey(path = []) {
   if (path.join('/') === 'posts') return 'posts';
   if (path.join('/') === 'profile') return 'profile';
   if (path.join('/') === 'inbox/conversations') return 'inbox/conversations';
+  if (path.join('/') === 'automations') return 'automations';
+  if (path[0] === 'automations' && path.length === 2) return 'automations/:automationId';
   if (path[0] === 'inbox' && path[1] === 'conversations' && path.length === 4 && path[3] === 'messages') return 'inbox/conversations/:conversationId/messages';
   if (path[0] === 'accounts' && path.length === 2) return 'accounts/:accountId';
   return path.join('/');
@@ -127,6 +133,38 @@ export async function handleZernioPublishingRequest(request, {
       return NextResponse.json({ account });
     } catch (error) {
       return jsonError(error, 'Unable to load the requested Maven Social account.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'automations') {
+    try {
+      return NextResponse.json(await listTenantCommentAutomations({ identity: auth.identity, repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social automations.');
+    }
+  }
+
+  if (request.method === 'POST' && key === 'automations') {
+    try {
+      return NextResponse.json(await createTenantCommentAutomation({ identity: auth.identity, input: await body(request), repository, client }), { status: 201 });
+    } catch (error) {
+      return jsonError(error, 'Unable to save this Maven Social automation.');
+    }
+  }
+
+  if (request.method === 'PATCH' && key === 'automations/:automationId') {
+    try {
+      return NextResponse.json(await updateTenantCommentAutomation({ identity: auth.identity, automationId: resolvedParams.path[1], input: await body(request), repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to update this Maven Social automation.');
+    }
+  }
+
+  if (request.method === 'DELETE' && key === 'automations/:automationId') {
+    try {
+      return NextResponse.json(await deleteTenantCommentAutomation({ identity: auth.identity, automationId: resolvedParams.path[1], repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to delete this Maven Social automation.');
     }
   }
 
