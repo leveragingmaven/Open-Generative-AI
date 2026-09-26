@@ -6,17 +6,7 @@ import { RecipeResolver } from "./RecipeResolver.js";
 import { deriveCreativeSkillGuidance, selectCreativeSkillsForStudio } from "../creative-brief/index.js";
 import { knowledgeContextRouter } from "./KnowledgeContextRouter.js";
 import { createCapabilityRequirement } from "./CapabilityTypes.js";
-
-function normalizeRequirements(recipe, request, input = {}) {
-  const requirements = input.capabilityRequirements?.length
-    ? input.capabilityRequirements
-    : request.capabilityRequirements?.length
-      ? request.capabilityRequirements
-      : recipe.capabilityRequirements || [];
-  return requirements.map((requirement) => createCapabilityRequirement(
-    typeof requirement === "string" ? { id: requirement } : requirement
-  ));
-}
+import { productionRequirements } from './CreativeProductionRequirements.js';
 
 export class CreativeIntelligenceEngine {
   constructor({ memory = creativeMemoryEngine, recipes = new RecipeResolver(), router = capabilityRouter, knowledgeRouter = knowledgeContextRouter } = {}) {
@@ -50,11 +40,12 @@ export class CreativeIntelligenceEngine {
       minConfidence: input.minMemoryConfidence,
       ttlMs: input.memoryTtlMs,
     });
-    const capabilityRequirements = normalizeRequirements(compiledRecipe, request, input);
+    const capabilityRequirements = productionRequirements(compiledRecipe, request, input.skills || []).map(r => createCapabilityRequirement(typeof r === 'string' ? { id: r } : r));
     const routing = capabilityRequirements.length
       ? this.router.resolve({ required: capabilityRequirements.filter((item) => item.kind !== "preferred"), preferred: capabilityRequirements.filter((item) => item.kind === "preferred") }, {
         policy: input.routingPolicy,
         preferences: request.preferences,
+        inputs: request.inputs,
       })
       : null;
     const warnings = [];

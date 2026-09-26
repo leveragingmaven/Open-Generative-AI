@@ -4,6 +4,7 @@ import { CreativeIntelligenceEngine, creativeIntelligenceEngine } from "./Creati
 import { RecipeResolver } from "./RecipeResolver.js";
 import { SkillResolver } from "../skills/SkillResolver.js";
 import { SkillReferenceResolver } from "../skills/SkillReferenceResolver.js";
+import { productionInputs } from './CreativeProductionRequirements.js';
 
 const unique = (values) => [...new Set(values.filter(Boolean))];
 const asArray = (value) => Array.isArray(value) ? value : value == null ? [] : [value];
@@ -311,7 +312,7 @@ export class SkillAwarePlanCompiler {
     metadata.costQualityStrategy.push(...asArray(recipeDefinition?.costQualityStrategy || recipeDefinition?.cost || recipeDefinition?.qualityStrategy));
 
     const unresolvedRequiredInputs = [];
-    const availableInputs = { ...request.inputs };
+    const availableInputs = productionInputs(request);
     for (const name of metadata.requiredInputs) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "skill" });
     for (const name of recipeReference?.inputRequirements?.required || []) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "recipe" });
     for (const name of workflowReference?.inputRequirements?.required || []) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "workflow" });
@@ -339,6 +340,13 @@ export class SkillAwarePlanCompiler {
       }
     }
 
+    for (const name of intelligencePlan?.routing?.requiredInputs || []) {
+      const definition = intelligencePlan.routing.inputSchema?.[name];
+      if (name === 'prompt' && (request.intent || availableInputs.text)) continue;
+      if (!valuePresent(availableInputs[name]) && definition?.default === undefined && !dedupedMissing.some(item => item.name === name)) {
+        dedupedMissing.push({ name, source: 'deployment' });
+      }
+    }
     const state = errors.length
       ? "non_executable"
       : dedupedMissing.length || (!recipeReference && input.requireRecipe !== false)

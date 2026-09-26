@@ -337,9 +337,9 @@ export async function generateAudio(apiKey, params) {
     const modelInfo = getAudioModelById(modelId);
     const endpoint = modelInfo?.endpoint || modelId;
     const payload = {};
-    const skipKeys = ['_modelId', 'onRequestId'];
+    const skipKeys = ['_modelId', 'onRequestId', 'signal', 'text', 'productionRequirements'];
     for (const key in params) {
-        if (!skipKeys.includes(key) && params[key] !== undefined && params[key] !== null) {
+        if (!skipKeys.includes(key) && (!modelInfo?.inputs || Object.hasOwn(modelInfo.inputs, key)) && params[key] !== undefined && params[key] !== null) {
             payload[key] = params[key];
         }
     }

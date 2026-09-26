@@ -5,6 +5,7 @@ import { PROVIDER_CONFIG } from "./config.js";
 import { PROVIDER_IDS } from "../providers/providerTypes.js";
 import { FAL_MODEL_IDS } from "../providers/FalProvider.js";
 import { FAL_ROUTING_MODELS } from "../providers/modelRoutingMetadata.js";
+import { studioModelDeployments } from "./StudioModelDeployments.js";
 
 export const PRODUCTION_CAPABILITIES = Object.freeze([
   { id: CAPABILITIES.TEXT_GENERATION, name: "Text and LLM Generation", operation: "text_generation", inputModalities: ["text"], outputModalities: ["text"] },
@@ -102,6 +103,7 @@ export const PRODUCTION_DEPLOYMENTS = Object.freeze([
   },
   {
     id: "muapi-ai-clipping",
+    metadata: { requiredInputs: ["videoUrl"] },
     providerId: "muapi",
     logicalModel: "muapi-ai-clipping",
     operation: "ai_clipping",
@@ -138,10 +140,11 @@ export const PRODUCTION_DEPLOYMENTS = Object.freeze([
   },
   {
     id: "muapi-video-generation",
+    metadata: { requiredInputs: ["image_url"] },
     providerId: "muapi",
     logicalModel: "muapi-i2v-catalog",
     operation: "image_to_video",
-    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.COMMERCIAL_LICENSE],
+    capabilities: [CAPABILITIES.VIDEO_GENERATION, CAPABILITIES.REFERENCE_IMAGES, CAPABILITIES.COMMERCIAL_LICENSE],
     inputs: ["image", "text"], outputs: ["video"], priority: 10, confidence: 0.8,
     featureState: "enabled", availability: "available", health: "healthy",
     quality: { standard: 0.8, premium: 0.9 }, speed: { tier: "standard" }, cost: { unit: "video", unitCost: null },
@@ -329,6 +332,7 @@ export const MUAPI_MODEL_FIXTURES = Object.freeze([
 export function registerProductionCapabilities({ capabilities = capabilityRegistry, deployments = providerCapabilityRegistry } = {}) {
   PRODUCTION_CAPABILITIES.forEach((definition) => capabilities.register(definition));
   PRODUCTION_DEPLOYMENTS.forEach((deployment) => deployments.register(deployment));
+  studioModelDeployments().forEach((deployment) => deployments.register(deployment));
   if (typeof deployments.registerModel === "function") {
     MUAPI_MODEL_FIXTURES.forEach((model) => deployments.registerModel(model));
   }

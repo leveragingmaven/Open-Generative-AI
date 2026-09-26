@@ -12,7 +12,7 @@ const UNSAFE_FIELDS = new Set([
 ]);
 
 const OPERATIONS = new Set([
-  'image_generation', 'image_editing', 'video_generation', 'video_editing',
+  'image_generation', 'image_editing', 'video_generation', 'video_editing', 'audio_generation',
 ]);
 
 const MAX_STRING_LENGTH = 4000;

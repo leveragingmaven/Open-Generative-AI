@@ -54,6 +54,7 @@ export const RECIPE_LIBRARY = Object.freeze({
   }),
   video: Object.freeze({
     id: "video",
+    outputModality: "video",
     promptId: "plain",
     providerId: "muapi",
     capabilityRequirements: ["video_generation"],
@@ -79,9 +80,11 @@ export const RECIPE_LIBRARY = Object.freeze({
   }),
   audio: Object.freeze({
     id: "audio",
+    outputModality: "audio",
     promptId: "plain",
     providerId: "muapi",
     capabilityRequirements: ["voice_generation"],
+    inputs: { text: { type: "string", required: true, description: "Exact words to speak" } },
   }),
   recast: Object.freeze({
     id: "recast",
@@ -201,9 +204,11 @@ export const RECIPE_LIBRARY = Object.freeze({
   }),
   videoTransform: Object.freeze({
     id: "video-transform",
+    outputModality: "video",
     promptId: "plain",
     providerId: "muapi",
     capabilityRequirements: ["video_editing"],
+    inputs: { videoUrl: { type: "string", required: true } },
   }),
   repurposeVideo: Object.freeze({
     id: "repurposeVideo",

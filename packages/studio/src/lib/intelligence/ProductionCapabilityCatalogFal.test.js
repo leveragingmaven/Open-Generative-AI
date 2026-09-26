@@ -120,7 +120,7 @@ test("M2 registered fal.ai records preserve provider/logicalModel/endpointId thr
   }
 });
 
-test("M2 leaves every existing MuAPI catalog entry unchanged", () => {
+test("catalog preserves MuAPI identity and adds executable studio deployments", () => {
   const { deployments } = buildRegistries();
   const muapiDeployments = PRODUCTION_DEPLOYMENTS.filter((entry) => entry.providerId === PROVIDER_IDS.MUAPI);
 
@@ -131,10 +131,10 @@ test("M2 leaves every existing MuAPI catalog entry unchanged", () => {
     assert.equal(entry.featureState, "enabled");
     assert.equal(entry.availability, "available");
     assert.equal(entry.health, "healthy");
-    assert.equal(entry.metadata, undefined);
+    if (entry.metadata) assert.ok(Array.isArray(entry.metadata.requiredInputs));
   }
 
-  assert.equal(deployments.list().length, PRODUCTION_DEPLOYMENTS.length);
+  assert.ok(deployments.list().length > PRODUCTION_DEPLOYMENTS.length);
   assert.equal(deployments.listModels().length, MUAPI_MODEL_FIXTURES.length);
   assert.equal(deployments.get("muapi-image-generation").logicalModel, "muapi-image-catalog");
   assert.equal(deployments.get("muapi-image-editing").logicalModel, "muapi-image-edit-catalog");

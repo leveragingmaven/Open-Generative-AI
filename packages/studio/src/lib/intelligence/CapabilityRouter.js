@@ -18,6 +18,10 @@ export class CapabilityRouter {
     });
     const eligible = getEligibleDeployments(this.deployments.list(), required, options.policy);
     const ranked = rankDeployments(eligible, { required, preferred }, options.preferences);
+    if (options.inputs) {
+      const missing = deployment => (deployment.metadata?.requiredInputs || []).filter(name => name !== 'prompt' && options.inputs[name] == null && deployment.metadata?.inputSchema?.[name]?.default === undefined).length;
+      ranked.sort((a, b) => missing(a.deployment) - missing(b.deployment));
+    }
     if (!ranked.length) throw new Error("No eligible deployment matches the capability requirements");
     const selected = ranked[0];
     return {
@@ -25,6 +29,9 @@ export class CapabilityRouter {
       providerId: selected.deployment.providerId,
       logicalModel: selected.deployment.logicalModel,
       operation: selected.deployment.operation,
+      model: selected.deployment.metadata?.modelId || selected.deployment.metadata?.endpointId || null,
+      requiredInputs: selected.deployment.metadata?.requiredInputs || [],
+      inputSchema: selected.deployment.metadata?.inputSchema || {},
       cost: selected.deployment.cost ? { ...selected.deployment.cost } : null,
       score: selected.score,
       reasons: selected.reasons,

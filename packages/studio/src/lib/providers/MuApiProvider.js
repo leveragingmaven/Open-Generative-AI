@@ -2,6 +2,7 @@ import { CreativeProvider } from "./CreativeProvider.js";
 import { PROVIDER_CAPABILITIES, PROVIDER_IDS, normalizeProviderError, normalizeProviderResponse } from "./providerTypes.js";
 import { getI2IModelById } from "../../models.js";
 import * as muapi from "../../muapi.js";
+import { productionInputs } from '../intelligence/CreativeProductionRequirements.js';
 
 function referenceValue(reference) {
   if (typeof reference === "string") return reference.trim();
@@ -56,17 +57,30 @@ export class MuApiProvider extends CreativeProvider {
   }
 
   execute(request = {}) {
-    const operation = request.operation || request.routing?.operation || request.capability?.operation || request.recipe?.operation;
+    const operation = request.routing?.operation || request.operation || request.capability?.operation || request.recipe?.operation;
     const apiKey = request.apiKey !== undefined ? request.apiKey : request.executionMetadata?.apiKey;
     const canonicalParams = request.params || request.payload || request.inputs || {};
-    const params = adaptImageReferences(request, operation, adaptImageEditingInputs(operation, canonicalParams));
+    const schema = request.routing?.inputSchema || {};
+    const defaults = Object.fromEntries(Object.entries(schema).filter(([,v]) => v.default !== undefined).map(([k,v]) => [k,v.default]));
+    const bound = productionInputs({ ...request, inputs: { ...defaults, ...canonicalParams } });
+    if (bound.videoUrl) bound.video_url ??= bound.videoUrl;
+    if (operation?.includes('video') || operation === 'ai_clipping') {
+      if (bound.aspectRatio) bound.aspect_ratio ??= bound.aspectRatio;
+      if (bound.durationSeconds) bound.duration ??= bound.durationSeconds;
+    }
+    if (operation === 'audio_generation') {
+      bound._modelId = request.routing?.model || bound.model;
+      if (bound.text) bound.prompt = bound.text;
+      delete bound.model;
+    }
+    const params = adaptImageReferences(request, operation, adaptImageEditingInputs(operation, bound));
     const methods = {
       image_generation: "generateImage",
       image_editing: "generateI2I",
       video_generation: "generateVideo",
       image_to_video: "generateI2V",
       video_transform: "processV2V",
-      video_editing: "runMotionGraphicsEdit",
+      video_editing: "processV2V",
       audio_generation: "generateAudio",
       marketing_generation: "generateMarketingStudioAd",
       recast: "processRecast",

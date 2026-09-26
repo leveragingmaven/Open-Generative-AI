@@ -3,6 +3,7 @@ export const CAPABILITIES = Object.freeze({
   IMAGE_EDITING: "image_editing",
   VIDEO_GENERATION: "video_generation",
   VIDEO_EDITING: "video_editing",
+  VIDEO_TRANSFORMATION: "video_transformation",
   TEXT_GENERATION: "text_generation",
   VOICE_SYNTHESIS: "voice_synthesis",
   SPEECH_RECOGNITION: "speech_recognition",

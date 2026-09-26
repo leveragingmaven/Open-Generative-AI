@@ -5,15 +5,18 @@ import {
   RecipeResolver,
 } from "./RecipeResolver.js";
 
-test("canonical image operations expose only the established default recipes", () => {
+test("canonical creative operations expose existing default recipes", () => {
   const resolver = new RecipeResolver();
   assert.deepEqual(CANONICAL_OPERATION_DEFAULT_RECIPES, {
     image_generation: "image",
     image_editing: "image-edit",
+    video_generation: "video",
+    video_editing: "video-transform",
+    audio_generation: "audio",
   });
   assert.equal(resolver.defaultRecipeIdForOperation("image_generation"), "image");
   assert.equal(resolver.defaultRecipeIdForOperation("image_editing"), "image-edit");
-  assert.equal(resolver.defaultRecipeIdForOperation("video_generation"), null);
+  assert.equal(resolver.defaultRecipeIdForOperation("video_generation"), "video");
   assert.equal(resolver.defaultRecipeIdForOperation("unknown_operation"), null);
 });
 

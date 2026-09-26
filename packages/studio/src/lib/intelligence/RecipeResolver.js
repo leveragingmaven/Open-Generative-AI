@@ -4,6 +4,9 @@ import "./ProductionCapabilityCatalog.js";
 export const CANONICAL_OPERATION_DEFAULT_RECIPES = Object.freeze({
   image_generation: "image",
   image_editing: "image-edit",
+  video_generation: "video",
+  video_editing: "video-transform",
+  audio_generation: "audio",
 });
 
 export class RecipeResolver {
@@ -29,6 +32,7 @@ export class RecipeResolver {
     return {
       id: recipe.id || recipeId,
       version: recipe.version || 1,
+      ...(recipe.outputModality ? { outputModality: recipe.outputModality } : {}),
       providerId: recipe.providerId || null,
       model: typeof recipe.model === "function" ? recipe.model(input) : recipe.model || null,
       defaults: { ...(recipe.defaults || {}) },

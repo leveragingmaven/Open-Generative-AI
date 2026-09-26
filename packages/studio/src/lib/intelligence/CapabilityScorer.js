@@ -14,10 +14,10 @@ export function scoreDeployment(deployment, requirements = {}, preferences = {})
       (score, [key, value]) => score + valueScore(deployment.metadata[key], value),
       0,
     );
-    return total + requirement.weight * (capabilityScore + metadataScore);
+    return total + (requirement.weight ?? 1) * (capabilityScore + metadataScore);
   }, 0);
   const quality = preferences.qualityTier ? (deployment.quality[preferences.qualityTier] || 0) : 0;
-  const speed = preferences.maxLatencyMs ? valueScore(deployment.speed.latencyMs, preferences.maxLatencyMs) : 0;
+  const speed = preferences.maxLatencyMs ? valueScore(preferences.maxLatencyMs, deployment.speed.latencyMs) : 0;
   const cost = preferences.maxCost ? valueScore(preferences.maxCost, deployment.cost.unitCost) : 0;
   return deployment.priority + deployment.confidence + matchedPreferred + quality + speed + cost;
 }
@@ -33,5 +33,12 @@ export function rankDeployments(deployments, requirements, preferences) {
         `confidence:${deployment.confidence}`,
       ],
     }))
-    .sort((a, b) => b.score - a.score || b.deployment.priority - a.deployment.priority || a.deployment.id.localeCompare(b.deployment.id));
+    .sort((a, b) => {
+      const suitability = d => scoreDeployment({ ...d, priority: 0, confidence: 0 }, requirements, preferences);
+      const difference = suitability(b.deployment) - suitability(a.deployment);
+      if (difference) return difference;
+      const ac = a.deployment.cost, bc = b.deployment.cost;
+      if (ac?.unit === bc?.unit && ac?.currency === bc?.currency && Number.isFinite(ac?.unitCost) && Number.isFinite(bc?.unitCost) && ac.unitCost !== bc.unitCost) return ac.unitCost - bc.unitCost;
+      return b.score - a.score || a.deployment.id.localeCompare(b.deployment.id);
+    });
 }

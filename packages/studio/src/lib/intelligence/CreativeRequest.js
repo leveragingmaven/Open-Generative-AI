@@ -9,6 +9,7 @@ export function createCreativeRequest(input = {}) {
     accountId: input.accountId || null,
     campaignId: input.campaignId || null,
     studioId: input.studioId || null,
+    operation: input.operation || null,
     recipeId: input.recipeId || null,
     intent: input.intent || "",
     capabilityRequirements: Array.isArray(input.capabilityRequirements)

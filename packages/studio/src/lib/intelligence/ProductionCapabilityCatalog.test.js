@@ -94,7 +94,8 @@ test("model catalog records remain separate from router deployments", () => {
   const router = new CapabilityRouter({ capabilities, deployments });
   const result = router.resolve({ required: ["image_generation"] });
 
-  assert.equal(deployments.list().length, PRODUCTION_DEPLOYMENTS.length);
+  assert.ok(deployments.list().length > PRODUCTION_DEPLOYMENTS.length);
+  assert.ok(deployments.list().some(d => d.capabilities.includes('voice_generation')));
   assert.ok(deployments.listModels().length > 0);
   assert.ok(PRODUCTION_DEPLOYMENTS.some((deployment) => deployment.id === result.deploymentId));
 });
