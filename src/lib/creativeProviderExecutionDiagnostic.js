@@ -68,6 +68,80 @@ const CLASS_RULES = Object.freeze([
 const CODE_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
 
 /**
+ * Closed cause classification. A transport failure reaches this module as a
+ * `TypeError: fetch failed` whose actionable detail lives on `error.cause.code`
+ * (ENOTFOUND, ECONNREFUSED, ...) rather than on the error itself, so
+ * `normalizeProviderError` collapses every one of them to the single
+ * `provider_execution_failed` code. This table restores the distinction.
+ *
+ * The emitted value is ALWAYS one of this module's own literals. An input code
+ * is matched by exact equality or by a fixed family prefix and is then
+ * DISCARDED — the caller's string is never emitted, only the bucket it fell
+ * into. A hostile `cause.code` therefore cannot appear in the log, and neither
+ * can a hostname, address, or message, because neither is ever read.
+ */
+const CAUSE_BY_EXACT_CODE = new Map([
+  ['ENOTFOUND', 'dns_not_found'],
+  ['EAI_AGAIN', 'dns_temporary_failure'],
+  ['ECONNREFUSED', 'connection_refused'],
+  ['ECONNRESET', 'connection_reset'],
+  ['ETIMEDOUT', 'connection_timeout'],
+  ['EPIPE', 'connection_broken_pipe'],
+  ['EHOSTUNREACH', 'host_unreachable'],
+  ['ENETUNREACH', 'network_unreachable'],
+  ['EACCES', 'permission_denied'],
+  ['EPROTO', 'protocol_error'],
+  ['ENOTCAPABLE', 'protocol_error'],
+  ['UND_ERR_CONNECT_TIMEOUT', 'undici_timeout'],
+  ['UND_ERR_HEADERS_TIMEOUT', 'undici_timeout'],
+  ['UND_ERR_BODY_TIMEOUT', 'undici_timeout'],
+  ['UND_ERR_SOCKET', 'undici_socket'],
+]);
+
+/**
+ * Certificate indicators are checked before the family prefixes, so a
+ * certificate-specific TLS failure (ERR_TLS_CERT_ALTNAME_INVALID) is reported
+ * as a certificate problem rather than the generic TLS bucket. Only the
+ * indicator is inspected; the matched code itself is never emitted.
+ */
+const CERTIFICATE_INDICATORS = Object.freeze(['CERT', 'CERTIFICATE']);
+
+/** Fixed family prefixes. The remainder of the code is never emitted. */
+const CAUSE_FAMILY_PREFIXES = Object.freeze([
+  ['UND_ERR_', 'undici_error'],
+  ['ERR_TLS_', 'tls_error'],
+  ['ERR_SSL_', 'ssl_error'],
+  ['DEPTH_ZERO_', 'tls_certificate'],
+  ['SELF_SIGNED_', 'tls_certificate'],
+  ['UNABLE_TO_VERIFY_', 'tls_certificate'],
+]);
+
+/** Bounded cause-chain depth; Node nests errors a few levels for transport faults. */
+const CAUSE_CHAIN_DEPTH = 4;
+
+/**
+ * Classifies an error's transport cause into a fixed bucket, or 'unknown'.
+ * Only `.code` is read. Messages, hostnames, addresses, and every other
+ * property of the cause are ignored entirely.
+ */
+export function classifyProviderExecutionCause(error) {
+  let current = error;
+  for (let depth = 0; current && depth < CAUSE_CHAIN_DEPTH; depth += 1) {
+    const code = current.code;
+    if (typeof code === 'string' && code.length <= 64) {
+      const exact = CAUSE_BY_EXACT_CODE.get(code);
+      if (exact !== undefined) return exact;
+      if (CERTIFICATE_INDICATORS.some((indicator) => code.includes(indicator))) return 'tls_certificate';
+      for (const [prefix, classification] of CAUSE_FAMILY_PREFIXES) {
+        if (code.startsWith(prefix)) return classification;
+      }
+    }
+    current = current.cause;
+  }
+  return 'unknown';
+}
+
+/**
  * Admits an error code only when it is short and drawn from a charset that
  * cannot carry an address, path, query string, or body. Anything else — an
  * absent code, a driver message, an object — collapses to a fixed literal.
@@ -104,6 +178,10 @@ export function emitProviderExecutionDiagnostic({ stage, outcome = 'ok', error }
       const code = safeProviderExecutionCode(error);
       record.code = code;
       record.class = classifyProviderExecutionFailure(safe, code);
+      // A transport fault carries no useful top-level code, so the cause is
+      // classified separately. Fixed buckets only; the cause's own string is
+      // never emitted.
+      record.cause = classifyProviderExecutionCause(error);
     }
     console.log(`${CREATIVE_PROVIDER_EXECUTION_DIAGNOSTIC} ${JSON.stringify(record)}`);
   } catch {

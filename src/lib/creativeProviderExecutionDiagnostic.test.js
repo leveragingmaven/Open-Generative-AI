@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import {
   CREATIVE_PROVIDER_EXECUTION_DIAGNOSTIC,
   PROVIDER_EXECUTION_STAGES,
+  classifyProviderExecutionCause,
   classifyProviderExecutionFailure,
   emitProviderExecutionDiagnostic,
   safeProviderExecutionCode,
@@ -120,10 +121,10 @@ describe('stage tracing distinguishes every pre-provider stage', () => {
 });
 
 describe('the marker cannot leak a secret', () => {
-  it('emits only stage, outcome, code and class', () => {
+  it('emits only stage, outcome, code, class and cause', () => {
     const cap = capture();
     emitProviderExecutionDiagnostic({ stage: 'credential_resolve', outcome: 'error', error: Object.assign(new Error('x'), { code: 'provider_credential_required:muapi' }) });
-    assert.deepEqual(Object.keys(cap.records[0]).sort(), ['class', 'code', 'outcome', 'stage']);
+    assert.deepEqual(Object.keys(cap.records[0]).sort(), ['cause', 'class', 'code', 'outcome', 'stage']);
   });
 
   it('collapses an uncoded, message-bearing, or exotic error to a fixed literal', () => {
@@ -197,6 +198,117 @@ describe('the marker cannot leak a secret', () => {
       (error) => error === failure,
     );
     console.log = originalLog;
+  });
+});
+
+describe('transport cause classification for provider_invoke', () => {
+  it('recovers the signal that normalizeProviderError discards', async () => {
+    // This is the exact production shape: a top-level TypeError with no code,
+    // carrying the real transport code on .cause. normalizeProviderError turns
+    // it into an uncoded provider_execution_failed; this restores the detail.
+    const cap = capture();
+    for (const [transportCode, expected] of [
+      ['ENOTFOUND', 'dns_not_found'],
+      ['EAI_AGAIN', 'dns_temporary_failure'],
+      ['ECONNREFUSED', 'connection_refused'],
+      ['ECONNRESET', 'connection_reset'],
+      ['ETIMEDOUT', 'connection_timeout'],
+      ['EPIPE', 'connection_broken_pipe'],
+      ['EHOSTUNREACH', 'host_unreachable'],
+      ['ENETUNREACH', 'network_unreachable'],
+      ['EPROTO', 'protocol_error'],
+    ]) {
+      const failure = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('inner'), { code: transportCode }) });
+      await assert.rejects(() => withProviderExecutionStage('provider_invoke', () => { throw failure; }));
+      const record = cap.records.at(-1);
+      assert.equal(record.stage, 'provider_invoke');
+      assert.equal(record.outcome, 'error');
+      // The top-level code is genuinely absent, exactly as in production.
+      assert.equal(record.code, 'uncoded');
+      assert.equal(record.cause, expected);
+    }
+  });
+
+  it('classifies certificate, TLS, SSL and undici families', () => {
+    const families = [
+      ['CERT_HAS_EXPIRED', 'tls_certificate'],
+      ['DEPTH_ZERO_SELF_SIGNED_CERT', 'tls_certificate'],
+      ['SELF_SIGNED_CERT_IN_CHAIN', 'tls_certificate'],
+      ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'tls_certificate'],
+      ['ERR_TLS_CERT_ALTNAME_INVALID', 'tls_certificate'],
+      ['ERR_TLS_HANDSHAKE_TIMEOUT', 'tls_error'],
+      ['ERR_SSL_WRONG_VERSION_NUMBER', 'ssl_error'],
+      ['UND_ERR_CONNECT_TIMEOUT', 'undici_timeout'],
+      ['UND_ERR_HEADERS_TIMEOUT', 'undici_timeout'],
+      ['UND_ERR_SOCKET', 'undici_socket'],
+      ['UND_ERR_SOMETHING_NEW', 'undici_error'],
+    ];
+    for (const [code, expected] of families) {
+      assert.equal(classifyProviderExecutionCause(Object.assign(new Error('x'), { code })), expected, code);
+      assert.equal(classifyProviderExecutionCause({ cause: Object.assign(new Error('x'), { code }) }), expected, code);
+    }
+  });
+
+  it('walks a bounded cause chain and stops at the first recognised code', () => {
+    // Levels examined are 0..3 (the bound). A code at level 3 is found.
+    const withinBound = { cause: { cause: { cause: { code: 'ENOTFOUND' } } } };
+    assert.equal(classifyProviderExecutionCause(withinBound), 'dns_not_found');
+    // A code beyond the bound gives up safely rather than reading further.
+    const beyondBound = { cause: { cause: { cause: { cause: { cause: { code: 'ENOTFOUND' } } } } } };
+    assert.equal(classifyProviderExecutionCause(beyondBound), 'unknown');
+  });
+
+  it('reports unknown for anything unrecognised or absent', () => {
+    assert.equal(classifyProviderExecutionCause(new Error('boom')), 'unknown');
+    assert.equal(classifyProviderExecutionCause({}), 'unknown');
+    assert.equal(classifyProviderExecutionCause(null), 'unknown');
+    assert.equal(classifyProviderExecutionCause({ cause: null }), 'unknown');
+    assert.equal(classifyProviderExecutionCause({ code: 'ENOTFOUND', cause: undefined }), 'dns_not_found');
+  });
+
+  it('never emits the cause code, message, hostname, address, or any other value', () => {
+    const cap = capture();
+    const hostile = new TypeError('fetch failed for https://api.muapi.ai/api/v1/flux-1 with key sk-live-DO-NOT-LOG-THIS');
+    hostile.cause = Object.assign(
+      new Error(`getaddrinfo ENOTFOUND api.muapi.ai-8.8.8.8 customer@example.com Bearer eyJhbG.abc.def`),
+      {
+        code: 'ENOTFOUND',
+        hostname: 'api.muapi.ai',
+        address: '8.8.8.8',
+        port: 443,
+        apiKey: 'sk-live-DO-NOT-LOG-THIS',
+        headers: { 'x-api-key': 'sk-live-DO-NOT-LOG-THIS' },
+        request: { body: { prompt: 'Your GPTs Need a New Home' } },
+        stack: 'TypeError: fetch failed\n    at submitAndPoll (muapi.js:144)',
+      },
+    );
+    emitProviderExecutionDiagnostic({ stage: 'provider_invoke', outcome: 'error', error: hostile });
+    const record = cap.records[0];
+    assert.equal(record.cause, 'dns_not_found');
+    const text = cap.lines.join('\n');
+    for (const secret of SECRET_LIKE) assert.ok(!text.includes(secret), `leaked ${secret}`);
+    for (const forbidden of ['ENOTFOUND', 'api.muapi.ai', '8.8.8.8', 'Bearer', 'fetch failed', 'getaddrinfo', 'submitAndPoll', 'muapi.js', 'x-api-key', 'at ']) {
+      assert.ok(!text.includes(forbidden), `leaked ${forbidden}`);
+    }
+    assert.ok(!text.includes('ENOTFOUND'));
+  });
+
+  it('discards an unrecognised cause code instead of echoing it', () => {
+    const cap = capture();
+    const hostile = { code: 'weird_leak_sk_live_ABCDEF', cause: { code: 'ENOTFOUND secret_sk-live-LEAK customer@example.com' } };
+    emitProviderExecutionDiagnostic({ stage: 'provider_invoke', outcome: 'error', error: hostile });
+    const record = cap.records[0];
+    assert.equal(record.code, 'weird_leak_sk_live_ABCDEF'); // top-level code: literal allowlist charset, fixed by design
+    // The cause value is NEVER emitted, recognised or not.
+    assert.equal(record.cause, 'unknown');
+    assert.ok(!cap.lines.join('\n').includes('ENOTFOUND secret'));
+    assert.ok(!cap.lines.join('\n').includes('sk-live-LEAK'));
+  });
+
+  it('does not emit a cause field for successful stages', async () => {
+    const cap = capture();
+    await withProviderExecutionStage('provider_invoke', () => ({ ok: true }));
+    assert.deepEqual(Object.keys(cap.records[0]), ['stage', 'outcome']);
   });
 });
 
