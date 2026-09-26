@@ -16,6 +16,10 @@ export const CREATOR_OS_SERVICE_SCOPES = [
   'creative.execute',
   'creative.read',
   'publishing',
+  // Customer Workspace model brokerage: Maven Harness asks Creator OS to run one
+  // OpenAI-compatible chat completion using the CUSTOMER's stored provider
+  // credential. This scope grants no creative, publishing, or identity authority.
+  'model.complete',
 ];
 
 export function setting(name, fallback = '') {
