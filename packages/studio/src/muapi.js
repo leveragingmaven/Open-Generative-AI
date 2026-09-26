@@ -14,8 +14,18 @@ function isAgencyMode() {
     return TRUE_ENV_VALUES.has((process.env.AGENCY_MODE || '').trim().toLowerCase());
 }
 
+// Agency Mode suppression exists only for the proxied browser path: the host
+// app's proxy re-issues the call server-side and injects the credential itself
+// (see app/api/api/v1/[[...path]]/route.js), so a browser key is redundant and
+// must never be forwarded. A server-side call has no proxy in front of it and
+// talks to MuAPI directly, so the credential already resolved for that call
+// must always be sent.
+function isProxiedRequest() {
+    return BASE_URL === '/api';
+}
+
 function clientApiKey(key) {
-    return isAgencyMode() ? null : key;
+    return isAgencyMode() && isProxiedRequest() ? null : key;
 }
 
 function jsonHeaders(key) {

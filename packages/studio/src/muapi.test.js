@@ -295,3 +295,93 @@ test('polling URL uses the exact returned request ID', async () => {
   await generateImage('test-key', imageParams());
   assert.equal(urls[1], resultUrl(requestId));
 });
+
+// Agency Mode credential handling.
+//
+// `muapi.js` is loaded twice on purpose. The static import at the top of this
+// file is evaluated in Node, so it is the direct server-side instance. The
+// browser instance is imported with `window` present, so it resolves the
+// in-app proxy base URL and is the path the studio actually ships.
+const MUAPI_MODULE_URL = new URL('./muapi.js', import.meta.url).href;
+
+async function loadBrowserMuApi() {
+  const hadWindow = 'window' in globalThis;
+  const previousWindow = globalThis.window;
+  globalThis.window = { location: { protocol: 'https:' } };
+  try {
+    return await import(`${MUAPI_MODULE_URL}?runtime=browser`);
+  } finally {
+    if (hadWindow) globalThis.window = previousWindow;
+    else delete globalThis.window;
+  }
+}
+
+async function withAgencyMode(value, run) {
+  const previous = process.env.AGENCY_MODE;
+  if (value === undefined) delete process.env.AGENCY_MODE;
+  else process.env.AGENCY_MODE = value;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.AGENCY_MODE;
+    else process.env.AGENCY_MODE = previous;
+  }
+}
+
+async function captureOutboundRequests(generate, params = imageParams()) {
+  const requests = [];
+  globalThis.fetch = mockSubmissionAndPolling({
+    polls: [response({ status: 'completed' })],
+    onFetch: (url, options) => requests.push({ url, headers: options?.headers || {} }),
+  });
+  await generate('test-key', params);
+  return requests;
+}
+
+test('Agency Mode suppresses the client key on the proxied browser path', async () => {
+  const browser = await loadBrowserMuApi();
+  const requests = await withAgencyMode('true', () => captureOutboundRequests(browser.generateImage));
+
+  // Submission and poll both go through the host app's proxy.
+  assert.deepEqual(requests.map(({ url }) => url), [
+    '/api/api/v1/ideogram-v3-t2i',
+    '/api/api/v1/predictions/request-1/result',
+  ]);
+  // The proxy strips any browser key and injects its own, so none is sent.
+  assert.equal(requests.every(({ headers }) => !('x-api-key' in headers)), true);
+  // Headers are still constructed; only the credential is withheld.
+  assert.equal(requests.every(({ headers }) => headers['Content-Type'] === 'application/json'), true);
+});
+
+test('Agency Mode still sends the resolved credential on a direct server-side request', async () => {
+  const requests = await withAgencyMode('true', () => captureOutboundRequests(generateImage));
+
+  // Server-side execution bypasses the proxy, so the URL is the upstream host.
+  assert.deepEqual(requests.map(({ url }) => url), [
+    'https://api.muapi.ai/api/v1/ideogram-v3-t2i',
+    'https://api.muapi.ai/api/v1/predictions/request-1/result',
+  ]);
+  // Submission AND polling must both authenticate, or the job is never recorded.
+  assert.deepEqual(requests.map(({ headers }) => headers['x-api-key']), ['test-key', 'test-key']);
+});
+
+test('non-Agency browser requests keep sending the client key through the proxy', async () => {
+  const browser = await loadBrowserMuApi();
+  const requests = await withAgencyMode(undefined, () => captureOutboundRequests(browser.generateImage));
+
+  assert.deepEqual(requests.map(({ url }) => url), [
+    '/api/api/v1/ideogram-v3-t2i',
+    '/api/api/v1/predictions/request-1/result',
+  ]);
+  assert.deepEqual(requests.map(({ headers }) => headers['x-api-key']), ['test-key', 'test-key']);
+});
+
+test('non-Agency server-side requests are unchanged', async () => {
+  const requests = await withAgencyMode(undefined, () => captureOutboundRequests(generateImage));
+
+  assert.deepEqual(requests.map(({ url }) => url), [
+    'https://api.muapi.ai/api/v1/ideogram-v3-t2i',
+    'https://api.muapi.ai/api/v1/predictions/request-1/result',
+  ]);
+  assert.deepEqual(requests.map(({ headers }) => headers['x-api-key']), ['test-key', 'test-key']);
+});
