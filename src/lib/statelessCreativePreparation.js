@@ -89,7 +89,9 @@ export class StatelessCreativePreparationService {
     const capabilityRequirements = plan.capabilityRequirements || [];
     const routingResolved = recipeResolved || capabilityRequirements.length > 0;
 
-    const routedPlan = routingResolved
+    let routedPlan;
+    try {
+      routedPlan = routingResolved
       ? {
         ...plan,
         routing: resolveConcreteProviderRouting({
@@ -99,6 +101,9 @@ export class StatelessCreativePreparationService {
         }),
       }
       : plan;
+    } catch (error) {
+      return statelessFailure({ error });
+    }
 
     return {
       ok: true,

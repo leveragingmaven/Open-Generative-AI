@@ -29,5 +29,6 @@ export function resolveConcreteProviderRouting({ routing = null, requiredCapabil
   if (selectedRouting.model) return selectedRouting;
   const candidates = modelRegistry.listModels().filter((candidate) => candidate.providerId === selectedRouting.providerId && candidate.operation === (selectedRouting.operation || null));
   const model = selectConcreteProviderModel(candidates, requiredCapabilities);
+  if (candidates.length && !model) throw Object.assign(new Error('No eligible concrete model matches the required capabilities.'), { code: 'capability_unsatisfied' });
   return model ? { ...selectedRouting, model: model.modelId, modelId: model.modelId, modelMetadata: { id: model.id, tier: model.tier || null, pricing: model.pricing || {}, verification: model.verification || null } } : selectedRouting;
 }

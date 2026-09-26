@@ -33,7 +33,7 @@ function executablePlan() {
     state: 'executable',
     valid: true,
     recipe: { id: 'r1', version: 'v1' },
-    capabilityRequirements: [{ id: 'image', kind: 'required' }],
+    capabilityRequirements: [{ id: 'image_generation', kind: 'required' }],
     selectedSkills: [],
     warnings: [],
     errors: [],
@@ -132,13 +132,13 @@ test('stateless service: preserves capability requirements and proposed routing 
   });
   const result = service.prepare({ request: makeRequest() });
   assert.ok(Array.isArray(result.capabilityRequirements));
-  assert.equal(result.capabilityRequirements[0].id, 'image');
+  assert.equal(result.capabilityRequirements[0].id, 'image_generation');
   // Routing is deterministic metadata only: the plan already carried a
-  // providerId, so it is preserved; no model candidate is registered in the
-  // test environment, so model stays null. No provider call ever occurs.
+  // providerId, so it is preserved; the concrete model comes from the catalog.
+  // No provider call ever occurs.
   assert.equal(result.proposedRouting.providerId, 'muapi');
   assert.equal(result.proposedRouting.operation, 'image_generation');
-  assert.equal(result.proposedRouting.model, null);
+  assert.equal(result.proposedRouting.model, 'flux-kontext-dev-t2i');
 });
 
 // ---- Authority boundary: service auth alone can NEVER execute/approve/cost/publish ----
@@ -168,7 +168,7 @@ test('stateless prepare: cannot satisfy cost authorization', () => {
   // No cost/funding authority is created; the response carries no spend token.
   assert.equal(result.authorized, false);
   assert.equal(result.executionStarted, false);
-  assert.equal(result.proposedRouting?.model, null);
+  assert.equal(result.proposedRouting?.model, 'flux-kontext-dev-t2i');
   const serialized = JSON.stringify(result);
   assert.ok(!serialized.includes('costAuthorized'));
   assert.ok(!serialized.includes('fundingAuthorized'));

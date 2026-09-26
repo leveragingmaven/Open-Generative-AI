@@ -15,6 +15,9 @@ test('ineligible or unavailable models cannot be selected', () => {
   ], [{ id: 'image_generation' }]);
   assert.equal(selected, null);
 });
+test('a family cannot silently fall back when no concrete model satisfies a mandatory capability', () => {
+  assert.throws(() => resolveConcreteProviderRouting({routing:{providerId:'muapi',operation:'image_generation'},requiredCapabilities:[{id:'image_generation'},{id:'photorealism'}]}), error=>error.code==='capability_unsatisfied');
+});
 
 test('non-image routing remains provider-neutral when no concrete model metadata exists', () => {
   const routing = resolveConcreteProviderRouting({ routing: { providerId: 'custom', deploymentId: 'custom-text', operation: 'text_generation' }, requiredCapabilities: [{ id: 'text_generation' }], modelRegistry: { listModels: () => [] } });
