@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateI2I, generateImage, getPublishedAgents, getTemplateAgents } from "./muapi.js";
+import { generateI2I, generateImage, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -25,6 +25,17 @@ function response(body, status = 200) {
     async text() { return typeof body === 'string' ? body : JSON.stringify(body); },
   };
 }
+
+test('prediction recovery recognizes HTTP 400 terminal failure without exposing provider detail', async () => {
+  globalThis.fetch = async () => response({ detail: { id: 'remote-1', status: 'failed', error: 'private prompt or provider detail' } }, 400);
+  const result = await getPredictionResult('test-key', 'remote-1');
+  assert.deepEqual(result, { status: 'failed' });
+});
+
+test('prediction recovery never treats an authentication error as a terminal prediction', async () => {
+  globalThis.fetch = async () => response({ detail: { status: 'failed' } }, 401);
+  await assert.rejects(() => getPredictionResult('test-key', 'remote-1'), { code: 'provider_credential_rejected' });
+});
 
 test('agent catalog reads forward their AbortSignal', async () => {
   const controller = new AbortController();

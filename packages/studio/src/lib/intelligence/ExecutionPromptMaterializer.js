@@ -145,7 +145,7 @@ export class ExecutionPromptMaterializationError extends Error {
  * Materialize provider-neutral execution inputs from an already-authorized plan.
  * The approved request and its reference records are read-only inputs.
  */
-export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {}, references = [] } = {}) {
+export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {}, references = [], maxPromptCharacters = Infinity } = {}) {
   const safeInputs = safeClone(inputs && typeof inputs === "object" ? inputs : {});
   const existingPrompt = typeof safeInputs.prompt === "string" && safeInputs.prompt.trim()
     ? safeInputs.prompt
@@ -154,9 +154,15 @@ export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {
     ? { prompt: existingPrompt, semanticFields: [], referenceRoles: referenceRoles({ references, originalRequest: request }), usedCreativeGuidance: false }
     : materializedPrompt({ plan, request, inputs: safeInputs, references });
 
-  const knowledgePackSummary = trustedKnowledgePackSummary(request);
+  // Preserve the creative instruction; optional background gets only the
+  // remaining provider budget. Never silently cut the user's instruction.
+  const limit = Number.isFinite(maxPromptCharacters) && maxPromptCharacters > 0 ? Math.floor(maxPromptCharacters) : Infinity;
+  if (composed.prompt?.length > limit) throw new ExecutionPromptMaterializationError("execution_prompt_too_long");
+  const contextPrefix = " Business context (trusted): ";
+  const contextBudget = Math.max(0, limit - (composed.prompt?.length || 0) - contextPrefix.length);
+  const knowledgePackSummary = trustedKnowledgePackSummary(request)?.slice(0, contextBudget) || null;
   const providerPrompt = composed.prompt && knowledgePackSummary
-    ? `${composed.prompt} Business context (trusted): ${knowledgePackSummary}`
+    ? `${composed.prompt}${contextPrefix}${knowledgePackSummary}`
     : composed.prompt;
 
   if (!providerPrompt) throw new ExecutionPromptMaterializationError();

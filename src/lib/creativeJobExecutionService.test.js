@@ -101,6 +101,19 @@ function service(db, { providerResult = db.providerResult, failProvider = false,
   });
 }
 
+test('MuAPI Flux execution keeps the complete brief and fits trusted context into its prompt limit', async () => {
+  const db = new FakeDb();
+  const row = db.jobs.get('job-1');
+  row.execution_context_json = JSON.stringify({ executionMetadata: { agentExecutionRequest: {
+    metadata: { knowledgePack: { trustedBy: 'maven-harness-service', summary: 'Business knowledge. '.repeat(400) } },
+  } } });
+  const result = await service(db, { persistedRouting: { providerId: 'muapi', model: 'flux-kontext-dev-t2i' } })
+    .executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(result.completed, true);
+  assert.ok(db.providerRequest.inputs.prompt.startsWith('hero Business context (trusted): '));
+  assert.equal(db.providerRequest.inputs.prompt.length, 3000);
+});
+
 test('execution-ready job routes, invokes Provider Registry, and persists completion', async () => {
   const db = new FakeDb();
   const result = await service(db).executeReadyJob({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });

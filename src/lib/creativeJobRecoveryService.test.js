@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CreativeJobRecoveryService } from './creativeJobRecoveryService.js';
+import { getPredictionResult } from '../../packages/studio/src/muapi.js';
 
 function fixture() {
   const job = {
@@ -95,6 +96,28 @@ test('recovery records definitive remote failure on the existing job and attempt
   assert.equal(result.job.error.code, 'provider_execution_failed');
   assert.doesNotMatch(JSON.stringify(result.job.error), /provider internals/);
   assert.equal(setup.assetPersistence.calls.length, 0);
+  assert.equal(result.job.result.recoveryRequired, false);
+  const replay = await service(setup, null).reconcile({ jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' });
+  assert.equal(replay.reconciled, false);
+  assert.equal(replay.terminal, true);
+});
+
+test('real MuAPI HTTP 400 failure becomes a terminal local job on the first recovery read', async (t) => {
+  const setup = fixture();
+  let reads = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    reads += 1;
+    return new Response(JSON.stringify({ detail: { status: 'failed', error: 'private prompt' } }), { status: 400 });
+  });
+  const recovery = new CreativeJobRecoveryService({ ...setup, credentialResolver: async () => 'test-key', providerStatusReader: getPredictionResult });
+  const query = { jobId: 'job-1', accountId: 'account-1', creatorIdentityKey: 'creator-1' };
+  const result = await recovery.reconcile(query);
+  assert.equal(result.job.status, 'failed');
+  assert.equal(result.job.executionStatus, 'failed');
+  assert.equal(result.job.result.recoveryRequired, false);
+  assert.doesNotMatch(JSON.stringify(result), /private prompt/);
+  await recovery.reconcile(query);
+  assert.equal(reads, 1);
 });
 
 test('recovery fails closed across owner identity boundaries', async () => {

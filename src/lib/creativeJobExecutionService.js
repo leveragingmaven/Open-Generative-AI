@@ -3,6 +3,7 @@ import { ProviderRegistryExecutionAdapter } from '../../packages/studio/src/lib/
 import { providerRegistry as defaultProviderRegistry } from '../../packages/studio/src/lib/providers/ProviderRegistry.js';
 import { EXECUTION_ATTEMPT_STATUS } from '../../packages/studio/src/lib/intelligence/ExecutionTypes.js';
 import { materializeExecutionInputs } from '../../packages/studio/src/lib/intelligence/ExecutionPromptMaterializer.js';
+import { getModelById } from '../../packages/studio/src/models.js';
 import { MySqlCreativeJobRepository } from './creativeJobRepository.js';
 import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAttemptRepository.js';
 import { CreativeAssetPersistenceError, CreativeAssetPersistenceService } from './creativeAssetPersistence.js';
@@ -230,6 +231,9 @@ export class CreativeJobExecutionService {
         request: originalRequest,
         inputs,
         references,
+        maxPromptCharacters: routing.providerId === 'muapi' && claimed.job.operation === 'image_generation'
+          ? getModelById(routing.model)?.inputs?.prompt?.maxLength
+          : undefined,
       }));
       await withProviderExecutionStage('funding', () => this.authorizeFunding({ job: claimed.job, accountId, creatorIdentityKey, routing }));
       const apiKey = await withProviderExecutionStage('credential_resolve', () => this.credentialResolver({

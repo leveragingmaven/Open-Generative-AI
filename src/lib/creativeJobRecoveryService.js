@@ -87,16 +87,17 @@ export class CreativeJobRecoveryService {
       await connection.beginTransaction();
       if (FAILURE.has(status)) {
         const failure = sanitizedFailure(remote);
+        const failedResult = { ...job.result, recoveryRequired: false, providerStatus: status };
         const updatedAttempt = await this.attemptRepository.updateStatusOnConnection(connection, {
           attemptId: attempt.id, accountId, status: 'failed', expectedStatus: 'running',
           changes: { completedAt: new Date().toISOString(), failure, providerJobId },
         });
         const updatedJob = await this.jobRepository.finalizeExecutionOnConnection(connection, {
-          jobId: job.id, accountId, status: 'failed', executionStatus: 'failed', result: job.result, error: failure,
+          jobId: job.id, accountId, status: 'failed', executionStatus: 'failed', result: failedResult, error: failure,
         });
         if (!updatedAttempt || !updatedJob) throw new CreativeJobRecoveryError('recovery_transition_conflict');
         await connection.commit();
-        return { reconciled: true, terminal: true, job: { ...job, status: 'failed', executionStatus: 'failed', error: failure }, attempt: { ...attempt, status: 'failed', failure } };
+        return { reconciled: true, terminal: true, job: { ...job, status: 'failed', executionStatus: 'failed', result: failedResult, error: failure }, attempt: { ...attempt, status: 'failed', failure } };
       }
 
       const references = outputReferences(remote);

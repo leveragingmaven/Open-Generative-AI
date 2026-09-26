@@ -51,7 +51,7 @@ function notifyAuthRequired(status, detail) {
     window.dispatchEvent(new CustomEvent('muapi:auth-required', { detail: { status, message: detail } }));
 }
 
-const TERMINAL_STATUSES = new Set(['failed', 'error', 'cancelled']);
+const TERMINAL_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled']);
 const SUCCESS_STATUSES = new Set(['completed', 'succeeded', 'success']);
 
 function sanitizeProviderMessage(value) {
@@ -138,6 +138,12 @@ export async function getPredictionResult(apiKey, requestId, { signal } = {}) {
     let data = {};
     try { data = JSON.parse(text || '{}'); } catch {}
     if (!response.ok) {
+        // MuAPI reports a failed prediction as HTTP 400 with detail.status.
+        // This is a definitive job outcome, not a status-read outage. Do not
+        // forward its raw error text (which can echo customer inputs).
+        if (response.status === 400 && TERMINAL_STATUSES.has(providerStatus(data))) {
+            return { status: providerStatus(data) };
+        }
         const error = new Error('Provider status could not be read.');
         error.code = response.status === 401 || response.status === 403 ? 'provider_credential_rejected' : 'provider_status_unavailable';
         error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;

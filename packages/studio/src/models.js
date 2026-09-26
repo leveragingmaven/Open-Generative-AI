@@ -173,6 +173,7 @@ export const t2iModels = [
     "name": "Flux Kontext Dev T2I",
     "inputs": {
       "prompt": {
+        "maxLength": 3000,
         "examples": [
           "A powerful wizard casting a glowing spell in a dark forest, wearing a hooded robe, with swirling magical energy, epic fantasy art."
         ],

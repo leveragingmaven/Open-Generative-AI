@@ -5,6 +5,22 @@ import {
   materializeExecutionInputs,
 } from "./ExecutionPromptMaterializer.js";
 
+test("bounds optional business context while preserving the complete creative request", () => {
+  const prompt = "Build Your AI Workspace Your Way. " + "Design guidance. ".repeat(10);
+  const result = materializeExecutionInputs({
+    inputs: { prompt }, maxPromptCharacters: 3000,
+    request: { metadata: { knowledgePack: { trustedBy: "maven-harness-service", summary: "Business context. ".repeat(400) } } },
+  });
+  assert.ok(result.inputs.prompt.startsWith(prompt));
+  assert.equal(result.inputs.prompt.length, 3000);
+  assert.equal(result.metadata.usedTrustedKnowledgePack, true);
+});
+
+test("does not silently truncate an oversized creative instruction", () => {
+  assert.throws(() => materializeExecutionInputs({ inputs: { prompt: "a".repeat(3001) }, maxPromptCharacters: 3000 }),
+    { code: "execution_prompt_too_long" });
+});
+
 test("preserves an existing canonical prompt exactly", () => {
   const prompt = "  Keep this exact provider-neutral prompt.  ";
   const result = materializeExecutionInputs({
