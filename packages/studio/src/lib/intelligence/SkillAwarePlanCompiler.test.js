@@ -190,3 +190,68 @@ test("unknown operations preserve fallback behavior and missing configured defau
   assert.equal(missing.state, "non_executable");
   assert.ok(missing.errors.some(({ code }) => code === "recipe_not_found"));
 });
+
+// --- Direct customer image-generation preparation -----------------------------
+// A customer who already supplied the deliverable, subject, and direction has
+// given a sufficient brief. A model-invented friendly recipe or skill name must
+// not turn that otherwise valid request into non_executable when the canonical
+// operation recipe is available.
+
+const canonicalRecipeSet = {
+  image: { id: "image", version: 2, capabilityRequirements: ["image_generation"] },
+  imageEdit: { id: "image-edit", version: 2, capabilityRequirements: ["image_editing", "reference_images"] },
+};
+
+test("an operation-only image_generation request resolves the canonical image recipe", () => {
+  const plan = compiler({ recipeSet: canonicalRecipeSet }).compile({
+    request: { requestId: "request-operation-only", operation: "image_generation", inputs: { prompt: "Instagram graphic for MavenSync Spaces" } },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(plan.state, "executable");
+  assert.equal(plan.recipe.id, "image");
+  assert.deepEqual(plan.capabilityRequirements.map(({ id }) => id), ["image_generation"]);
+  assert.equal(plan.errors.length, 0);
+});
+
+test("a model-invented recipe name falls back to the canonical operation recipe instead of failing", () => {
+  const plan = compiler({ recipeSet: canonicalRecipeSet }).compile({
+    request: { requestId: "request-invented-recipe", operation: "image_generation", recipeId: "instagram-graphic", inputs: { prompt: "Instagram graphic" } },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(plan.state, "executable");
+  assert.equal(plan.recipe.id, "image");
+  assert.equal(plan.errors.length, 0);
+  assert.ok(plan.warnings.some((warning) => warning.code === "recipe_not_in_library"));
+});
+
+test("a model-invented skill name does not block a canonically routed image request", () => {
+  const plan = compiler({ recipeSet: canonicalRecipeSet }).compile({
+    request: { requestId: "request-invented-skill", operation: "image_generation", inputs: { prompt: "Instagram graphic" } },
+    explicitSkillIds: ["instagram-graphic-designer"],
+  });
+  assert.equal(plan.errors.length, 0);
+  assert.equal(plan.state, "executable");
+  assert.equal(plan.recipe.id, "image");
+  assert.ok(plan.warnings.some((warning) => warning.code === "skill_not_found"));
+});
+
+test("an invented recipe still hard-fails when the operation has no canonical default", () => {
+  const plan = compiler({ recipeSet: canonicalRecipeSet }).compile({
+    request: { requestId: "request-invented-no-default", operation: "video_generation", recipeId: "viral-clip", inputs: { prompt: "clip" } },
+    explicitSkillIds: ["alpha"], inputs: { brief: "brief" },
+  });
+  assert.equal(plan.valid, false);
+  assert.equal(plan.state, "non_executable");
+  assert.ok(plan.errors.some((error) => error.code === "recipe_not_found"));
+});
+
+test("operator-pinned unresolved skill references remain a hard failure", () => {
+  const broken = { ...skills.alpha, recipes: ["missing-recipe"] };
+  const plan = compiler({ skillSet: { broken }, recipeSet: canonicalRecipeSet }).compile({
+    request: { requestId: "request-pinned-broken", operation: "image_generation", inputs: { prompt: "hero" } },
+    explicitSkillIds: ["broken"], inputs: { brief: "brief" },
+  });
+  assert.equal(plan.valid, false);
+  assert.equal(plan.state, "non_executable");
+  assert.ok(plan.errors.some((error) => error.code === "recipe_reference_error"));
+});

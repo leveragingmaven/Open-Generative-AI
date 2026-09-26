@@ -180,15 +180,26 @@ export class SkillAwarePlanCompiler {
     });
     const agent = input.agent || input.agentProfile || null;
     const explicitIds = normalizeExplicitSkillIds(input, request);
+    // The canonical recipe for this operation, when the recipe library defines one
+    // (image_generation -> "image", image_editing -> "image-edit"). When it exists,
+    // an unresolvable CALLER-SUPPLIED name is advisory rather than fatal: guessing a
+    // friendly recipe or skill name must not turn an otherwise valid request into
+    // non_executable. References that come from operator-controlled skill metadata
+    // (references.unresolved below) stay hard failures, and an operation with no
+    // canonical recipe keeps the previous hard-failure behavior.
+    const canonicalOperationRecipeId = this.recipeResolver.defaultRecipeIdForOperation?.(rawRequest.operation) || defaultRecipeId || null;
+    const canUseCanonicalRecipeFallback = canonicalOperationRecipeId !== null;
     const skillResults = [];
     const errors = [];
+    const warnings = [];
     let dynamic = false;
 
     if (explicitIds.length) {
       for (const skillId of explicitIds) {
         const skill = this.skillResolver.getSkill(skillId);
         if (!skill) {
-          errors.push({ code: "skill_not_found", skillId, message: `Unknown creative skill: ${skillId}` });
+          const record = { code: "skill_not_found", skillId, message: `Unknown creative skill: ${skillId}` };
+          (canUseCanonicalRecipeFallback ? warnings : errors).push(record);
           continue;
         }
         if (skill.status !== "active" || skill.discoverable === false) {
@@ -204,7 +215,8 @@ export class SkillAwarePlanCompiler {
         skillResults.push({ skill: match.skill, reason: match.reasons.join("; "), score: match.score });
       }
       if (!skillResults.length && input.requireSkills !== false) {
-        errors.push({ code: "no_eligible_skill", message: "No eligible Creative Skill matched the request." });
+        const record = { code: "no_eligible_skill", message: "No eligible Creative Skill matched the request." };
+        (canUseCanonicalRecipeFallback ? warnings : errors).push(record);
       }
     }
 
@@ -244,7 +256,33 @@ export class SkillAwarePlanCompiler {
           errors.push({ code: "recipe_version_mismatch", message: `Requested recipe ${request.recipeId}@${input.recipeVersion}, but canonical version is ${canonical.version}.` });
         }
       } catch (error) {
-        errors.push({ code: "recipe_not_found", message: error.message });
+        // Fall back to the existing canonical operation recipe instead of failing,
+        // but only when that recipe actually resolves. Ignoring the reference must
+        // never be possible for an operation with no canonical default.
+        const fallback = canUseCanonicalRecipeFallback
+          ? (() => { try { return this.recipeResolver.resolve(canonicalOperationRecipeId); } catch { return null; } })()
+          : null;
+        if (fallback) {
+          warnings.push({
+            code: "recipe_not_in_library",
+            recipeId: request.recipeId,
+            message: `Requested recipe ${request.recipeId} is not in the creative recipe library; using the canonical "${canonicalOperationRecipeId}" recipe for this operation instead.`,
+          });
+          recipeDefinition = fallback;
+          recipeReference = {
+            recipeId: fallback.id || canonicalOperationRecipeId,
+            recipeVersion: fallback.version ?? null,
+            status: "resolved",
+            inputRequirements: {
+              required: Object.entries(fallback.inputs || {}).filter(([, definition]) => definition?.required).map(([name]) => name),
+              optional: Object.entries(fallback.inputs || {}).filter(([, definition]) => !definition?.required).map(([name]) => name),
+              inferred: [],
+            },
+            provenance: { source: "canonical-operation-default", requestId: request.requestId },
+          };
+        } else {
+          errors.push({ code: "recipe_not_found", message: error.message });
+        }
       }
     } else {
       recipeReference = references.recipes[0] || references.advisoryRecipes[0] || null;
@@ -339,7 +377,7 @@ export class SkillAwarePlanCompiler {
       state,
       valid: state !== "non_executable",
       errors,
-      warnings: intelligencePlan?.warnings || [],
+      warnings: [...warnings, ...(intelligencePlan?.warnings || [])],
       assumptions: dynamic ? ["Skills were selected deterministically from eligible metadata."] : [],
       metadata: {
         planner: "skill-aware-plan-compiler",
