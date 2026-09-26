@@ -77,14 +77,28 @@ export class StatelessCreativePreparationService {
       };
     }
 
-    const routedPlan = {
-      ...plan,
-      routing: resolveConcreteProviderRouting({
-        routing: plan.routing,
-        requiredCapabilities: plan.capabilityRequirements || [],
-        capabilityRouter: this.capabilityRouter,
-      }),
-    };
+    // An unresolved plan has no recipe and therefore no capability requirements.
+    // resolveConcreteProviderRouting would then call the capability router with
+    // an EMPTY requirement set, which ranks every deployment and returns the
+    // highest scorer regardless of the request. That produced a confident-looking
+    // `operation` (currently muapi-ai-clipping) for a plan that resolved nothing
+    // at all, and sent incident triage after a provider name instead of the real
+    // cause. Report the unresolved state truthfully instead, and leave routing
+    // alone whenever a recipe (or capability set) actually resolved.
+    const recipeResolved = Boolean(plan.recipe);
+    const capabilityRequirements = plan.capabilityRequirements || [];
+    const routingResolved = recipeResolved || capabilityRequirements.length > 0;
+
+    const routedPlan = routingResolved
+      ? {
+        ...plan,
+        routing: resolveConcreteProviderRouting({
+          routing: plan.routing,
+          requiredCapabilities: capabilityRequirements,
+          capabilityRouter: this.capabilityRouter,
+        }),
+      }
+      : plan;
 
     return {
       ok: true,
@@ -98,9 +112,12 @@ export class StatelessCreativePreparationService {
         requiredInputs: plan.requiredInputs || [],
         warnings: plan.warnings || [],
         assumptions: plan.assumptions || [],
+        // A structural reason code, so an unresolved operation is legible without
+        // the caller having to infer it from a missing recipe.
+        ...(routingResolved ? {} : { errors: [...(plan.errors || []), { code: 'creative_operation_unresolved', message: 'No canonical creative recipe matched the requested operation, so no provider routing was resolved.' }] }),
       },
-      capabilityRequirements: plan.capabilityRequirements || [],
-      proposedRouting: routedPlan.routing ? {
+      capabilityRequirements,
+      proposedRouting: routingResolved && routedPlan.routing ? {
         providerId: routedPlan.routing.providerId || null,
         model: routedPlan.routing.model || routedPlan.routing.modelId || null,
         operation: routedPlan.routing.operation || null,
