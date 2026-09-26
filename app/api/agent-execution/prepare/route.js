@@ -10,6 +10,50 @@ function errorResponse(error) {
   return Response.json({ error: error?.code || 'agent_execution_preparation_failed', code: error?.code || 'agent_execution_preparation_failed' }, { status });
 }
 
+// --- TEMPORARY BOUNDED DIAGNOSTIC -------------------------------------------
+// Answers "what did preparation decide, and why" without ever emitting customer
+// content. STRUCTURAL FACTS AND CODES ONLY: no prompt, no userIntent, no
+// inputs/creativeBrief, no email, no account, no headers, no token, and no raw
+// request or response body. Safe to delete once the live failure is identified.
+const SAFE_TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+function safeToken(value) {
+  return typeof value === 'string' && SAFE_TOKEN.test(value) ? value : null;
+}
+
+function safeCodes(list, limit = 8) {
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.map((item) => safeToken(typeof item === 'string' ? item : item?.code)).filter((item) => item !== null))].slice(0, limit);
+}
+
+function logPrepareResult(request, { result, error } = {}) {
+  try {
+    const failed = error !== undefined;
+    const review = failed ? undefined : result?.review;
+    const routing = failed ? undefined : result?.proposedRouting;
+    const marker = {
+      event: 'creative_prepare_result',
+      requestId: safeToken(request?.headers?.get('x-mavensync-request-id') ?? null),
+      outcome: failed ? 'error' : 'ok',
+      status: safeToken(failed ? null : result?.status),
+      planState: safeToken(failed ? null : result?.planState),
+      executable: failed ? null : result?.planState === 'executable',
+      recipeId: safeToken(failed ? null : review?.recipe?.id),
+      providerId: safeToken(routing?.providerId),
+      operation: safeToken(failed ? null : routing?.operation),
+      capabilities: safeCodes(failed ? null : result?.capabilityRequirements),
+      errorCodes: failed ? [safeToken(error?.code) ?? 'unclassified'] : safeCodes(review?.errors),
+      warningCodes: safeCodes(review?.warnings),
+      requiredInputs: safeCodes(failed ? null : result?.requiredInputs),
+      approvalRequirements: safeCodes(failed ? null : result?.approvalRequirements),
+      durableJobCreated: failed ? null : result?.durableJobCreated === true,
+    };
+    console.info(`CREATIVE_PREPARE_RESULT ${JSON.stringify(marker)}`);
+  } catch {
+    // Diagnostics must never interfere with preparation.
+  }
+}
+
 function hasClientOwnedOverride(payload) {
   return ['accountId', 'userId', 'creatorId', 'identityKey', 'authenticatedIdentity', 'identitySource', 'status', 'jobStatus', 'executionStatus', 'attemptStatus', 'routing', 'providerId', 'provider', 'model', 'providerModel', 'apiKey', 'credential', 'credentials'].some((field) => Object.prototype.hasOwnProperty.call(payload, field))
     || Object.prototype.hasOwnProperty.call(payload.inputs || {}, 'model');
@@ -51,13 +95,16 @@ export async function handleAgentExecutionPreparationPost(request, { identity, p
           source: 'server',
         },
       };
-      return Response.json(stateless.prepare({ request: normalizedProposal }));
+      const result = stateless.prepare({ request: normalizedProposal });
+      logPrepareResult(request, { result });
+      return Response.json(result);
     }
     const normalized = await normalizeAuthorizedRequest(payload, { identity });
     const service = preparationService || new AgentExecutionPreparationService();
     const result = await service.prepare({ request: normalized.request, requestFingerprint: normalized.context.intentFingerprint, authorizationId: normalized.proof.authorizationId });
     return Response.json(result);
   } catch (error) {
+    logPrepareResult(request, { error });
     return errorResponse(error);
   }
 }
