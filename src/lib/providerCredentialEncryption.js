@@ -30,9 +30,16 @@ export function encryptProviderCredential(plaintext) {
 }
 
 export function decryptProviderCredential(record) {
-  if (!record?.value || record.version !== VERSION) throw new Error('provider_credential_ciphertext_invalid');
+  // The two throws below already carried this exact string as their message but
+  // omitted `.code`, so every caller that classifies on `code` — including
+  // normalizedError, which is what persists creative_jobs.error_json — fell
+  // through to the generic `provider_execution_failed` bucket and the real
+  // cause was lost. The message, the condition, and the control flow are
+  // unchanged; only the code is now attached, matching the two throws below
+  // that already used Object.assign.
+  if (!record?.value || record.version !== VERSION) throw Object.assign(new Error('provider_credential_ciphertext_invalid'), { code: 'provider_credential_ciphertext_invalid' });
   let envelope;
-  try { envelope = JSON.parse(record.value); } catch { throw new Error('provider_credential_ciphertext_invalid'); }
+  try { envelope = JSON.parse(record.value); } catch { throw Object.assign(new Error('provider_credential_ciphertext_invalid'), { code: 'provider_credential_ciphertext_invalid' }); }
   try {
     const decipher = crypto.createDecipheriv(ALGORITHM, key(), Buffer.from(envelope.iv, 'base64url'));
     decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));

@@ -8,6 +8,7 @@ import { MySqlCreativeExecutionAttemptRepository } from './creativeExecutionAtte
 import { CreativeAssetPersistenceError, CreativeAssetPersistenceService } from './creativeAssetPersistence.js';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
 import { getExecutionReadinessErrorCode } from './creativeJobReadiness.js';
+import { emitProviderExecutionDiagnostic, withProviderExecutionStage } from './creativeProviderExecutionDiagnostic.js';
 
 export const DEFAULT_PROVIDER_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -224,21 +225,21 @@ export class CreativeJobExecutionService {
       if (normalized) acceptedRemote = { providerJobId: normalized, providerStatus: String(providerStatus || 'accepted') };
     };
     try {
-      const materialized = materializeExecutionInputs({
+      const materialized = await withProviderExecutionStage('materialization', () => materializeExecutionInputs({
         plan: claimed.job.plan,
         request: originalRequest,
         inputs,
         references,
-      });
-      await this.authorizeFunding({ job: claimed.job, accountId, creatorIdentityKey, routing });
-      const apiKey = await this.credentialResolver({
+      }));
+      await withProviderExecutionStage('funding', () => this.authorizeFunding({ job: claimed.job, accountId, creatorIdentityKey, routing }));
+      const apiKey = await withProviderExecutionStage('credential_resolve', () => this.credentialResolver({
         job: claimed.job,
         accountId,
         creatorIdentityKey,
         providerId: routing.providerId,
         operation: claimed.job.operation,
         routing,
-      });
+      }));
       const executionMetadata = {
         source: 'mavensync-agent-execution',
         promptMaterialization: materialized.metadata,
@@ -247,7 +248,8 @@ export class CreativeJobExecutionService {
       const providerInputs = routing?.model && materialized.inputs?.model == null
         ? { ...materialized.inputs, model: routing.model }
         : materialized.inputs;
-      const raw = await this.executeProvider({
+      emitProviderExecutionDiagnostic({ stage: 'provider_start' });
+      const raw = await withProviderExecutionStage('provider_invoke', () => this.executeProvider({
         job: claimed.job,
         context: claimed.job.executionContext,
         routing,
@@ -258,7 +260,7 @@ export class CreativeJobExecutionService {
         attachments,
         executionMetadata,
         apiKey,
-      }, onProviderJobAccepted);
+      }, onProviderJobAccepted));
       const returnedProviderJobId = providerReference(raw);
       if (returnedProviderJobId && !acceptedRemote) acceptedRemote = { providerJobId: returnedProviderJobId, providerStatus: raw?.status || 'accepted' };
       if (!terminalProviderResult(raw)) {
@@ -280,7 +282,7 @@ export class CreativeJobExecutionService {
         await connection.beginTransaction();
         let materialized;
         try {
-          materialized = await this.assetPersistence.persistOnConnection(connection, { result, job: claimed.job, attempt: claimed.attempt, routing });
+          materialized = await withProviderExecutionStage('asset_persistence', () => this.assetPersistence.persistOnConnection(connection, { result, job: claimed.job, attempt: claimed.attempt, routing }));
         } catch (error) {
           throw new CreativeAssetPersistenceError('asset_materialization_failed', error.message);
         }
