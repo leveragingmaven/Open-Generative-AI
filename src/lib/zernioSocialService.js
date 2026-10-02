@@ -404,6 +404,126 @@ export async function sendTenantZernioMessage({ identity, conversationId, accoun
   };
 }
 
+// Only metrics Zernio actually returns for a post are surfaced; nothing is derived or invented.
+const ANALYTICS_METRIC_KEYS = [
+  'impressions', 'reach', 'likes', 'comments', 'shares', 'saves', 'clicks', 'views',
+  'follows', 'reposts', 'profileViews', 'websiteClicks', 'engagementRate',
+  'igReelsAvgWatchTime', 'igReelsVideoViewTotalTime', 'reelsSkipRate', 'completionRate',
+  'videoDurationSeconds', 'lastUpdated',
+];
+
+function sanitizeZernioAnalyticsMetrics(metrics) {
+  if (!metrics || typeof metrics !== 'object') return null;
+  const result = {};
+  for (const key of ANALYTICS_METRIC_KEYS) {
+    if (metrics[key] !== undefined && metrics[key] !== null) result[key] = metrics[key];
+  }
+  return Object.keys(result).length ? result : null;
+}
+
+function sanitizeZernioAnalyticsOverview(overview) {
+  if (!overview || typeof overview !== 'object') return null;
+  return {
+    totalPosts: overview.totalPosts ?? 0,
+    publishedPosts: overview.publishedPosts ?? 0,
+    scheduledPosts: overview.scheduledPosts ?? 0,
+    lastSync: overview.lastSync ?? null,
+    dataStaleness: overview.dataStaleness || null,
+  };
+}
+
+function sanitizeZernioAnalyticsPlatform(target = {}) {
+  return {
+    platform: target.platform || null,
+    status: target.status || null,
+    accountId: target.accountId || null,
+    accountUsername: target.accountUsername || null,
+    syncStatus: target.syncStatus || null,
+    platformPostUrl: target.platformPostUrl || null,
+    // Never surface raw provider error detail; report only that a platform could not sync.
+    syncError: target.errorMessage ? 'Analytics is temporarily unavailable for this platform.' : null,
+    metrics: sanitizeZernioAnalyticsMetrics(target.analytics),
+  };
+}
+
+function analyticsPostIsOwned(post, ownedAccountIds) {
+  const targets = Array.isArray(post?.platforms) ? post.platforms : [];
+  const withAccount = targets.filter((target) => target?.accountId);
+  if (!withAccount.length) return true;
+  return withAccount.some((target) => ownedAccountIds.has(String(target.accountId)));
+}
+
+function sanitizeZernioAnalyticsPost(post = {}) {
+  return {
+    id: post._id || post.id || null,
+    content: post.content || '',
+    status: post.status || null,
+    platform: post.platform || null,
+    platformPostUrl: post.platformPostUrl || null,
+    publishedAt: post.publishedAt || null,
+    scheduledFor: post.scheduledFor || null,
+    isExternal: post.isExternal === true,
+    isAd: post.isAd === true,
+    mediaType: post.mediaType || null,
+    thumbnailUrl: post.thumbnailUrl || null,
+    metrics: sanitizeZernioAnalyticsMetrics(post.analytics),
+    platforms: (Array.isArray(post.platforms) ? post.platforms : []).map(sanitizeZernioAnalyticsPlatform),
+  };
+}
+
+export async function getTenantZernioAnalytics({
+  identity,
+  accountId,
+  platform,
+  fromDate,
+  toDate,
+  limit,
+  page,
+  sortBy,
+  order,
+  source,
+  repository = new MySqlZernioRepository(),
+  client = getZernioClient(),
+} = {}) {
+  const owner = requiredIdentity(identity);
+  const profile = await ensureZernioProfile({ identity: owner, repository, client });
+  const accounts = await listTenantZernioAccounts({ identity: owner, repository, client });
+  const ownedAccountIds = new Set(accounts.accounts.map((account) => String(account.id)));
+  const requestedAccountId = String(accountId || '').trim();
+  if (requestedAccountId && !ownedAccountIds.has(requestedAccountId)) {
+    const error = new Error('The requested social account is not available to this tenant.');
+    error.code = 'zernio_account_not_owned';
+    error.status = 403;
+    throw error;
+  }
+  const query = { profileId: profile.zernioProfileId };
+  if (requestedAccountId) query.accountId = requestedAccountId;
+  if (platform) {
+    const option = getZernioConnectionOption(platform);
+    if (!option || isZernioSpecialConnection(option)) {
+      throw Object.assign(new Error('This Maven Social platform is not available for analytics.'), { code: 'zernio_platform_not_supported', status: 400 });
+    }
+    query.platform = option.zernioPlatform;
+  }
+  if (fromDate) query.fromDate = fromDate;
+  if (toDate) query.toDate = toDate;
+  if (limit !== undefined) query.limit = limit;
+  if (page !== undefined) query.page = page;
+  if (sortBy) query.sortBy = sortBy;
+  if (order) query.order = order;
+  if (source) query.source = source;
+  const data = dataOf(await client.analytics.getAnalytics({ query }));
+  const posts = (Array.isArray(data?.posts) ? data.posts : [])
+    .filter((post) => analyticsPostIsOwned(post, ownedAccountIds))
+    .map(sanitizeZernioAnalyticsPost);
+  return {
+    hasAnalyticsAccess: typeof data?.hasAnalyticsAccess === 'boolean' ? data.hasAnalyticsAccess : null,
+    overview: sanitizeZernioAnalyticsOverview(data?.overview),
+    posts,
+    pagination: data?.pagination || null,
+  };
+}
+
 const COMMENT_AUTOMATION_PLATFORMS = new Set(['instagram', 'facebook']);
 
 function automationRecord(automation = {}) {
@@ -561,17 +681,21 @@ function canonicalPublishInput({ assetIds = [], platforms = [], accountIds = {} 
   };
 }
 
-export function stablePublishRequestId({ identity, draftId, content, assetIds, platforms, accountIds }) {
+export function stablePublishRequestId({ identity, draftId, content, firstComment = '', assetIds, platforms, accountIds }) {
   const canonical = canonicalPublishInput({ assetIds, platforms, accountIds });
   const payload = JSON.stringify({
     accountId: String(identity.accountId),
     creatorIdentityKey: String(identity.creatorIdentityKey),
     draftId: String(draftId || ''),
     content: String(content || ''),
+    firstComment: String(firstComment || '').trim(),
     ...canonical,
   });
   return `maven-social-${crypto.createHash('sha256').update(payload).digest('hex')}`;
 }
+
+// Zernio accepts an optional first comment only on these platform targets, nested in platformSpecificData.
+const FIRST_COMMENT_PLATFORMS = new Set(['instagram', 'facebook', 'linkedin', 'threads', 'youtube']);
 
 function validatePresignedUploadUrl(value) {
   let url;
@@ -602,7 +726,7 @@ function sanitizePublishResponse(data, platforms, httpStatus) {
   return { status, postId: post._id || null, platformResults, publishedUrls: returned.filter((item) => item.platformPostUrl).map((item) => item.platformPostUrl), httpStatus: status === 'partially_published' ? 207 : status === 'published' ? (httpStatus || 201) : 502 };
 }
 
-export async function publishZernioNow({ identity, draftId, content = '', assetIds = [], platforms = [], accountIds = {}, repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
+export async function publishZernioNow({ identity, draftId, content = '', firstComment = '', assetIds = [], platforms = [], accountIds = {}, repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
   const owner = requiredIdentity(identity);
   const selectedPlatforms = [...new Set(platforms.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
   if (!selectedPlatforms.length) throw Object.assign(new Error('Choose at least one Maven Social destination.'), { code: 'zernio_publish_invalid', status: 400 });
@@ -625,10 +749,16 @@ export async function publishZernioNow({ identity, draftId, content = '', assetI
     if (!option || isZernioSpecialConnection(option)) throw Object.assign(new Error('This Maven Social platform is not available for Publish Now.'), { code: 'zernio_platform_not_supported', status: 400 });
     const selectedId = accountIds[platform] || accountIds[option.zernioPlatform];
     const account = await getTenantZernioAccount({ identity: owner, zernioAccountId: selectedId, expectedPlatform: option.zernioPlatform, repository, client });
-    targets.push({ platform: option.zernioPlatform, accountId: account.id });
+    const comment = String(firstComment || '').trim();
+    targets.push({
+      platform: option.zernioPlatform,
+      accountId: account.id,
+      // Only send platformSpecificData when there is a first comment and the platform actually supports it.
+      ...(comment && FIRST_COMMENT_PLATFORMS.has(option.zernioPlatform) ? { platformSpecificData: { firstComment: comment } } : {}),
+    });
   }
   if (!String(content || '').trim() && !mediaItems.length) throw Object.assign(new Error('Add text or creative media before publishing.'), { code: 'zernio_publish_invalid', status: 400 });
-  const requestId = stablePublishRequestId({ identity: owner, draftId, content, assetIds, platforms: selectedPlatforms, accountIds });
+  const requestId = stablePublishRequestId({ identity: owner, draftId, content, firstComment, assetIds, platforms: selectedPlatforms, accountIds });
   const response = await client.posts.createPost({ headers: { 'x-request-id': requestId }, body: { ...(String(content || '').trim() ? { content: String(content) } : {}), ...(mediaItems.length ? { mediaItems } : {}), platforms: targets, publishNow: true } });
   if (response?.error) throw unwrapResponse(response, 'Maven Social could not publish this post.');
   const httpStatus = response?.response?.status || response?.status || (response?.data?.existingPost ? 200 : 201);

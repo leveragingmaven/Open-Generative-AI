@@ -73,6 +73,10 @@ export class ZernioPublishingProvider extends PublishingProvider {
     });
   }
 
+  async getAnalytics(query = {}) {
+    return await this.request('/analytics', { query });
+  }
+
   connectAccount(platformOrPayload, options = {}) {
     const payload = typeof platformOrPayload === 'string'
       ? { platform: platformOrPayload, redirectTo: options.redirectTo }
@@ -110,6 +114,7 @@ export class ZernioPublishingProvider extends PublishingProvider {
         assetIds,
         platforms: Array.isArray(draft.platforms) ? draft.platforms : [],
         accountIds: draft.accountIds || draft.platformAccountIds || {},
+        firstComment: draft.firstComment || '',
       },
     });
     const status = response.status === 'published'

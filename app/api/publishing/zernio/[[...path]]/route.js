@@ -9,6 +9,7 @@ import {
   getZernioConnectUrl,
   listTenantZernioAccounts,
   listTenantZernioConversations,
+  getTenantZernioAnalytics,
   getTenantZernioMessages,
   sendTenantZernioMessage,
   listTenantCommentAutomations,
@@ -31,6 +32,7 @@ function routeKey(path = []) {
   if (path.join('/') === 'posts') return 'posts';
   if (path.join('/') === 'profile') return 'profile';
   if (path.join('/') === 'inbox/conversations') return 'inbox/conversations';
+  if (path.join('/') === 'analytics') return 'analytics';
   if (path.join('/') === 'automations') return 'automations';
   if (path[0] === 'automations' && path.length === 2) return 'automations/:automationId';
   if (path[0] === 'inbox' && path[1] === 'conversations' && path.length === 4 && path[3] === 'messages') return 'inbox/conversations/:conversationId/messages';
@@ -176,6 +178,30 @@ export async function handleZernioPublishingRequest(request, {
     }
   }
 
+  if (request.method === 'GET' && key === 'analytics') {
+    try {
+      const searchParams = new URL(request.url).searchParams;
+      const limit = searchParams.get('limit');
+      const page = searchParams.get('page');
+      return NextResponse.json(await getTenantZernioAnalytics({
+        identity: auth.identity,
+        accountId: searchParams.get('accountId'),
+        platform: searchParams.get('platform'),
+        fromDate: searchParams.get('fromDate'),
+        toDate: searchParams.get('toDate'),
+        limit: limit || undefined,
+        page: page || undefined,
+        sortBy: searchParams.get('sortBy'),
+        order: searchParams.get('order'),
+        source: searchParams.get('source'),
+        repository,
+        client,
+      }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social analytics.');
+    }
+  }
+
   if (request.method === 'GET' && key === 'inbox/conversations/:conversationId/messages') {
     try {
       const accountId = new URL(request.url).searchParams.get('accountId');
@@ -215,6 +241,7 @@ export async function handleZernioPublishingRequest(request, {
         identity: auth.identity,
         draftId: input.draftId,
         content: input.content,
+        firstComment: typeof input.firstComment === 'string' ? input.firstComment : '',
         assetIds: Array.isArray(input.assetIds) ? input.assetIds : [],
         platforms: Array.isArray(input.platforms) ? input.platforms : [],
         accountIds: input.accountIds && typeof input.accountIds === 'object' ? input.accountIds : {},

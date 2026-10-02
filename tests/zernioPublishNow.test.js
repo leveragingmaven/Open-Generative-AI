@@ -177,3 +177,29 @@ test('Publish route accepts asset identities only and never exposes provider cre
   assert.equal(JSON.stringify(result).includes('browser-secret'), false);
   assert.equal(client.calls.find((call) => call.method === 'post').input.body.mediaItems, undefined);
 });
+
+test('Publish Now sends an optional first comment only as platformSpecificData on a supporting platform', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  const result = await publishZernioNow({ lookup: safeLookup, identity: tenantA, draftId: 'draft-comment', content: 'Hello', firstComment: '  First!  ', platforms: ['instagram'], accountIds: { instagram: 'z-account-1' }, repository, client });
+  const post = client.calls.find((call) => call.method === 'post');
+  assert.equal(result.status, 'published');
+  assert.deepEqual(post.input.body.platforms, [{ platform: 'instagram', accountId: 'z-account-1', platformSpecificData: { firstComment: 'First!' } }]);
+});
+
+test('Publish Now omits first comment on platforms that do not support it and keeps the body unchanged', async () => {
+  const repository = new InMemoryZernioRepository();
+  const profile = await ensureZernioProfile({ identity: tenantA, repository, client: clientFor() });
+  await repository.saveAccounts({ accountId: tenantA.accountId, creatorIdentityKey: tenantA.identityKey, zernioProfileId: profile.zernioProfileId, accounts: [{ zernioAccountId: 'z-tiktok-1', platform: 'tiktok', status: 'connected', isActive: true }] });
+  const client = clientFor();
+  await publishZernioNow({ lookup: safeLookup, identity: tenantA, draftId: 'draft-tiktok-comment', content: 'Hello', firstComment: 'First!', platforms: ['tiktok'], accountIds: { tiktok: 'z-tiktok-1' }, repository, client });
+  const post = client.calls.find((call) => call.method === 'post');
+  assert.deepEqual(post.input.body.platforms, [{ platform: 'tiktok', accountId: 'z-tiktok-1' }]);
+});
+
+test('first comment participates in the idempotency request identity', async () => {
+  const { stablePublishRequestId } = await import('../src/lib/zernioSocialService.js');
+  const base = { identity: tenantA, draftId: 'draft', content: 'Hello', assetIds: [], platforms: ['instagram'], accountIds: { instagram: 'z1' } };
+  assert.notEqual(stablePublishRequestId({ ...base, firstComment: 'a' }), stablePublishRequestId({ ...base, firstComment: 'b' }));
+  assert.equal(stablePublishRequestId({ ...base, firstComment: '' }), stablePublishRequestId(base));
+});

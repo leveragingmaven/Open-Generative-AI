@@ -109,6 +109,32 @@ function inboxParticipant(conversation) {
   return conversation.participantName || conversation.participantId || "Unknown participant";
 }
 
+const ANALYTICS_METRIC_LABELS = [
+  ["impressions", "Impressions"],
+  ["reach", "Reach"],
+  ["views", "Views"],
+  ["likes", "Likes"],
+  ["comments", "Comments"],
+  ["shares", "Shares"],
+  ["saves", "Saves"],
+  ["clicks", "Clicks"],
+  ["follows", "New follows"],
+  ["reposts", "Reposts"],
+  ["engagementRate", "Engagement"],
+];
+
+function formatMetric(key, value) {
+  if (value === null || value === undefined) return "—";
+  const formatted = typeof value === "number" ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value) : String(value);
+  return key === "engagementRate" ? `${formatted}%` : formatted;
+}
+
+function AnalyticsMetricGrid({ metrics }) {
+  const entries = ANALYTICS_METRIC_LABELS.filter(([key]) => metrics?.[key] !== undefined && metrics?.[key] !== null);
+  if (!entries.length) return <p className="mt-2 text-[9px] text-[var(--ms-color-text-muted)]">Metrics pending sync.</p>;
+  return <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{entries.map(([key, label]) => <div key={key}><p className="text-sm font-semibold">{formatMetric(key, metrics[key])}</p><p className="mt-0.5 text-[8px] uppercase tracking-[0.1em] text-[var(--ms-color-text-muted)]">{label}</p></div>)}</div>;
+}
+
 function AssetPreview({ asset }) {
   const url = assetUrl(asset);
   const type = assetType(asset).toLowerCase();
@@ -149,6 +175,9 @@ export default function PublishingStudio() {
   const [automationSaving, setAutomationSaving] = useState(false);
   const [automationError, setAutomationError] = useState(null);
   const [inboxReplyError, setInboxReplyError] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState(null);
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleValue, setScheduleValue] = useState("");
@@ -163,6 +192,7 @@ export default function PublishingStudio() {
     { id: "automations", label: "Automations", detail: "Turn comments into DMs" },
     { id: "calendar", label: "Calendar", detail: "See what is scheduled" },
     { id: "queue", label: "Queue", detail: "Review drafts and actions" },
+    { id: "analytics", label: "Analytics", detail: "Review performance" },
     { id: "accounts", label: "Accounts", detail: "Manage destinations" },
     { id: "history", label: "History", detail: "Review what went live" },
   ];
@@ -335,6 +365,24 @@ export default function PublishingStudio() {
   };
 
   useEffect(() => {
+    if (activeView !== "analytics" || providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO) return undefined;
+    let cancelled = false;
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+    void centerRef.current.getAnalytics().then((result) => {
+      if (!cancelled) setAnalytics(result);
+    }).catch((error) => {
+      if (!cancelled) {
+        setAnalytics(null);
+        setAnalyticsError(error);
+      }
+    }).finally(() => {
+      if (!cancelled) setAnalyticsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeView, providerId]);
+
+  useEffect(() => {
     if (activeView !== "inbox") return undefined;
     if (providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO) {
       setInboxConversations([]);
@@ -441,6 +489,7 @@ export default function PublishingStudio() {
       title: edits.title ?? draft.title ?? "",
       caption: edits.caption ?? draft.caption ?? "",
       hashtags: parseHashtags(edits.hashtags ?? hashtagsToText(draft.hashtags)),
+      firstComment: edits.firstComment ?? draft.firstComment ?? "",
     });
     setDraftEdits((current) => {
       const next = { ...current };
@@ -684,7 +733,7 @@ export default function PublishingStudio() {
         </div>
       </WorkspaceHero>
 
-      <GhlHubPublishingAccounts />
+      {activeView === "accounts" && <GhlHubPublishingAccounts />}
 
       <nav aria-label="Publishing views" className="mt-5 overflow-x-auto rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-surface)] p-1.5">
         <div className="flex min-w-max gap-1">
@@ -702,6 +751,26 @@ export default function PublishingStudio() {
           ))}
         </div>
       </nav>
+
+      {activeView === "analytics" && (
+        providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO ? (
+          <WorkspaceSection title="Maven Social Analytics" description="Review performance reported by Maven Social for your connected accounts.">
+            <EmptyState title="Select Maven Social" description="Choose Maven Social as the account source in Accounts before opening Analytics." icon={<Icon type="history" />} />
+          </WorkspaceSection>
+        ) : (
+          <WorkspaceSection title="Maven Social Analytics" description="Performance reported by Maven Social for your connected accounts. Only metrics the provider returns are shown.">
+            {analyticsLoading ? <LoadingState title="Loading Analytics" description="Gathering performance from Maven Social..." /> : analyticsError ? <ErrorState title="Analytics unavailable" description={analyticsError.message || "Unable to load Maven Social analytics."} /> : !analytics || (!(analytics.posts || []).length && !analytics.overview) ? <EmptyState title="No analytics yet" description="Published post analytics will appear here once Maven Social reports them." icon={<Icon type="history" />} /> : (
+              <div className="space-y-5">
+                {analytics.hasAnalyticsAccess === false ? <p className="rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] p-3 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">The Maven Social analytics add-on is not enabled for these accounts. Ask your provider to enable analytics access.</p> : null}
+                {analytics.overview ? <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Analytics overview"><WorkspaceCard className="bg-black/10 p-3"><p className="text-xl font-semibold">{formatMetric("totalPosts", analytics.overview.totalPosts)}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Total posts</p></WorkspaceCard><WorkspaceCard className="bg-black/10 p-3"><p className="text-xl font-semibold">{formatMetric("publishedPosts", analytics.overview.publishedPosts)}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Published</p></WorkspaceCard><WorkspaceCard className="bg-black/10 p-3"><p className="text-xl font-semibold">{formatMetric("scheduledPosts", analytics.overview.scheduledPosts)}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Scheduled</p></WorkspaceCard><WorkspaceCard className="bg-black/10 p-3"><p className="text-sm font-semibold">{analytics.overview.lastSync ? readableDate(analytics.overview.lastSync, true) : "Not synced"}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">Last sync</p></WorkspaceCard></div> : null}
+                {(analytics.posts || []).length ? <div className="space-y-3">{analytics.posts.map((post, index) => <WorkspaceCard key={post.id || `post-${index}`} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="line-clamp-2 text-xs font-semibold">{post.content || "Untitled post"}</p><p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{post.platform || post.platforms?.[0]?.platform || "Post"} · {readableDate(post.publishedAt || post.scheduledFor, true)}</p></div><div className="flex flex-wrap items-center gap-2">{post.isExternal ? <StatusBadge tone="neutral">Synced</StatusBadge> : null}{post.isAd ? <StatusBadge tone="gold">Paid</StatusBadge> : null}{post.status ? <StatusBadge tone={post.status === "published" ? "success" : post.status === "failed" ? "error" : "neutral"}>{post.status}</StatusBadge> : null}</div></div>
+                  {post.platforms?.length ? <div className="mt-3 space-y-3">{post.platforms.map((platform, platformIndex) => <div key={`${platform.platform}-${platform.accountId}-${platformIndex}`} className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-semibold uppercase tracking-[0.12em]">{platform.platform || "Platform"}</span>{platform.accountUsername ? <span className="text-[9px] text-[var(--ms-color-text-muted)]">{platform.accountUsername}</span> : null}{platform.syncStatus && platform.syncStatus !== "synced" ? <StatusBadge tone="warning">{platform.syncStatus}</StatusBadge> : null}</div>{platform.syncStatus === "unavailable" && !platform.metrics ? <p className="mt-2 text-[9px] text-[var(--ms-color-text-muted)]">{platform.syncError || "Analytics are not available for this post yet."}</p> : <AnalyticsMetricGrid metrics={platform.metrics} />}</div>)}</div> : post.metrics ? <AnalyticsMetricGrid metrics={post.metrics} /> : null}
+                </WorkspaceCard>)}</div> : null}
+              </div>
+            )}
+          </WorkspaceSection>
+        )
+      )}
 
       {activeView === "inbox" && (
         providerId !== PUBLISHING_PROVIDER_IDS.ZERNIO ? (
@@ -779,7 +848,7 @@ export default function PublishingStudio() {
                   <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedDraft.assets.length} {focusedDraft.assets.length === 1 ? "asset" : "assets"}</span><span>·</span><button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
                 </div>
                 <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
-                <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
+                <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
                  <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date and time</span><input aria-label="Schedule date and time" type="datetime-local" min={dateTimeInputValue(new Date())} value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} className="mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" /></label><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button><span className="text-[10px] text-[var(--ms-color-text-muted)]">Timezone: {focusedDraft.timezone || "UTC"}</span></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
@@ -787,7 +856,7 @@ export default function PublishingStudio() {
              ) : <EmptyState title="Start a new post" description="Write a text-only post or optionally attach an existing image or video from the Creative Library." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
           </WorkspaceSection>
           <WorkspaceSection title="Live Preview" description="A quiet preview of the selected post and destination.">
-            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
+            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}{draftField(focusedDraft, "firstComment") && <p className="text-[10px] text-[var(--ms-color-text-muted)]"><span className="font-semibold uppercase tracking-[0.1em]">First comment:</span> {draftField(focusedDraft, "firstComment")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
           </WorkspaceSection>
         </div>
       )}
@@ -936,6 +1005,10 @@ export default function PublishingStudio() {
                   <label className="block lg:col-span-2">
                     <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span>
                     <textarea value={draftField(draft, "caption")} onChange={(event) => updateDraftEdit(draft.id, "caption", event.target.value)} className="mt-2 min-h-24 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption that will travel with this publishing draft." />
+                  </label>
+                  <label className="block lg:col-span-2">
+                    <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span>
+                    <textarea value={draftField(draft, "firstComment")} onChange={(event) => updateDraftEdit(draft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." />
                   </label>
                 </div>
 

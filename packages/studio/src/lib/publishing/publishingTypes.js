@@ -64,6 +64,7 @@ export function normalizePublishingDraft(input = {}) {
     description: input.description || "",
     link: input.link || "",
     hashtags: Array.isArray(input.hashtags) ? input.hashtags : [],
+    firstComment: input.firstComment || "",
     platforms: Array.isArray(input.platforms) ? input.platforms : [],
     platformOverrides: input.platformOverrides || {},
     accountIds: input.accountIds || input.platformAccountIds || {},
