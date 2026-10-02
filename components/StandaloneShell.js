@@ -522,7 +522,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
     try {
       const status = await revokeProviderCredential(provider);
       setByokStatuses((current) => ({ ...current, [provider]: status }));
-      setByokKey('');
+      setByokKeys((current) => ({ ...current, [provider]: '' }));
     } catch (error) {
       setByokError(error?.message || `Unable to revoke the ${provider} credential.`);
     } finally {

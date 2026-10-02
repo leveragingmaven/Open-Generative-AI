@@ -65,7 +65,7 @@ test("Agents mounts eagerly and keeps its catalog effect", () => {
   const catalogSource = readFileSync(new URL('../packages/studio/src/lib/agents/AgentCatalog.js', import.meta.url), 'utf8');
   const muapiSource = readFileSync(new URL('../packages/studio/src/muapi.js', import.meta.url), 'utf8');
   assert.match(agentSource, /const \[activeMainTab, setActiveMainTab\] = useState\(["']all["']\)/);
-  assert.match(agentSource, /const CATALOG_REQUEST_TIMEOUT_MS = 15_000;/);
+  assert.match(agentSource, /const CATALOG_REQUEST_TIMEOUT_MS = 30_000;/);
   assert.match(agentSource, /templates: \{ records: \[\], status: ["']loading["'], error: null \}/);
   assert.match(agentSource, /featured: \{ records: \[\], status: ["']loading["'], error: null \}/);
   assert.match(agentSource, /startAgentCatalogFeedRequest\(\{/);
