@@ -96,6 +96,51 @@ function dateTimeInputValue(date = new Date(Date.now() + 24 * 60 * 60 * 1000)) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function calendarDateKey(value, timezone) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const pad = (part) => String(part).padStart(2, "0");
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone || undefined,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+}
+
+function monthCalendarDays(month) {
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const gridStart = new Date(firstDay);
+  gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+  const dayCount = Math.ceil((firstDay.getDay() + new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()) / 7) * 7;
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    return date;
+  });
+}
+
+function calendarTime(value, timezone) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Time unavailable";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timezone || undefined,
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  }
+}
+
 function statusTone(status) {
   if (status === PUBLISHING_STATUS.PUBLISHED) return "success";
   if (status === PUBLISHING_STATUS.FAILED || status === PUBLISHING_STATUS.CANCELLED) return "error";
@@ -191,6 +236,10 @@ export default function PublishingStudio() {
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleValue, setScheduleValue] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   const libraryPublishPath = "/studio/asset-library?mode=publish&returnTo=publishing";
   const platformOptions = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO
     ? ZERNIO_CONNECTION_CATALOG
@@ -444,6 +493,24 @@ export default function PublishingStudio() {
   }, []);
 
   const scheduled = useMemo(() => drafts.filter((draft) => [PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft))), [drafts]);
+  const calendarDays = useMemo(() => monthCalendarDays(calendarMonth), [calendarMonth]);
+  const scheduledByDate = useMemo(() => {
+    const grouped = new Map();
+    scheduled.forEach((draft) => {
+      const dateKey = calendarDateKey(draft.scheduledAt, draft.timezone);
+      if (!dateKey) return;
+      const entries = grouped.get(dateKey) || [];
+      entries.push(draft);
+      grouped.set(dateKey, entries);
+    });
+    return grouped;
+  }, [scheduled]);
+  const calendarMonthHasScheduled = useMemo(() => calendarDays.some((date) => (
+    date.getMonth() === calendarMonth.getMonth()
+      && Boolean(scheduledByDate.get(calendarDateKey(date))?.length)
+  )), [calendarDays, calendarMonth, scheduledByDate]);
+  const todayDateKey = calendarDateKey(new Date());
+  const calendarMonthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(calendarMonth);
   const published = useMemo(() => history.filter((item) => item.status === PUBLISHING_STATUS.PUBLISHED || item.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED), [history]);
   const attention = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.FAILED || draft.platforms.length === 0), [drafts]);
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
@@ -922,22 +989,47 @@ export default function PublishingStudio() {
         ) : <EmptyState title="No assets ready for publishing" description="Open the Creative Library to choose an existing asset, or create new content first. Only real saved assets appear here." icon={<Icon type="ready" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Select from Creative Library</SecondaryButton>} />}
       </WorkspaceSection>}
 
-      {activeView === "calendar" && <WorkspaceSection title="Calendar" description="Existing drafts with a scheduled time or scheduled status.">
-          {scheduled.length ? (
-             <div className="space-y-3">
-               {scheduled.map((draft) => (
-                 <WorkspaceCard key={draft.id} className="flex items-center gap-4">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ms-radius-card-small)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="schedule" /></span>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-xs font-semibold">{draft.title || "Untitled Draft"}</h3>
-                   <p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{readableDate(draft.scheduledAt, true)} · {draft.timezone}</p>
-                  </div>
-                  <StatusBadge tone="gold">{draftStatus(draft)}</StatusBadge>
-                  {draft.providerJobId && <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button>}
-                 </WorkspaceCard>
-              ))}
+      {activeView === "calendar" && <WorkspaceSection title="Calendar" description="Scheduled posts by date and stored timezone.">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" aria-label="Previous month" onClick={() => setCalendarMonth((month) => new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)] hover:text-white">Previous</button>
+            <h3 aria-live="polite" className="text-sm font-semibold">{calendarMonthLabel}</h3>
+            <button type="button" aria-label="Next month" onClick={() => setCalendarMonth((month) => new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)] hover:text-white">Next</button>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[700px] overflow-hidden rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)]">
+              <div className="grid grid-cols-7 border-b border-[var(--ms-color-border-subtle)] bg-black/10" role="row">
+                {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day) => <div key={day} role="columnheader" className="px-2 py-2 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)]">{day}</div>)}
+              </div>
+              <div className="grid grid-cols-7" role="grid" aria-label={`${calendarMonthLabel} scheduled posts calendar`}>
+                {calendarDays.map((date) => {
+                  const dateKey = calendarDateKey(date);
+                  const entries = scheduledByDate.get(dateKey) || [];
+                  const isCurrentMonth = date.getMonth() === calendarMonth.getMonth();
+                  const isToday = dateKey === todayDateKey;
+                  return (
+                    <div key={dateKey} role="gridcell" aria-current={isToday ? "date" : undefined} className={`min-h-28 border-b border-r border-[var(--ms-color-border-subtle)] p-2 ${isCurrentMonth ? "bg-[var(--ms-color-surface)]" : "bg-black/10 text-[var(--ms-color-text-muted)]"}`}>
+                      <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[10px] ${isToday ? "bg-[var(--ms-color-gold-primary)] font-semibold text-black" : "text-[var(--ms-color-text-secondary)]"}`}>{date.getDate()}</span>
+                      <div className="mt-1 space-y-1">
+                        {entries.map((draft) => (
+                          <div key={draft.id} className="rounded border border-[rgba(212,168,88,0.2)] bg-[rgba(212,168,88,0.06)] px-1.5 py-1">
+                            <p className="truncate text-[9px] font-semibold text-[var(--ms-color-text-primary)]" title={draft.title || "Untitled Draft"}>{draft.title || "Untitled Draft"}</p>
+                            <p className="truncate text-[8px] text-[var(--ms-color-text-muted)]">{calendarTime(draft.scheduledAt, draft.timezone)}{draft.timezone ? ` · ${draft.timezone}` : ""}</p>
+                            <div className="mt-1 flex items-center justify-between gap-1">
+                              <StatusBadge tone="gold">{draftStatus(draft)}</StatusBadge>
+                              {draft.providerJobId && <button type="button" aria-label={`Cancel ${draft.title || "scheduled post"}`} disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          ) : <EmptyState title="Nothing scheduled" description="Scheduled drafts will appear here at their existing date and timezone." icon={<Icon type="schedule" />} />}
+          </div>
+          {!calendarMonthHasScheduled ? <p role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">Nothing scheduled</p> : null}
+        </div>
       </WorkspaceSection>}
 
       {activeView === "history" && <WorkspaceSection title="History" description="Existing successful publishing history, most recent first.">
