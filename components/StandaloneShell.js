@@ -937,7 +937,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
         )}
 
         {/* Center content: the mounted studio */}
-        <div className="flex-1 min-h-0 relative overflow-hidden bg-[var(--ms-color-background)]">
+        <div className={`flex-1 min-h-0 relative ${activeWorkspaceTab === 'publishing' ? 'overflow-clip' : 'overflow-hidden'} bg-[var(--ms-color-background)]`}>
           {isComingSoonRoute ? <ComingSoonStudio name={comingSoonName} /> : studioContent}
         </div>
       </div>
