@@ -66,6 +66,19 @@ export class PublishingCenterMVP {
     }, options);
   }
 
+  attachAsset(draftId, asset) {
+    const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
+    if (!draft) throw new Error("Draft not found");
+    if (!asset?.id || !asset?.url) throw new Error("Uploaded media is unavailable");
+    const updated = this.providerForDraft(draft).updateDraft({
+      ...draft,
+      assets: [asset],
+      assetIds: [asset.id],
+    }, { storage: this.storage });
+    savePublishingDraft(updated, this.storage);
+    return updated;
+  }
+
   /**
    * Update draft platforms
    */

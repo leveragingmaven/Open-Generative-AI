@@ -69,6 +69,17 @@ test("createDraftFromAsset reads campaign off asset metadata when not top-level"
   assert.equal(draft.campaignName, "Social");
 });
 
+test("attachAsset persists uploaded media on an existing draft", () => {
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: new MuApiPublishingProvider({ fetchFn: async () => ({ ok: true, json: async () => ({}) }) }) });
+  const draft = center.createDraft({ caption: "Hello" });
+  const asset = { id: "upload-1", url: "https://cdn.test/photo.png", type: "image", metadata: { assetType: "uploaded", modality: "image" } };
+  const updated = center.attachAsset(draft.id, asset);
+  assert.deepEqual(updated.assetIds, ["upload-1"]);
+  assert.equal(center.getDrafts()[0].assets[0].url, asset.url);
+  assert.equal(center.getDrafts()[0].caption, "Hello");
+});
+
 test("createDraftFromAsset leaves campaignId null when asset has no campaign", () => {
   const storage = createMemoryStorage();
   const provider = new MuApiPublishingProvider({

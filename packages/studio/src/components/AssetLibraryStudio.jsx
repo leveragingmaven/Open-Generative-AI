@@ -8,6 +8,7 @@ import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import {
   EmptyState,
@@ -145,14 +146,14 @@ function Icon({ type, size = 18 }) {
 }
 
 function AssetMedia({ asset, className = "" }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const kind = assetType(asset).toLowerCase();
-  // Saved assets may carry a separate thumbnail reference; prefer it when the
-  // primary file reference does not render, and fall back to the placeholder.
-  const url = kind.includes("image") ? (asset?.thumbnail || assetUrl(asset)) : assetUrl(asset);
-  if (url && kind.includes("image") && !imageFailed) return <img src={url} alt={assetTitle(asset)} onError={() => setImageFailed(true)} className={`h-full w-full object-cover ${className}`} />;
-  if (url && kind.includes("video")) return <video src={url} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
-  if (url && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={url} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
+  const [failedSources, setFailedSources] = useState([]);
+  const kind = assetPreviewKind(asset) || assetType(asset).toLowerCase();
+  const primaryUrl = assetUrl(asset);
+  const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
+  const imageUrl = [thumbnail, primaryUrl].find((source) => source && !failedSources.includes(source));
+  if (imageUrl && kind.includes("image")) return <img src={imageUrl} alt={assetTitle(asset)} onError={() => setFailedSources((sources) => [...sources, imageUrl])} className={`h-full w-full object-cover ${className}`} />;
+  if (primaryUrl && !failedSources.includes(primaryUrl) && kind.includes("video")) return <video src={primaryUrl} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, primaryUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
+  if (primaryUrl && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={primaryUrl} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
   return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={25} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em]">{kind}</span></div>;
 }
 

@@ -8,6 +8,7 @@ import { publishingProviderRegistry } from "../lib/publishing/PublishingProvider
 import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
+import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -136,10 +137,13 @@ function AnalyticsMetricGrid({ metrics }) {
 }
 
 function AssetPreview({ asset }) {
+  const [failedSources, setFailedSources] = useState([]);
   const url = assetUrl(asset);
-  const type = assetType(asset).toLowerCase();
-  if (url && type.includes("image")) return <img src={url} alt={assetTitle(asset)} className="h-full w-full object-cover" />;
-  if (url && type.includes("video")) return <video src={url} aria-label={`${assetTitle(asset)} preview`} preload="metadata" className="h-full w-full object-cover" />;
+  const type = assetPreviewKind(asset) || assetType(asset).toLowerCase();
+  const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
+  const imageUrl = [thumbnail, url].find((source) => source && !failedSources.includes(source));
+  if (imageUrl && type.includes("image")) return <img src={imageUrl} alt={assetTitle(asset)} onError={() => setFailedSources((sources) => [...sources, imageUrl])} className="h-full w-full object-cover" />;
+  if (url && !failedSources.includes(url) && type.includes("video")) return <video src={url} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, url])} aria-label={`${assetTitle(asset)} preview`} preload="metadata" className="h-full w-full object-cover" />;
   return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={24} /><span className="text-[9px] font-semibold uppercase tracking-[0.15em]">{type}</span></div>;
 }
 
@@ -147,6 +151,8 @@ export default function PublishingStudio() {
   const router = useRouter();
   const { activeCampaign } = useActiveCampaign();
   const centerRef = useRef(null);
+  const uploadInputRef = useRef(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [assets, setAssets] = useState([]);
   const [drafts, setDrafts] = useState([]);
   const [history, setHistory] = useState([]);
@@ -468,6 +474,30 @@ export default function PublishingStudio() {
     } catch (error) {
       setNotice({ tone: "error", text: error.message || "Unable to create draft." });
       return null;
+    }
+  };
+
+  const attachLocalMedia = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || uploadingMedia) return;
+    setUploadingMedia(true);
+    setNotice(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch("/api/publishing/media", { method: "POST", credentials: "include", body });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.asset) throw new Error(result.error || "Unable to upload media.");
+      const draft = focusedDraft || centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
+      centerRef.current.attachAsset(draft.id, result.asset);
+      setFocusedDraftId(draft.id);
+      setNotice({ tone: "success", text: `${file.name} attached to this post.` });
+      await reload();
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message || "Unable to attach media." });
+    } finally {
+      setUploadingMedia(false);
     }
   };
 
@@ -840,7 +870,8 @@ export default function PublishingStudio() {
 
       {activeView === "create" && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] lg:items-start">
-          <WorkspaceSection title="Post Composer" description="Write a post, optionally add existing creative work, then choose a destination.">
+          <WorkspaceSection title="Post Composer" description="Write a post, attach an image or video, then choose a destination.">
+            <div className="mb-4 flex flex-wrap gap-2"><input ref={uploadInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/mpeg,video/x-msvideo" onChange={attachLocalMedia} className="sr-only" aria-label="Choose image or video to attach" /><SecondaryButton type="button" disabled={uploadingMedia} onClick={() => uploadInputRef.current?.click()} className="min-h-9 px-4 py-2 text-xs">{uploadingMedia ? "Uploading media..." : "Upload/Attach Media"}</SecondaryButton></div>
             {focusedDraft ? (
               <div className="space-y-5">
                 <div className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
@@ -853,7 +884,7 @@ export default function PublishingStudio() {
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date and time</span><input aria-label="Schedule date and time" type="datetime-local" min={dateTimeInputValue(new Date())} value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} className="mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" /></label><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button><span className="text-[10px] text-[var(--ms-color-text-muted)]">Timezone: {focusedDraft.timezone || "UTC"}</span></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
-             ) : <EmptyState title="Start a new post" description="Write a text-only post or optionally attach an existing image or video from the Creative Library." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
+             ) : <EmptyState title="Start a new post" description="Write a post, upload an image or video, or choose existing creative work." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
           </WorkspaceSection>
           <WorkspaceSection title="Live Preview" description="A quiet preview of the selected post and destination.">
             {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}{draftField(focusedDraft, "firstComment") && <p className="text-[10px] text-[var(--ms-color-text-muted)]"><span className="font-semibold uppercase tracking-[0.1em]">First comment:</span> {draftField(focusedDraft, "firstComment")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
