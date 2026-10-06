@@ -4,7 +4,8 @@ import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
 import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
 import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
 import { localAssetManager } from "../intelligence/AssetManager.js";
-import { PublishingValidationError } from "./publishingErrors.js";
+import { PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
+import { PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
 
 function freshDraftId() {
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -142,25 +143,39 @@ export class PublishingCenterMVP {
     }
 
     const provider = this.providerForDraft(draft);
-    const scheduledDraft = provider.updateDraft({
+    if (!provider.supportsCapability("schedulePost")) {
+      throw new UnsupportedPublishingCapabilityError("schedulePost", provider.id);
+    }
+
+    const scheduledDraft = {
       ...draft,
       scheduledAt,
       timezone,
-    }, { storage: this.storage });
+      updatedAt: new Date().toISOString(),
+    };
 
-    // Save using the publishing history abstraction
-    savePublishingDraft(scheduledDraft, this.storage);
-    
-    if (scheduledDraft.providerJobId && ["scheduled", "queued"].includes(draft.status)) {
-      const result = await provider.reschedulePost(scheduledDraft.providerJobId, {
+    let result;
+    if (scheduledDraft.providerJobId && [PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draft.status)) {
+      if (!provider.supportsCapability("reschedulePost")) {
+        throw new UnsupportedPublishingCapabilityError("reschedulePost", provider.id);
+      }
+      result = await provider.reschedulePost(scheduledDraft.providerJobId, {
         scheduled_at: new Date(scheduledAt).toISOString(),
         scheduledAt: new Date(scheduledAt).toISOString(),
         timezone,
       });
-      savePublishingJob({ ...(result || {}), draftId: draft.id, provider: provider.id, providerJobId: scheduledDraft.providerJobId, status: "scheduled", updatedAt: new Date().toISOString() }, this.storage);
-      return result;
+      savePublishingJob({ ...(result || {}), draftId: draft.id, provider: provider.id, providerJobId: scheduledDraft.providerJobId, status: PUBLISHING_STATUS.SCHEDULED, updatedAt: new Date().toISOString() }, this.storage);
+    } else {
+      result = await provider.schedulePost(scheduledDraft, { storage: this.storage });
     }
-    return await provider.schedulePost(scheduledDraft, { storage: this.storage });
+
+    const scheduledStatus = effectivePublishingDraftStatus({ ...scheduledDraft, status: result?.status || PUBLISHING_STATUS.SCHEDULED });
+    savePublishingDraft({
+      ...scheduledDraft,
+      status: scheduledStatus,
+      providerJobId: result?.providerJobId || result?.id || scheduledDraft.providerJobId,
+    }, this.storage);
+    return result;
   }
 
   /**
@@ -301,7 +316,7 @@ export class PublishingCenterMVP {
   }
 
   async getRemoteHistory() {
-    if (!this.publishingProvider.getScheduledPosts) return [];
+    if (!this.publishingProvider.supportsCapability("getScheduledPosts")) return [];
     return await this.publishingProvider.getScheduledPosts();
   }
 

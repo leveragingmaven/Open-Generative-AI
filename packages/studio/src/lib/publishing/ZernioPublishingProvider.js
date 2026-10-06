@@ -148,6 +148,11 @@ export class ZernioPublishingProvider extends PublishingProvider {
     return [];
   }
 
+  supportsCapability(methodName) {
+    if (methodName === 'schedulePost') return false;
+    return super.supportsCapability(methodName);
+  }
+
   schedulePost() {
     throw new PublishingError('Maven Social scheduling will be enabled in a later phase.', {
       code: 'zernio_scheduling_not_available',

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { GhlHubPublishingProvider } from "./GhlHubPublishingProvider.js";
 import { MuApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { PublishingCenterMVP } from "./PublishingCenterMVP.js";
+import { PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
+import { ZernioPublishingProvider } from "./ZernioPublishingProvider.js";
+import { savePublishingDraft } from "./publishingHistory.js";
 
 function createMemoryStorage() {
   const map = new Map();
@@ -209,11 +213,63 @@ test("scheduleDraft accepts an explicit future time and cancellation uses the pr
 
   const scheduled = await center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
   assert.equal(scheduled.status, "scheduled");
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(center.getDrafts()[0].providerJobId, "provider-job-1");
   assert.equal(center.getDrafts()[0].scheduledAt, "2035-01-01T10:00:00.000Z");
   await center.cancelScheduledDraft(draft.id);
   assert.equal(center.getDrafts()[0].status, "cancelled");
   assert.equal(center.getDrafts()[0].scheduledAt, null);
   assert.equal(calls.some(({ url }) => url.endsWith("/jobs/provider-job-1/cancel")), true);
+});
+
+test("scheduleDraft rejects unsupported providers without persisting schedule metadata", async () => {
+  const storage = createMemoryStorage();
+  const muApi = new MuApiPublishingProvider({ fetchFn: async () => ({ ok: true, json: async () => ({}) }) });
+  const draft = muApi.createDraft({ caption: "Read-only draft" });
+  savePublishingDraft({ ...draft, provider: "ghl_hub" }, storage);
+  const provider = new GhlHubPublishingProvider({ fetchFn: async () => { throw new Error("unexpected account request"); } });
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const scheduledAt = "2035-01-01T10:00:00.000Z";
+
+  await assert.rejects(() => center.scheduleDraft(draft.id, scheduledAt), { code: "unsupported_capability" });
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.DRAFT);
+  assert.equal(center.getDrafts()[0].scheduledAt, null);
+});
+
+test("scheduleDraft leaves the stored draft unchanged when provider submission fails", async () => {
+  const storage = createMemoryStorage();
+  const provider = new MuApiPublishingProvider({ fetchFn: async () => ({ ok: true, json: async () => ({}) }) });
+  const draft = provider.createDraft({ caption: "Retryable draft" });
+  savePublishingDraft(draft, storage);
+  provider.schedulePost = async () => { throw new Error("provider unavailable"); };
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+
+  await assert.rejects(() => center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z"), /provider unavailable/);
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.DRAFT);
+  assert.equal(center.getDrafts()[0].scheduledAt, null);
+});
+
+test("getRemoteHistory skips providers that inherit the unsupported default", async () => {
+  let fetchCalled = false;
+  const provider = new GhlHubPublishingProvider({ fetchFn: async () => { fetchCalled = true; } });
+  const center = new PublishingCenterMVP({ storage: createMemoryStorage(), publishingProvider: provider });
+
+  assert.deepEqual(await center.getRemoteHistory(), []);
+  assert.equal(fetchCalled, false);
+});
+
+test("effective scheduled status is consistent and respects scheduling capability", () => {
+  const draft = { status: PUBLISHING_STATUS.DRAFT, scheduledAt: "2035-01-01T10:00:00.000Z" };
+  assert.equal(effectivePublishingDraftStatus(draft, true, Date.parse("2034-01-01T00:00:00Z")), PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(effectivePublishingDraftStatus(draft, false, Date.parse("2034-01-01T00:00:00Z")), PUBLISHING_STATUS.DRAFT);
+  assert.equal(effectivePublishingDraftStatus({ ...draft, status: PUBLISHING_STATUS.FAILED }, true, Date.parse("2034-01-01T00:00:00Z")), PUBLISHING_STATUS.FAILED);
+  assert.equal(effectivePublishingDraftStatus(draft, true, Date.parse("2036-01-01T00:00:00Z")), PUBLISHING_STATUS.DRAFT);
+});
+
+test("Zernio advertises that scheduling is unavailable despite defining a rejecting method", () => {
+  const provider = new ZernioPublishingProvider({ fetchFn: async () => ({ ok: true, json: async () => ({}) }) });
+  assert.equal(provider.supportsCapability("schedulePost"), false);
+  assert.equal(provider.supportsCapability("getScheduledPosts"), true);
 });
 
 test("duplicateDraft creates a fresh editable draft without provider submission identifiers", () => {

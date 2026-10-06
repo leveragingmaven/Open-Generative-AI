@@ -38,6 +38,18 @@ export function normalizePublishingStatus(input) {
   return PUBLISHING_STATUS.UNKNOWN;
 }
 
+export function effectivePublishingDraftStatus(draft = {}, supportsScheduling = true, now = Date.now()) {
+  const status = normalizePublishingStatus(draft.status || PUBLISHING_STATUS.DRAFT);
+  if (status === PUBLISHING_STATUS.SCHEDULED || status === PUBLISHING_STATUS.QUEUED) {
+    return status;
+  }
+  const scheduledTime = new Date(draft.scheduledAt).getTime();
+  if (status === PUBLISHING_STATUS.DRAFT && supportsScheduling && Number.isFinite(scheduledTime) && scheduledTime > now) {
+    return PUBLISHING_STATUS.SCHEDULED;
+  }
+  return status;
+}
+
 export function normalizePublishingDraft(input = {}) {
   const now = new Date().toISOString();
   const assets = Array.isArray(input.assets) ? input.assets : [];

@@ -10,6 +10,10 @@ export class PublishingProvider {
     throw new UnsupportedPublishingCapabilityError(methodName, this.id);
   }
 
+  supportsCapability(methodName) {
+    return typeof this[methodName] === "function" && this[methodName] !== PublishingProvider.prototype[methodName];
+  }
+
   connectAccount() {
     return this.notImplemented("connectAccount");
   }

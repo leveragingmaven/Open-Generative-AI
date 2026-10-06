@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
-import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { effectivePublishingDraftStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
@@ -68,6 +68,10 @@ function accountsForPlatform(accounts, platform) {
 function accountProvider(account) { return account?.provider || PUBLISHING_PROVIDER_IDS.MUAPI; }
 function isReadOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB || providerId === PUBLISHING_PROVIDER_IDS.POSTIZ; }
 function isAccountOnlyProvider(providerId) { return providerId === PUBLISHING_PROVIDER_IDS.ZERNIO; }
+function draftStatus(draft) {
+  const provider = publishingProviderRegistry.get(draft.provider);
+  return effectivePublishingDraftStatus(draft, provider.supportsCapability("schedulePost"));
+}
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
 
@@ -439,7 +443,7 @@ export default function PublishingStudio() {
     };
   }, []);
 
-  const scheduled = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.SCHEDULED || Boolean(draft.scheduledAt)), [drafts]);
+  const scheduled = useMemo(() => drafts.filter((draft) => [PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft))), [drafts]);
   const published = useMemo(() => history.filter((item) => item.status === PUBLISHING_STATUS.PUBLISHED || item.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED), [history]);
   const attention = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.FAILED || draft.platforms.length === 0), [drafts]);
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
@@ -663,7 +667,10 @@ export default function PublishingStudio() {
       setScheduleDraftId(null);
       setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} scheduled for ${readableDate(scheduledAt.toISOString(), true)}.` });
     } catch (error) {
-      setNotice({ tone: "error", text: error.message || "Unable to schedule draft." });
+      setNotice({
+        tone: error.code === "unsupported_capability" ? "neutral" : "error",
+        text: error.code === "unsupported_capability" ? "Scheduling is unavailable for this account source." : error.message || "Unable to schedule draft.",
+      });
     } finally {
       setBusyId(null);
       void reload();
@@ -742,7 +749,7 @@ export default function PublishingStudio() {
       />
 
       {activeCampaign && <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3"><StatusBadge tone="gold" dot>Campaign context</StatusBadge><span className="truncate text-xs font-semibold">{activeCampaign.name}</span></div>}
-      {notice && <div role={notice.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-[var(--ms-radius-card-small)] border px-4 py-3 text-xs ${notice.tone === "error" ? "border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] text-[var(--ms-color-error)]" : notice.tone === "warning" ? "border-[rgba(212,168,88,0.35)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-muted)]" : "border-[rgba(99,197,155,0.3)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"}`}>{notice.text}</div>}
+      {notice && <div role={notice.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-[var(--ms-radius-card-small)] border px-4 py-3 text-xs ${notice.tone === "error" ? "border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] text-[var(--ms-color-error)]" : notice.tone === "warning" ? "border-[rgba(212,168,88,0.35)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-muted)]" : notice.tone === "neutral" ? "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-muted)]" : "border-[rgba(99,197,155,0.3)] bg-[rgba(99,197,155,0.08)] text-[var(--ms-color-success)]"}`}>{notice.text}</div>}
       {accountsError && <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{accountsError.code === "hub_session_expired" ? "MavenSync Hub is not connected. Reconnect through MavenSync Hub, then refresh this page." : accountsError.message}</div>}
       {remoteHistoryError && <div role="status" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-4 py-3 text-xs text-[var(--ms-color-gold-muted)]">{remoteHistoryError}</div>}
       {loadError ? <ErrorState className="mt-5" title="Publishing Center unavailable" description={loadError} /> : null}
@@ -925,7 +932,7 @@ export default function PublishingStudio() {
                     <h3 className="truncate text-xs font-semibold">{draft.title || "Untitled Draft"}</h3>
                    <p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{readableDate(draft.scheduledAt, true)} · {draft.timezone}</p>
                   </div>
-                  <StatusBadge tone="gold">{draft.status}</StatusBadge>
+                  <StatusBadge tone="gold">{draftStatus(draft)}</StatusBadge>
                   {draft.providerJobId && <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button>}
                  </WorkspaceCard>
               ))}
@@ -1004,18 +1011,18 @@ export default function PublishingStudio() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge tone={statusTone(draft.status)}>{draft.status}</StatusBadge>
+                      <StatusBadge tone={statusTone(draftStatus(draft))}>{draftStatus(draft)}</StatusBadge>
                       {draft.campaignName ? <StatusBadge tone="gold">{draft.campaignName}</StatusBadge> : null}
                     </div>
                     <h3 className="mt-3 text-sm font-semibold">{draft.title || "Untitled Draft"}</h3>
                     <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{draft.assets.length} {draft.assets.length === 1 ? "asset" : "assets"} · Updated {readableDate(draft.updatedAt, true)}</p>
-                    {draft.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(draft.scheduledAt, true)} · {draft.timezone}</p> : null}
+                    {[PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft)) && draft.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(draft.scheduledAt, true)} · {draft.timezone}</p> : null}
                     {draft.error ? <p className="mt-2 text-[10px] text-[var(--ms-color-error)]">{draft.error}</p> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                     <SecondaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
-                    {(draft.status === PUBLISHING_STATUS.SCHEDULED || draft.scheduledAt) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
+                    {[PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
                     <SecondaryButton type="button" onClick={() => saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
                     <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
                     <button type="button" onClick={() => deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)]">Delete</button>
