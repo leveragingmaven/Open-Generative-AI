@@ -5,7 +5,7 @@ import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
 import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
 import { localAssetManager } from "../intelligence/AssetManager.js";
 import { PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
-import { PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
+import { isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
 
 function freshDraftId() {
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -170,10 +170,26 @@ export class PublishingCenterMVP {
     }
 
     const scheduledStatus = effectivePublishingDraftStatus({ ...scheduledDraft, status: result?.status || PUBLISHING_STATUS.SCHEDULED });
+    const providerPostIds = {
+      ...(draft.providerPostIds || {}),
+      ...(result?.providerPostIds || {}),
+      ...Object.fromEntries(Object.entries(result?.platformResults || {})
+        .filter(([, platformResult]) => platformResult?.providerPostId)
+        .map(([platform, platformResult]) => [platform, platformResult.providerPostId])),
+    };
+    const providerRequestIds = {
+      ...(draft.providerRequestIds || {}),
+      ...(result?.providerRequestIds || {}),
+      ...Object.fromEntries(Object.entries(result?.platformResults || {})
+        .filter(([, platformResult]) => platformResult?.providerRequestId)
+        .map(([platform, platformResult]) => [platform, platformResult.providerRequestId])),
+    };
     savePublishingDraft({
       ...scheduledDraft,
       status: scheduledStatus,
       providerJobId: result?.providerJobId || result?.id || scheduledDraft.providerJobId,
+      providerPostIds,
+      providerRequestIds,
     }, this.storage);
     return result;
   }
@@ -336,7 +352,68 @@ export class PublishingCenterMVP {
 
   async getRemoteHistory() {
     if (!this.publishingProvider.supportsCapability("getScheduledPosts")) return [];
-    return await this.publishingProvider.getScheduledPosts();
+    const remoteJobs = await this.publishingProvider.getScheduledPosts();
+    if (this.publishingProvider.id !== PUBLISHING_PROVIDER_IDS.MUAPI) return remoteJobs;
+
+    const drafts = readPublishingDrafts(this.storage);
+    const history = readPublishingHistory(this.storage);
+    return remoteJobs.map((remoteJob) => {
+      const remoteIds = new Set([
+        remoteJob.providerJobId,
+        remoteJob.providerPostId,
+        remoteJob.providerRequestId,
+        remoteJob.id,
+      ].filter(Boolean).map(String));
+      const remoteRaw = remoteJob.raw || {};
+      const remoteDraftId = remoteJob.draftId || remoteRaw.draftId || remoteRaw.draft_id;
+      const draft = drafts.find((item) => item.provider === PUBLISHING_PROVIDER_IDS.MUAPI
+        && (isScheduledPublishingStatus(item.status) || Boolean(item.scheduledAt))
+        && ((remoteDraftId && item.id === remoteDraftId)
+          || [item.providerJobId, ...Object.values(item.providerPostIds || {}), ...Object.values(item.providerRequestIds || {})]
+            .some((id) => id && remoteIds.has(String(id)))));
+      if (!draft || ![PUBLISHING_STATUS.PUBLISHED, PUBLISHING_STATUS.FAILED].includes(remoteJob.status)) return remoteJob;
+
+      const historyJob = history.find((item) => item.draftId === draft.id);
+      const platforms = remoteJob.platforms?.length ? remoteJob.platforms : draft.platforms;
+      const providerPostIds = {
+        ...(draft.providerPostIds || {}),
+        ...(remoteJob.providerPostIds || {}),
+        ...(remoteJob.providerPostId && platforms.length === 1 ? { [platforms[0]]: remoteJob.providerPostId } : {}),
+      };
+      const providerJobId = remoteJob.providerJobId || draft.providerJobId;
+      const error = remoteJob.status === PUBLISHING_STATUS.FAILED
+        ? remoteJob.error || "MuAPI reported that this scheduled post failed."
+        : null;
+      const updatedDraft = this.providerForDraft(draft).updateDraft({
+        ...draft,
+        status: remoteJob.status,
+        providerJobId,
+        providerPostIds,
+        scheduledAt: draft.scheduledAt || remoteJob.scheduledAt,
+        publishedAt: remoteJob.status === PUBLISHING_STATUS.PUBLISHED
+          ? remoteJob.publishedAt || draft.publishedAt || new Date().toISOString()
+          : draft.publishedAt,
+        error,
+      }, { storage: this.storage });
+      savePublishingDraft(updatedDraft, this.storage);
+
+      const reconciledJob = {
+        ...historyJob,
+        ...remoteJob,
+        id: historyJob?.id || remoteJob.id || providerJobId || remoteJob.providerPostId || draft.id,
+        draftId: draft.id,
+        provider: PUBLISHING_PROVIDER_IDS.MUAPI,
+        providerJobId,
+        providerPostIds,
+        platforms,
+        status: remoteJob.status,
+        scheduledAt: draft.scheduledAt || remoteJob.scheduledAt,
+        publishedAt: remoteJob.status === PUBLISHING_STATUS.PUBLISHED ? updatedDraft.publishedAt : remoteJob.publishedAt,
+        error,
+      };
+      savePublishingJob(reconciledJob, this.storage);
+      return reconciledJob;
+    });
   }
 
   /**

@@ -399,8 +399,12 @@ export class MuApiPublishingProvider extends PublishingProvider {
         ...post,
         id: firstValue(post.id, post.post_id, post.request_id),
         provider: this.id,
-        providerPostId: firstValue(post.post_id, post.id),
-        providerRequestId: firstValue(post.request_id, post.requestId),
+        providerPostId: firstValue(post.post_id, post.postId, post.provider_post_id, post.providerPostId, post.id),
+        providerJobId: firstValue(post.job_id, post.jobId, post.providerJobId, post.request_id, post.requestId, post.id),
+        providerRequestId: firstValue(post.request_id, post.requestId, post.providerRequestId),
+        platforms: post.platforms || (post.platform ? [post.platform] : []),
+        publishedAt: firstValue(post.published_at, post.publishedAt, post.completed_at, post.completedAt),
+        error: firstValue(post.error, post.error_message, post.message),
       }));
     });
   }

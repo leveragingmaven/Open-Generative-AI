@@ -38,6 +38,20 @@ export function normalizePublishingStatus(input) {
   return PUBLISHING_STATUS.UNKNOWN;
 }
 
+export function isActivePublishingQueueDraft(draft = {}) {
+  return draft.provider !== PUBLISHING_PROVIDER_IDS.MUAPI
+    || normalizePublishingStatus(draft.status) !== PUBLISHING_STATUS.PUBLISHED;
+}
+
+export function isPublishingDraftNeedsAttention(draft = {}) {
+  return normalizePublishingStatus(draft.status) === PUBLISHING_STATUS.FAILED || (draft.platforms || []).length === 0;
+}
+
+export function isScheduledPublishingStatus(status) {
+  const normalized = normalizePublishingStatus(status);
+  return normalized === PUBLISHING_STATUS.SCHEDULED || normalized === PUBLISHING_STATUS.QUEUED;
+}
+
 export function effectivePublishingDraftStatus(draft = {}, supportsScheduling = true, now = Date.now()) {
   const status = normalizePublishingStatus(draft.status || PUBLISHING_STATUS.DRAFT);
   if (status === PUBLISHING_STATUS.SCHEDULED || status === PUBLISHING_STATUS.QUEUED) {
@@ -153,7 +167,8 @@ export function normalizePublishingJob(input = {}) {
     providerContentId: input.providerContentId || null,
     providerRequestId: input.providerRequestId || input.request_id || input.requestId || null,
     publishedUrls: input.publishedUrls || input.urls || [],
-    scheduledAt: input.scheduledAt || input.scheduledFor || null,
+    scheduledAt: input.scheduledAt || input.scheduled_at || input.scheduledFor || null,
+    publishedAt: input.publishedAt || input.published_at || input.completedAt || input.completed_at || null,
     timezone: input.timezone || null,
     error: input.error || null,
     updatedAt: input.updatedAt || new Date().toISOString(),

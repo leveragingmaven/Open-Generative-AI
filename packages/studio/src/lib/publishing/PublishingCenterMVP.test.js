@@ -3,7 +3,7 @@ import test from "node:test";
 import { GhlHubPublishingProvider } from "./GhlHubPublishingProvider.js";
 import { MuApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { PublishingCenterMVP } from "./PublishingCenterMVP.js";
-import { PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
+import { isActivePublishingQueueDraft, isPublishingDraftNeedsAttention, isScheduledPublishingStatus, PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
 import { ZernioPublishingProvider } from "./ZernioPublishingProvider.js";
 import { savePublishingDraft } from "./publishingHistory.js";
 
@@ -220,6 +220,116 @@ test("scheduleDraft accepts an explicit future time and cancellation uses the pr
   assert.equal(center.getDrafts()[0].status, "cancelled");
   assert.equal(center.getDrafts()[0].scheduledAt, null);
   assert.equal(calls.some(({ url }) => url.endsWith("/jobs/provider-job-1/cancel")), true);
+});
+
+test("MuAPI scheduled reconciliation keeps pending jobs in Queue and Calendar, then moves published jobs to History", async () => {
+  let remoteStatus = { job_id: "mu-job-1", post_id: "mu-post-1", request_id: "mu-request-1", platform: "facebook", status: "pending", scheduled_at: "2035-01-01T10:00:00.000Z" };
+  const provider = new MuApiPublishingProvider({
+    fetchFn: async (url, options = {}) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      if (body?.action === "schedule") {
+        return { ok: true, json: async () => ({ id: "mu-job-1", job_id: "mu-job-1", post_id: "mu-post-1", request_id: "mu-request-1", status: "scheduled" }) };
+      }
+      if (url.endsWith("/scheduled")) return { ok: true, json: async () => ({ posts: [remoteStatus] }) };
+      return { ok: true, json: async () => ({}) };
+    },
+    mavenSyncClient: { isEnabled: () => false },
+  });
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({
+    id: "muapi-scheduled-draft",
+    title: "Scheduled Facebook post",
+    caption: "Existing caption",
+    platforms: ["facebook"],
+    accountIds: { facebook: "fb-account-1" },
+    platformOverrides: { facebook: { accountId: "fb-account-1", accountName: "Creator Page" } },
+    assets: [{ id: "mu-asset-1", url: "https://cdn.test/muapi.jpg", type: "image" }],
+    assetIds: ["mu-asset-1"],
+  });
+  await center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
+
+  const pendingJobs = await center.getRemoteHistory();
+  let localDraft = center.getDrafts().find((item) => item.id === draft.id);
+  assert.equal(pendingJobs[0].status, PUBLISHING_STATUS.QUEUED);
+  assert.equal(localDraft.status, PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(isActivePublishingQueueDraft(localDraft), true);
+  assert.equal(effectivePublishingDraftStatus(localDraft, provider.supportsCapability("schedulePost")), PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(isScheduledPublishingStatus(effectivePublishingDraftStatus(localDraft, provider.supportsCapability("schedulePost"))), true);
+  assert.equal(localDraft.providerJobId, "mu-job-1");
+
+  remoteStatus = {
+    ...remoteStatus,
+    status: "success",
+    published_at: "2035-01-01T10:02:30.000Z",
+    scheduled_at: "2035-01-01T10:00:00.000Z",
+  };
+  const publishedJobs = await center.getRemoteHistory();
+  localDraft = center.getDrafts().find((item) => item.id === draft.id);
+  assert.equal(publishedJobs[0].status, PUBLISHING_STATUS.PUBLISHED);
+  assert.equal(localDraft.status, PUBLISHING_STATUS.PUBLISHED);
+  assert.equal(localDraft.providerJobId, "mu-job-1");
+  assert.equal(localDraft.providerPostIds.facebook, "mu-post-1");
+  assert.deepEqual(localDraft.platforms, ["facebook"]);
+  assert.equal(localDraft.accountIds.facebook, "fb-account-1");
+  assert.equal(localDraft.caption, "Existing caption");
+  assert.equal(localDraft.assets[0].id, "mu-asset-1");
+  assert.equal(localDraft.scheduledAt, "2035-01-01T10:00:00.000Z");
+  assert.equal(localDraft.publishedAt, "2035-01-01T10:02:30.000Z");
+  assert.equal(isActivePublishingQueueDraft(localDraft), false);
+  assert.equal(isActivePublishingQueueDraft({ ...localDraft, provider: "zernio" }), true);
+  assert.equal(effectivePublishingDraftStatus(localDraft, provider.supportsCapability("schedulePost")), PUBLISHING_STATUS.PUBLISHED);
+  assert.equal(isScheduledPublishingStatus(effectivePublishingDraftStatus(localDraft, provider.supportsCapability("schedulePost"))), false);
+  const publishedHistory = center.getHistory().filter((item) => item.draftId === draft.id && item.status === PUBLISHING_STATUS.PUBLISHED);
+  assert.equal(publishedHistory.length, 1);
+  assert.equal(publishedHistory[0].providerPostIds.facebook, "mu-post-1");
+  assert.equal(publishedHistory[0].platforms[0], "facebook");
+  assert.equal(publishedHistory[0].scheduledAt, "2035-01-01T10:00:00.000Z");
+  assert.equal(publishedHistory[0].publishedAt, "2035-01-01T10:02:30.000Z");
+});
+
+test("failed MuAPI scheduled jobs stay active in Queue with Needs Attention status", async () => {
+  const provider = new MuApiPublishingProvider({
+    fetchFn: async (url, options = {}) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      if (body?.action === "schedule") return { ok: true, json: async () => ({ id: "mu-job-fail", job_id: "mu-job-fail", status: "scheduled" }) };
+      if (url.endsWith("/scheduled")) return { ok: true, json: async () => ({ posts: [{ job_id: "mu-job-fail", status: "error", error_message: "Facebook rejected the post", platform: "facebook" }] }) };
+      return { ok: true, json: async () => ({}) };
+    },
+    mavenSyncClient: { isEnabled: () => false },
+  });
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({ id: "muapi-failed-draft", caption: "Retry me", platforms: ["facebook"], accountIds: { facebook: "fb-account-1" }, assets: [{ id: "asset-fail", url: "https://cdn.test/fail.jpg", type: "image" }] });
+  await center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
+  await center.getRemoteHistory();
+  const failedDraft = center.getDrafts().find((item) => item.id === draft.id);
+  assert.equal(failedDraft.status, PUBLISHING_STATUS.FAILED);
+  assert.equal(failedDraft.error, "Facebook rejected the post");
+  assert.equal(isActivePublishingQueueDraft(failedDraft), true);
+  assert.equal(isPublishingDraftNeedsAttention(failedDraft), true);
+  assert.equal(failedDraft.caption, "Retry me");
+});
+
+test("MuAPI direct publish behavior continues to use publishNow and persist its provider result", async () => {
+  const calls = [];
+  const provider = new MuApiPublishingProvider({
+    fetchFn: async (url, options = {}) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      calls.push({ url, action: body?.action });
+      return { ok: true, json: async () => ({ id: "mu-direct-job", post_id: "mu-direct-post", status: "published" }) };
+    },
+    mavenSyncClient: { isEnabled: () => false },
+  });
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({ id: "muapi-direct-draft", caption: "Publish now", platforms: ["facebook"], accountIds: { facebook: "fb-account-1" }, assets: [{ id: "direct-asset", url: "https://cdn.test/direct.jpg", type: "image" }] });
+  const result = await center.publishDraft(draft.id);
+  assert.equal(result.status, PUBLISHING_STATUS.PUBLISHED);
+  assert.deepEqual(calls.map((call) => call.action), ["publish"]);
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.PUBLISHED);
+  assert.equal(center.getHistory()[0].providerPostId, "mu-direct-post");
+  assert.equal(center.getHistory()[0].publishedAt, null);
 });
 
 test("scheduleDraft rejects unsupported providers without persisting schedule metadata", async () => {
