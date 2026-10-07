@@ -7,6 +7,7 @@ import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { effectivePublishingDraftStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { zernioEngagementEntitlement } from "../lib/publishing/zernioEntitlements.js";
+import { publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "../lib/publishing/publishingComposer.js";
 import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
@@ -76,13 +77,6 @@ function draftStatus(draft) {
 }
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
-
-function parseHashtags(value) {
-  return String(value || "")
-    .split(/[\s,]+/)
-    .map((item) => item.trim().replace(/^#/, ""))
-    .filter(Boolean);
-}
 
 function readableDate(value, withTime = false) {
   if (!value) return "Not scheduled";
@@ -546,7 +540,8 @@ export default function PublishingStudio() {
   const attention = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.FAILED || draft.platforms.length === 0), [drafts]);
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
   const focusedDraft = useMemo(() => drafts.find((draft) => draft.id === focusedDraftId) || null, [drafts, focusedDraftId]);
-  const focusedPreviewAsset = focusedDraft?.assets?.[0] || null;
+  const focusedComposerValues = focusedDraft ? publishingComposerValues(focusedDraft, draftEdits[focusedDraft.id]) : null;
+  const focusedPreviewAsset = focusedComposerValues?.assets?.[0] || null;
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
     ...drafts.flatMap((draft) => draft.platforms || []),
@@ -579,6 +574,27 @@ export default function PublishingStudio() {
     }
   };
 
+  const editQueuedDraft = async (draft) => {
+    const selection = queueEditSelection(draft);
+    if (selection.providerId !== providerId) await switchProvider(selection.providerId);
+    setFocusedDraftId(selection.focusedDraftId);
+    setActiveView(selection.activeView);
+    if (draft.scheduledAt) openSchedule(draft);
+    setNotice({ tone: "neutral", text: "Editing saved draft. Save Draft to update this queue item." });
+  };
+
+  const attachLibraryMedia = (asset) => {
+    if (!focusedDraft || !asset) return;
+    updateDraftEdit(focusedDraft.id, "assets", [asset]);
+    updateDraftEdit(focusedDraft.id, "assetIds", [asset.id]);
+    setNotice({ tone: "success", text: `${assetTitle(asset)} attached to this post.` });
+  };
+
+  const removeDraftMedia = (draft) => {
+    updateDraftEdit(draft.id, "assets", []);
+    updateDraftEdit(draft.id, "assetIds", []);
+  };
+
   const attachLocalMedia = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -591,9 +607,14 @@ export default function PublishingStudio() {
       const response = await fetch("/api/publishing/media", { method: "POST", credentials: "include", body });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.asset) throw new Error(result.error || "Unable to upload media.");
-      const draft = focusedDraft || centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
-      centerRef.current.attachAsset(draft.id, result.asset);
-      setFocusedDraftId(draft.id);
+      if (focusedDraft) {
+        updateDraftEdit(focusedDraft.id, "assets", [result.asset]);
+        updateDraftEdit(focusedDraft.id, "assetIds", [result.asset.id]);
+      } else {
+        const draft = centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
+        centerRef.current.attachAsset(draft.id, result.asset);
+        setFocusedDraftId(draft.id);
+      }
       setNotice({ tone: "success", text: `${file.name} attached to this post.` });
       await reload();
     } catch (error) {
@@ -616,19 +637,18 @@ export default function PublishingStudio() {
   };
 
   const saveDraftEdits = (draft, options = {}) => {
-    const edits = draftEdits[draft.id] || {};
-    const updated = centerRef.current.updateDraft(draft.id, {
-      title: edits.title ?? draft.title ?? "",
-      caption: edits.caption ?? draft.caption ?? "",
-      hashtags: parseHashtags(edits.hashtags ?? hashtagsToText(draft.hashtags)),
-      firstComment: edits.firstComment ?? draft.firstComment ?? "",
-    });
+    const updates = publishingDraftUpdateFromComposer(draft, draftEdits[draft.id] || {});
+    const updated = centerRef.current.updateDraft(draft.id, updates);
     setDraftEdits((current) => {
       const next = { ...current };
       delete next[draft.id];
       return next;
     });
-    if (!options.silent) setNotice({ tone: "success", text: "Draft saved." });
+    setDrafts(centerRef.current.getDrafts());
+    if (!options.silent) {
+      setNotice({ tone: "success", text: "Draft saved." });
+      if (options.returnToQueue) setActiveView("queue");
+    }
     void reload();
     return updated;
   };
@@ -1028,11 +1048,11 @@ export default function PublishingStudio() {
               <div className="space-y-5">
                 <div className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
                   <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
-                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedDraft.assets.length} {focusedDraft.assets.length === 1 ? "asset" : "assets"}</span><span>·</span><button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
+                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedComposerValues.assets.length} {focusedComposerValues.assets.length === 1 ? "asset" : "assets"}</span>{focusedComposerValues.assets.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
                 </div>
-                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
+                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
-                 <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
+                 <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
@@ -1059,7 +1079,7 @@ export default function PublishingStudio() {
                     <StatusBadge>{assetType(asset)}</StatusBadge>
                   </div>
                   {asset.campaignName || asset.metadata?.campaignName ? <p className="mt-3 text-[9px] text-[var(--ms-color-gold-muted)]">{asset.campaignName || asset.metadata.campaignName}</p> : null}
-                  <PrimaryButton type="button" onClick={() => createDraft(asset)} className="mt-4 min-h-9 w-full px-4 py-2 text-xs">Create Draft</PrimaryButton>
+                  <PrimaryButton type="button" onClick={() => focusedDraft ? attachLibraryMedia(asset) : createDraft(asset)} className="mt-4 min-h-9 w-full px-4 py-2 text-xs">{focusedDraft ? "Attach to Draft" : "Create Draft"}</PrimaryButton>
                 </div>
               </WorkspaceCard>
             ))}
@@ -1184,8 +1204,9 @@ export default function PublishingStudio() {
       {activeView === "queue" && <WorkspaceSection title="Queue" description="Existing drafts and their current destinations, schedule, status, ownership, and actions." actions={<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge>}>
         {drafts.length ? (
           <div className="space-y-3">
-            {drafts.map((draft) => (
-              <WorkspaceCard key={draft.id} className={`p-5 ${focusedDraftId === draft.id ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
+            {drafts.map((draft) => {
+              const canEditDraft = publishingProviderRegistry.get(draft.provider).supportsCapability("updateDraft");
+              return <WorkspaceCard key={draft.id} className={`p-5 ${focusedDraftId === draft.id ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1198,6 +1219,7 @@ export default function PublishingStudio() {
                     {draft.error ? <p className="mt-2 text-[10px] text-[var(--ms-color-error)]">{draft.error}</p> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {canEditDraft ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Edit</SecondaryButton> : null}
                     <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                     <SecondaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
                     {[PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
@@ -1257,8 +1279,8 @@ export default function PublishingStudio() {
                     </div>
                   ) : <p className="mt-2 flex items-center gap-1.5 text-[9px] text-[var(--ms-color-warning)]"><Icon type="attention" size={12} /> Connect and select at least one enabled platform before scheduling or publishing.</p>}
                 </fieldset>
-              </WorkspaceCard>
-            ))}
+              </WorkspaceCard>;
+            })}
           </div>
         ) : <EmptyState title="Publishing queue is clear" description="Select an asset from the Creative Library or create a draft from a ready asset to begin the existing publishing workflow." icon={<Icon type="publish" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Select from Creative Library</SecondaryButton>} />}
       </WorkspaceSection>}

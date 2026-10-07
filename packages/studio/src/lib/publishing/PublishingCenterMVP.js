@@ -118,8 +118,8 @@ export class PublishingCenterMVP {
       ...draft,
       ...updates,
       id: draft.id,
-      assetIds: draft.assetIds,
-      assets: draft.assets,
+      assetIds: Array.isArray(updates.assetIds) ? updates.assetIds : draft.assetIds,
+      assets: Array.isArray(updates.assets) ? updates.assets : draft.assets,
       createdAt: draft.createdAt,
     }, { storage: this.storage });
 
