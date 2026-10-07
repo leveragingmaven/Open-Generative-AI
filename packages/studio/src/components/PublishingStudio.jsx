@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
-import { effectivePublishingDraftStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { effectivePublishingDraftStatus, isActivePublishingQueueDraft, isPublishingDraftNeedsAttention, isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { zernioEngagementEntitlement } from "../lib/publishing/zernioEntitlements.js";
 import { publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "../lib/publishing/publishingComposer.js";
+import { publishingCalendarActions, publishingCalendarDateTime, publishingCalendarDetails } from "../lib/publishing/publishingCalendar.js";
 import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
@@ -247,6 +248,8 @@ export default function PublishingStudio() {
   const [analyticsError, setAnalyticsError] = useState(null);
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
+  const [selectedCalendarDraftId, setSelectedCalendarDraftId] = useState(null);
+  const [calendarRescheduleDraftId, setCalendarRescheduleDraftId] = useState(null);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
   const [scheduleTimezone, setScheduleTimezone] = useState(() => resolvedScheduleTimeZone());
@@ -274,8 +277,6 @@ export default function PublishingStudio() {
     if (!center) return;
     try {
       setAssets(center.getAvailableAssets());
-      setDrafts(center.getDrafts());
-      const localHistory = center.getHistory();
       let remoteHistory = [];
       try {
         remoteHistory = await center.getRemoteHistory();
@@ -283,6 +284,8 @@ export default function PublishingStudio() {
       } catch (error) {
         setRemoteHistoryError(error.message || "MuAPI publishing history is unavailable; showing local history.");
       }
+      setDrafts(center.getDrafts());
+      const localHistory = center.getHistory();
       const byId = new Map();
       [...remoteHistory, ...localHistory].forEach((item) => {
         if (item?.id) byId.set(item.id, item);
@@ -517,7 +520,7 @@ export default function PublishingStudio() {
     };
   }, []);
 
-  const scheduled = useMemo(() => drafts.filter((draft) => [PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft))), [drafts]);
+  const scheduled = useMemo(() => drafts.filter((draft) => isScheduledPublishingStatus(draftStatus(draft))), [drafts]);
   const calendarDays = useMemo(() => monthCalendarDays(calendarMonth), [calendarMonth]);
   const scheduledByDate = useMemo(() => {
     const grouped = new Map();
@@ -534,10 +537,12 @@ export default function PublishingStudio() {
     date.getMonth() === calendarMonth.getMonth()
       && Boolean(scheduledByDate.get(calendarDateKey(date))?.length)
   )), [calendarDays, calendarMonth, scheduledByDate]);
+  const selectedCalendarDraft = scheduled.find((draft) => draft.id === selectedCalendarDraftId) || null;
   const todayDateKey = calendarDateKey(new Date());
   const calendarMonthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(calendarMonth);
   const published = useMemo(() => history.filter((item) => item.status === PUBLISHING_STATUS.PUBLISHED || item.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED), [history]);
-  const attention = useMemo(() => drafts.filter((draft) => draft.status === PUBLISHING_STATUS.FAILED || draft.platforms.length === 0), [drafts]);
+  const queueDrafts = useMemo(() => drafts.filter(isActivePublishingQueueDraft), [drafts]);
+  const attention = useMemo(() => queueDrafts.filter(isPublishingDraftNeedsAttention), [queueDrafts]);
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
   const focusedDraft = useMemo(() => drafts.find((draft) => draft.id === focusedDraftId) || null, [drafts, focusedDraftId]);
   const focusedComposerValues = focusedDraft ? publishingComposerValues(focusedDraft, draftEdits[focusedDraft.id]) : null;
@@ -813,6 +818,38 @@ export default function PublishingStudio() {
     setScheduleTimezone(timezone);
   };
 
+  const openCalendarReschedule = (draft) => {
+    setSelectedCalendarDraftId(draft.id);
+    openSchedule(draft);
+    setCalendarRescheduleDraftId(draft.id);
+  };
+
+  const rescheduleCalendarDraft = async (draft) => {
+    const scheduledFor = scheduledForFromFields(scheduleDate, scheduleTime, scheduleTimezone);
+    if (!scheduledFor) {
+      setNotice({ tone: "error", text: "Choose a valid date and time for the selected timezone." });
+      return;
+    }
+    if (new Date(scheduledFor).getTime() <= Date.now()) {
+      setNotice({ tone: "error", text: "Choose a future date and time before rescheduling." });
+      return;
+    }
+    setBusyId(draft.id);
+    setNotice(null);
+    try {
+      await centerRef.current.scheduleDraft(draft.id, scheduledFor, scheduleTimezone);
+      setScheduleDraftId(null);
+      setCalendarRescheduleDraftId(null);
+      setSelectedCalendarDraftId(draft.id);
+      setNotice({ tone: "success", text: `${draft.title || "Draft"} rescheduled for ${readableDate(scheduledFor, true)} (${scheduleTimezone}).` });
+    } catch (error) {
+      setNotice({ tone: error.code === "unsupported_capability" ? "neutral" : "error", text: error.message || "Unable to reschedule draft." });
+    } finally {
+      setBusyId(null);
+      void reload();
+    }
+  };
+
   const scheduleDraft = async (draft) => {
     const scheduledFor = scheduledForFromFields(scheduleDate, scheduleTime, scheduleTimezone);
     if (!scheduledFor) {
@@ -848,7 +885,10 @@ export default function PublishingStudio() {
     setNotice(null);
     try {
       await centerRef.current.cancelScheduledDraft(draft.id);
-      setNotice({ tone: "success", text: "Scheduled delivery cancelled. The draft remains available for editing." });
+      setSelectedCalendarDraftId(null);
+      if (scheduleDraftId === draft.id) setScheduleDraftId(null);
+      if (calendarRescheduleDraftId === draft.id) setCalendarRescheduleDraftId(null);
+      setNotice({ tone: "success", text: "Scheduled delivery cancelled. The draft remains available for editing in Queue." });
     } catch (error) {
       setNotice({ tone: "error", text: error.message || "Unable to cancel scheduled delivery." });
     } finally {
@@ -1109,16 +1149,21 @@ export default function PublishingStudio() {
                     <div key={dateKey} role="gridcell" aria-current={isToday ? "date" : undefined} className={`min-h-28 border-b border-r border-[var(--ms-color-border-subtle)] p-2 ${isCurrentMonth ? "bg-[var(--ms-color-surface)]" : "bg-black/10 text-[var(--ms-color-text-muted)]"}`}>
                       <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[10px] ${isToday ? "bg-[var(--ms-color-gold-primary)] font-semibold text-black" : "text-[var(--ms-color-text-secondary)]"}`}>{date.getDate()}</span>
                       <div className="mt-1 space-y-1">
-                        {entries.map((draft) => (
-                          <div key={draft.id} className="rounded border border-[rgba(212,168,88,0.2)] bg-[rgba(212,168,88,0.06)] px-1.5 py-1">
-                            <p className="truncate text-[9px] font-semibold text-[var(--ms-color-text-primary)]" title={draft.title || "Untitled Draft"}>{draft.title || "Untitled Draft"}</p>
-                            <p className="truncate text-[8px] text-[var(--ms-color-text-muted)]">{calendarTime(draft.scheduledAt, draft.timezone)}{draft.timezone ? ` · ${draft.timezone}` : ""}</p>
-                            <div className="mt-1 flex items-center justify-between gap-1">
+                        {entries.map((draft) => {
+                          const provider = publishingProviderRegistry.get(draft.provider);
+                          const draftPlatforms = draft.provider === PUBLISHING_PROVIDER_IDS.ZERNIO ? ZERNIO_CONNECTION_CATALOG : LEGACY_PLATFORM_OPTIONS;
+                          const details = publishingCalendarDetails(draft, { accounts, accountsProviderId: providerId, platforms: draftPlatforms, providerName: provider.name, status: draftStatus(draft) });
+                          const actions = publishingCalendarActions(draft, provider);
+                          const destinationLabel = details.destinations.map((destination) => destination.label).join(", ");
+                          return <div key={draft.id} className="rounded border border-[rgba(212,168,88,0.2)] bg-[rgba(212,168,88,0.06)] px-1.5 py-1">
+                            <button type="button" aria-expanded={selectedCalendarDraftId === draft.id} aria-label={`View ${draft.title || "scheduled draft"}${destinationLabel ? ` for ${destinationLabel}` : ""}`} onClick={() => setSelectedCalendarDraftId((current) => current === draft.id ? null : draft.id)} className="block w-full text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--ms-color-gold-primary)]">
+                              <p className="truncate text-[9px] font-semibold text-[var(--ms-color-text-primary)]" title={draft.title || "Untitled Draft"}>{draft.title || "Untitled Draft"}</p>
+                              {destinationLabel ? <p className="truncate text-[8px] text-[var(--ms-color-gold-muted)]">{destinationLabel}</p> : null}
+                              <p className="truncate text-[8px] text-[var(--ms-color-text-muted)]">{calendarTime(draft.scheduledAt, draft.timezone)}{draft.timezone ? ` · ${draft.timezone}` : ""}</p>
                               <StatusBadge tone="gold">{draftStatus(draft)}</StatusBadge>
-                              {draft.providerJobId && <button type="button" aria-label={`Cancel ${draft.title || "scheduled post"}`} disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button>}
-                            </div>
-                          </div>
-                        ))}
+                            </button>
+                          </div>;
+                        })}
                       </div>
                     </div>
                   );
@@ -1127,6 +1172,29 @@ export default function PublishingStudio() {
             </div>
           </div>
           {!calendarMonthHasScheduled ? <p role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">Nothing scheduled</p> : null}
+          {selectedCalendarDraft ? (() => {
+            const provider = publishingProviderRegistry.get(selectedCalendarDraft.provider);
+            const draftPlatforms = selectedCalendarDraft.provider === PUBLISHING_PROVIDER_IDS.ZERNIO ? ZERNIO_CONNECTION_CATALOG : LEGACY_PLATFORM_OPTIONS;
+            const details = publishingCalendarDetails(selectedCalendarDraft, { accounts, accountsProviderId: providerId, platforms: draftPlatforms, providerName: provider.name, status: draftStatus(selectedCalendarDraft) });
+            const actions = publishingCalendarActions(selectedCalendarDraft, provider);
+            return <WorkspaceCard className="mt-4 border-[var(--ms-color-gold-primary)] p-4" aria-label={`Scheduled item details for ${details.title}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{details.title}</h3><StatusBadge tone={statusTone(details.status)}>{details.status}</StatusBadge></div>
+                  <p className="mt-2 text-[10px] text-[var(--ms-color-text-secondary)]">{details.destinations.map((destination) => destination.label).join(", ") || "No destination recorded"}</p>
+                  <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{details.providerName} · {publishingCalendarDateTime(details.scheduledAt, details.timezone)} · {details.timezone || "Timezone not recorded"}</p>
+                </div>
+                {details.media ? <div className="h-16 w-24 shrink-0 overflow-hidden rounded border border-[var(--ms-color-border-subtle)]"><AssetPreview asset={details.media} /></div> : null}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {actions.canEdit ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Edit</SecondaryButton> : null}
+                {actions.canReschedule ? <SecondaryButton type="button" onClick={() => openCalendarReschedule(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Reschedule</SecondaryButton> : null}
+                {actions.canCancel ? <SecondaryButton type="button" disabled={busyId === `cancel:${selectedCalendarDraft.id}`} onClick={() => void cancelScheduledDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Cancel</SecondaryButton> : null}
+                <button type="button" onClick={() => setSelectedCalendarDraftId(null)} className="min-h-8 px-3 py-2 text-[10px] font-semibold text-[var(--ms-color-text-muted)]">Close</button>
+              </div>
+              {calendarRescheduleDraftId === selectedCalendarDraft.id && scheduleDraftId === selectedCalendarDraft.id && actions.canReschedule ? <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Reschedule ${details.title}`} /><PrimaryButton type="button" disabled={busyId === selectedCalendarDraft.id} onClick={() => void rescheduleCalendarDraft(selectedCalendarDraft)} className="min-h-9 px-4 py-2 text-xs">Save Reschedule</PrimaryButton><button type="button" onClick={() => { setScheduleDraftId(null); setCalendarRescheduleDraftId(null); }} className="min-h-9 px-2 text-[10px] font-semibold text-[var(--ms-color-text-muted)]">Cancel</button></div> : null}
+            </WorkspaceCard>;
+          })() : null}
         </div>
       </WorkspaceSection>}
 
@@ -1202,27 +1270,27 @@ export default function PublishingStudio() {
       </WorkspaceSection>}
 
       {activeView === "queue" && <WorkspaceSection title="Queue" description="Existing drafts and their current destinations, schedule, status, ownership, and actions." actions={<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge>}>
-        {drafts.length ? (
+        {queueDrafts.length ? (
           <div className="space-y-3">
-            {drafts.map((draft) => {
+            {queueDrafts.map((draft) => {
               const canEditDraft = publishingProviderRegistry.get(draft.provider).supportsCapability("updateDraft");
               return <WorkspaceCard key={draft.id} className={`p-5 ${focusedDraftId === draft.id ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge tone={statusTone(draftStatus(draft))}>{draftStatus(draft)}</StatusBadge>
+                      <StatusBadge tone={statusTone(draftStatus(draft))}>{isPublishingDraftNeedsAttention(draft) ? "Needs Attention" : draftStatus(draft)}</StatusBadge>
                       {draft.campaignName ? <StatusBadge tone="gold">{draft.campaignName}</StatusBadge> : null}
                     </div>
                     <h3 className="mt-3 text-sm font-semibold">{draft.title || "Untitled Draft"}</h3>
                     <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{draft.assets.length} {draft.assets.length === 1 ? "asset" : "assets"} · Updated {readableDate(draft.updatedAt, true)}</p>
-                    {[PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft)) && draft.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(draft.scheduledAt, true)} · {draft.timezone}</p> : null}
+                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(draft.scheduledAt, true)} · {draft.timezone}</p> : null}
                     {draft.error ? <p className="mt-2 text-[10px] text-[var(--ms-color-error)]">{draft.error}</p> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {canEditDraft ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Edit</SecondaryButton> : null}
                     <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                     <SecondaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
-                    {[PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED].includes(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
+                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
                     <SecondaryButton type="button" onClick={() => saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
                     <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
                     <button type="button" onClick={() => deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)]">Delete</button>
