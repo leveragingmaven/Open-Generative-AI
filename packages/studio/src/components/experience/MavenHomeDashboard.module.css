@@ -69,12 +69,18 @@
 .more[open] > summary {
   border-color: var(--ms-color-pink-primary);
 }
+.more[open] {
+  z-index: 60;
+}
 .morePanel {
   position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
+  z-index: 80;
+  top: auto;
   right: 0;
+  bottom: calc(100% + 8px);
   width: min(340px, calc(100vw - 48px));
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
@@ -314,7 +320,9 @@
   .morePanel {
     position: static;
     width: 100%;
+    max-height: none;
     margin-top: 8px;
+    overflow: visible;
     box-shadow: none;
   }
   .more[open] {
@@ -335,34 +343,39 @@
 
 /* Maven Workspace — compact navigation, spacious conversation canvas, anchored composer. */
 .page {
-  height: 100%;
-  overflow: hidden;
+  height: auto;
+  min-height: calc(100vh - 56px);
+  overflow: visible;
   background: #0d0d0e;
 }
 .page > main {
   display: flex;
   width: 100%;
   max-width: none;
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: calc(100vh - 76px);
   padding: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 .workspace {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
+  min-height: max(100%, calc(100vh - 76px));
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, .07);
   border-radius: 22px;
   background: #101011;
 }
 .sidebar {
+  position: sticky;
+  top: 10px;
   display: flex;
   flex: 0 0 250px;
+  align-self: flex-start;
   flex-direction: column;
   min-width: 0;
+  min-height: calc(100vh - 76px);
   padding: 20px 13px 14px;
   border-right: 1px solid rgba(255, 255, 255, .07);
   background: #111112;
@@ -503,8 +516,8 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
+  min-height: calc(100vh - 76px);
+  overflow: visible;
   background: radial-gradient(ellipse at 50% 33%, rgba(212,168,88,.035), transparent 44%), #101011;
 }
 .canvasHeader {
@@ -546,7 +559,9 @@
 .transcript {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  max-height: calc(100vh - 230px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 34px 22px 24px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,.12) transparent;
@@ -573,8 +588,9 @@
 .userMessage { padding: 10px 15px; border: 1px solid rgba(212,168,88,.18); border-radius: 17px 17px 5px 17px; background: rgba(212,168,88,.095); color: #f4eee3; }
 .assistantMessage { color: #dedad4; }
 .composerDock {
-  position: relative;
-  z-index: 2;
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
   flex: 0 0 auto;
   width: min(100%, 850px);
   margin: 0 auto;
@@ -657,7 +673,7 @@
 .send:hover:not(:disabled) { background: #e0bb78; }
 .send:disabled { opacity: .38; }
 .attachmentSlot { height: 0; }
-.suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin-top: 13px; }
+.suggestions { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin-top: 13px; }
 .suggestions .pill { min-height: 31px; padding: 5px 10px; border-radius: 10px; background: rgba(255,255,255,.025); font-size: 10px; }
 .suggestions .pill svg { color: #b69a67; }
 .statusLine { flex: 0 0 auto; width: min(100%, 760px); margin: 0 auto 8px; color: #c9ab72; font-size: 11px; }
@@ -666,7 +682,7 @@
 @media (max-width: 760px) {
   .page > main { padding: 5px; }
   .workspace { border-radius: 16px; }
-  .sidebar { flex-basis: 62px; align-items: center; padding: 13px 6px; }
+  .sidebar { top: 5px; flex-basis: 62px; min-height: calc(100vh - 76px); align-items: center; padding: 13px 6px; }
   .brand { padding: 0; }
   .brand > span:last-child,.newChat > span,.newChat kbd,.navHeading,.navItem > span,.chatList,.sidebarFooter > p { display: none; }
   .brandMark { width: 38px; height: 38px; }
@@ -681,7 +697,9 @@
   .welcome { padding: 20px 16px 0; }
   .welcome h1 { max-width: 390px; font-size: clamp(21px, 6vw, 28px); }
   .welcome p { max-width: 350px; font-size: 11px; }
-  .composerDock { padding: 14px 11px max(12px, env(safe-area-inset-bottom)); }
+  .chatWorkspace { min-height: calc(100vh - 76px); }
+  .transcript { max-height: calc(100vh - 210px); }
+  .composerDock { bottom: 0; padding: 14px 11px max(12px, env(safe-area-inset-bottom)); }
   .composer { padding: 10px 9px 8px; border-radius: 17px; }
   .composerInputRow { padding: 2px 5px 9px; }
   .composer textarea { font-size: 16px; }

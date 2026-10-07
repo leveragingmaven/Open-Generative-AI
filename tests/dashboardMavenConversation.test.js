@@ -276,8 +276,8 @@ test("Dashboard degrades gracefully when controlled conversation is unavailable"
   assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy \|\| !mavenMessage\.trim\(\)\}/);
 });
 
-test("Maven Workspace shell exposes New Chat, Chats, Skills, Connectors, and Projects", () => {
-  for (const label of ["New Chat", "Chats", "Skills", "Connectors", "Projects"]) {
+test("Maven Workspace shell exposes New Chat, Chats, and existing studio actions", () => {
+  for (const label of ["New Chat", "Chats", "Content", "Image", "Video", "Audio", "More"]) {
     assert.ok(dashboardSource.includes(label), `expected ${label} in Maven Workspace navigation`);
   }
   assert.match(dashboardSource, /clearStoredDashboardSessionId\(window\.localStorage\)/);
@@ -290,8 +290,11 @@ test("Maven composer autosizes, hides its scrollbar, and stays anchored below a 
   assert.match(dashboardStyles, /\.composer textarea::-webkit-scrollbar \{ display: none/);
   assert.match(dashboardStyles, /scrollbar-width: none/);
   assert.match(dashboardStyles, /\.transcriptInner[\s\S]*?width: min\(100%, 760px\)/);
-  assert.match(dashboardStyles, /\.composerDock[\s\S]*?flex: 0 0 auto/);
-  assert.match(dashboardStyles, /\.transcript[\s\S]*?overflow: auto/);
+  assert.match(dashboardStyles, /\.composerDock\s*\{[\s\S]*?position: sticky;[\s\S]*?bottom: 0;[\s\S]*?flex: 0 0 auto/);
+  assert.match(dashboardStyles, /\.transcript\s*\{[\s\S]*?max-height: calc\(100vh - 230px\);[\s\S]*?overflow-y: auto/);
+  assert.match(dashboardStyles, /\.morePanel\s*\{[\s\S]*?position: absolute;[\s\S]*?bottom: calc\(100% \+ 8px\);[\s\S]*?max-height: min\(70vh, 420px\);[\s\S]*?overflow-y: auto/);
+  assert.match(dashboardStyles, /\.workspace\s*\{[\s\S]*?overflow: visible/);
+  assert.match(dashboardStyles, /\.chatWorkspace\s*\{[\s\S]*?overflow: visible/);
 });
 
 test("CreativeCanvas delegates wire behavior to the shared conversation client", () => {

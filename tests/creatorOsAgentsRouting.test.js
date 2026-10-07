@@ -6,6 +6,7 @@ const shellSource = readFileSync(new URL("../components/StandaloneShell.js", imp
 const createClientSource = readFileSync(new URL("../app/agents/create/AgentCreateClient.js", import.meta.url), "utf8");
 const editClientSource = readFileSync(new URL("../app/agents/edit/[id]/AgentEditClient.js", import.meta.url), "utf8");
 const mavenHomeSource = readFileSync(new URL("../packages/studio/src/components/experience/MavenHomeDashboard.jsx", import.meta.url), "utf8");
+const navigationSource = readFileSync(new URL("../packages/studio/src/studioNavigation.js", import.meta.url), "utf8");
 
 test("Creator OS Agents destination resolves to the Studio Agents workspace", () => {
   // The shell tab handler restores the generic /studio/:tabId route, so the
@@ -47,12 +48,22 @@ test("Other Studio destinations retain their existing routing", () => {
   assert.match(commandNavigateBlock, /router\.push\(route\);/);
 });
 
-test("Maven Workspace keeps its Agents destination available in the studio picker", () => {
-  // Maven Workspace keeps the existing studio shortcuts, including Agents, in its expandable picker.
-  assert.match(mavenHomeSource, /styles\.workspace/, "expected the Maven Workspace shell");
-  assert.match(mavenHomeSource, /MORE_ACTIONS\.map\(\(item\) => <QuickActionButton/);
+test("Maven Workspace sidebar uses existing Creator OS destinations", () => {
+  assert.match(mavenHomeSource, /WORKSPACE_NAVIGATION = \[/);
+  assert.match(mavenHomeSource, /title: "Workflows", icon: "repurpose", href: "\/studio\/workflows"/);
+  assert.match(mavenHomeSource, /title: "Publishing", icon: "publish", href: "\/studio\/publishing"/);
   assert.match(mavenHomeSource, /title: "Agents", icon: "design", href: "\/studio\/agents"/);
-  assert.doesNotMatch(mavenHomeSource, /\/agents\/create/);
+  assert.match(mavenHomeSource, /title: "Projects", icon: "library", href: "\/studio\/campaigns"/);
+  assert.match(mavenHomeSource, /WORKSPACE_NAVIGATION\.map\(\(item\)/);
+  assert.doesNotMatch(mavenHomeSource, /aria-label="Skills"/);
+  assert.doesNotMatch(mavenHomeSource, /aria-label="Connectors"/);
+
+  assert.match(navigationSource, /\{ id: 'workflow', label: 'Workflows', route: '\/studio\/workflows', tabIds: \['workflows'\] \}/);
+  assert.match(navigationSource, /\{ id: 'publishing', label: 'Publishing', route: '\/studio\/publishing', tabIds: \['publishing'\] \}/);
+  assert.match(navigationSource, /\{ id: 'campaigns', label: 'Campaigns', route: '\/studio\/campaigns', tabIds: \['campaigns'\] \}/);
+  assert.match(navigationSource, /id: 'agents',[\s\S]*?label: 'Agents'/);
+  assert.match(shellSource, /router\.push\(`\/studio\/\$\{tabId\}`\);/);
+  assert.doesNotMatch(mavenHomeSource, /href="\/studio\/mcp-cli"/);
 });
 
 test("Design Agent remains a separate Studio destination", () => {

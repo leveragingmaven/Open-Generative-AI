@@ -22,6 +22,12 @@ test("Studio home mounts the simple Dashboard and /studio/overview preserves the
   assert.ok(homeIndex !== -1, "expected MavenHomeDashboard with shell settings on the slugless studio home");
   assert.ok(overviewIndex !== -1, "expected MavenSyncDashboard preserved for the overview workspace");
   assert.ok(homeIndex < overviewIndex, "home must map to the Dashboard and overview to the Workspace overview");
+  assert.match(shellSource, /\{isHeaderVisible && \(/, "the global Creator OS header remains mounted on Studio home");
+  assert.match(shellSource, /<header className="sticky top-0 z-50[^\"]*h-14/, "the existing header stays available during home scrolling");
+  assert.doesNotMatch(shellSource, /isHeaderVisible && !isStudioHome/);
+  assert.match(shellSource, /isStudioHome \? "min-h-screen overflow-x-clip"/);
+  assert.match(shellSource, /isStudioHome \? "overflow-visible" : "min-h-0 overflow-hidden"/);
+  assert.match(shellSource, /isStudioHome \? "overflow-visible" : activeWorkspaceTab === 'publishing'/);
 });
 
 test("Dedicated workflow routes are not classified as Studio home", () => {

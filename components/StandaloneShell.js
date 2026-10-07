@@ -863,7 +863,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   const creativeShell = (
     <div
-      className="h-screen w-full bg-[#121212] text-white flex overflow-hidden"
+      className={`w-full bg-[#121212] text-white flex ${isStudioHome ? "min-h-screen overflow-x-clip" : "h-screen overflow-hidden"}`}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -872,10 +872,10 @@ const [characterTarget, setCharacterTarget] = useState(null);
 {dragOverlay}
 
       {/* Main column */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className={`flex-1 min-w-0 flex flex-col ${isStudioHome ? "overflow-visible" : "min-h-0 overflow-hidden"}`}>
         {/* Informational workspace header */}
-        {isHeaderVisible && !isStudioHome && (
-          <header className="relative z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-4 px-4 md:px-5">
+        {isHeaderVisible && (
+          <header className="sticky top-0 z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
               {!isStudioHome && (
                 <a
@@ -937,7 +937,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
         )}
 
         {/* Center content: the mounted studio */}
-        <div className={`flex-1 min-h-0 relative ${activeWorkspaceTab === 'publishing' ? 'overflow-clip' : 'overflow-hidden'} bg-[var(--ms-color-background)]`}>
+        <div className={`flex-1 min-w-0 relative ${isStudioHome ? "overflow-visible" : activeWorkspaceTab === 'publishing' ? 'min-h-0 overflow-clip' : 'min-h-0 overflow-hidden'} bg-[var(--ms-color-background)]`}>
           {isComingSoonRoute ? <ComingSoonStudio name={comingSoonName} /> : studioContent}
         </div>
       </div>

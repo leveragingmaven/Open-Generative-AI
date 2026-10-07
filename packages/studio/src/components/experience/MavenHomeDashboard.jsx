@@ -82,10 +82,15 @@ const MORE_ACTIONS = [
 
 const SECONDARY_ACTIONS = [
   { title: "Campaigns", icon: "library", href: "/studio/campaigns" },
-  { title: "Workflows", icon: "repurpose", href: "/studio/workflows" },
-  { title: "Publishing", icon: "publish", href: "/studio/publishing" },
   { title: "Creative Library", icon: "image", href: "/studio/asset-library" },
   { title: "Knowledge", icon: "content", href: "/studio/knowledge-center" },
+];
+
+const WORKSPACE_NAVIGATION = [
+  { title: "Workflows", icon: "repurpose", href: "/studio/workflows" },
+  { title: "Publishing", icon: "publish", href: "/studio/publishing" },
+  { title: "Agents", icon: "design", href: "/studio/agents" },
+  { title: "Projects", icon: "library", href: "/studio/campaigns" },
 ];
 
 function QuickActionButton({ item }) {
@@ -317,8 +322,6 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
             <Icon type="attach" size={17} />
           </button>
           <span className={styles.modelPill}><Icon type="sparkle" size={14} /> Maven Intelligence <Icon type="chevron" size={13} /></span>
-          <a className={styles.toolLink} href="/studio/knowledge-center">Skills</a>
-          <a className={styles.toolLink} href="/studio/mcp-cli">Connectors</a>
         </div>
         <div className={styles.composerSubmitGroup}>
           <span id="maven-composer-status" role="status" className={styles.composerStatus}>
@@ -353,9 +356,11 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
               <Icon type="chat" size={17} /><span>Chats</span>
               {hasMavenConversation ? <span className={styles.navCount}>1</span> : null}
             </button>
-            <a className={styles.navItem} href="/studio/knowledge-center" aria-label="Skills" title="Skills"><Icon type="skills" size={17} /><span>Skills</span></a>
-            <a className={styles.navItem} href="/studio/mcp-cli" aria-label="Connectors" title="Connectors"><Icon type="connectors" size={17} /><span>Connectors</span></a>
-            <a className={styles.navItem} href="/studio/campaigns" aria-label="Projects" title="Projects"><Icon type="library" size={17} /><span>Projects</span></a>
+            {WORKSPACE_NAVIGATION.map((item) => (
+              <a key={item.href} className={styles.navItem} href={item.href} aria-label={item.title} title={item.title}>
+                <Icon type={item.icon} size={17} /><span>{item.title}</span>
+              </a>
+            ))}
           </nav>
           <div className={styles.chatList}>
             <div className={styles.chatListHeading}><span>Recent chats</span><Icon type="chevron" size={14} /></div>
