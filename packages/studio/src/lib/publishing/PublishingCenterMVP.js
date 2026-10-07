@@ -269,6 +269,18 @@ export class PublishingCenterMVP {
     return await this.publishingProvider.getConnectedAccounts();
   }
 
+  async getEngagementEntitlement() {
+    if (!this.publishingProvider.getEngagementEntitlement) return null;
+    return await this.publishingProvider.getEngagementEntitlement();
+  }
+
+  async disconnectAccount(accountId) {
+    if (!this.publishingProvider.disconnectAccount) {
+      throw new UnsupportedPublishingCapabilityError("disconnectAccount", this.publishingProvider.id);
+    }
+    return await this.publishingProvider.disconnectAccount(accountId);
+  }
+
   async listAutomations() {
     if (!this.publishingProvider.listAutomations) return [];
     return await this.publishingProvider.listAutomations();
@@ -311,10 +323,14 @@ export class PublishingCenterMVP {
 
   async connectAccount(platform, options = {}) {
     if (!this.publishingProvider.connectAccount) throw new Error("Connected accounts are unavailable");
+    const input = typeof platform === "object" && platform !== null
+      ? platform
+      : { ...options, platform };
     return await this.publishingProvider.connectAccount({
-      platform,
-      externalUserId: options.externalUserId,
-      redirectTo: options.redirectTo,
+      platform: input.platform,
+      externalUserId: input.externalUserId,
+      redirectTo: input.redirectTo,
+      reconnectAccountId: input.reconnectAccountId,
     });
   }
 

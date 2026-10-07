@@ -5,6 +5,7 @@ import { MySqlZernioRepository, newZernioProfileName } from './zernioRepository.
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
 import { resolveZernioMedia, unsafeAddress } from './zernioMediaResolver.js';
 import { getZernioConnectionOption, isZernioSpecialConnection } from '../../packages/studio/src/lib/publishing/zernioConnectionCatalog.js';
+import { zernioEngagementEntitlement } from '../../packages/studio/src/lib/publishing/zernioEntitlements.js';
 
 function requiredIdentity(identity) {
   const accountId = String(identity?.accountId || '').trim();
@@ -192,7 +193,24 @@ export async function ensureZernioProfile({ identity, repository = new MySqlZern
   }
 }
 
-export async function getZernioConnectUrl({ identity, platform, redirectUrl, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+export async function getZernioEngagementEntitlement({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const owner = requiredIdentity(identity);
+  const [accountResult, storedEntitlement] = await Promise.all([
+    listTenantZernioAccounts({ identity: owner, repository, client }),
+    repository.getEngagementEntitlement(owner),
+  ]);
+  return zernioEngagementEntitlement(accountResult.accounts, storedEntitlement?.purchasedEngagementAccounts || 0);
+}
+
+function accountLimitError(entitlement) {
+  const error = new Error(`You’ve used your ${entitlement.allowedEngagementAccounts} included engagement accounts.`);
+  error.code = 'zernio_engagement_account_limit';
+  error.status = 409;
+  error.entitlement = entitlement;
+  return error;
+}
+
+export async function getZernioConnectUrl({ identity, platform, redirectUrl, reconnectAccountId = null, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
   const option = getZernioConnectionOption(platform);
   if (!option) {
@@ -208,13 +226,39 @@ export async function getZernioConnectUrl({ identity, platform, redirectUrl, rep
     throw error;
   }
   const profile = await ensureZernioProfile({ identity: owner, repository, client });
+  const reconnecting = reconnectAccountId
+    ? await repository.getAccount({ ...owner, zernioProfileId: profile.zernioProfileId, zernioAccountId: String(reconnectAccountId) })
+    : null;
+  if (reconnectAccountId && (!reconnecting || (!reconnecting.needsReconnect && reconnecting.isActive !== false))) {
+    throw Object.assign(new Error('The selected Maven Social account cannot be reconnected.'), { code: 'zernio_account_not_owned', status: 403 });
+  }
+  const entitlement = await getZernioEngagementEntitlement({ identity: owner, repository, client });
+  if (!reconnecting && !entitlement.canConnectEngagementAccount) throw accountLimitError(entitlement);
   const query = { profileId: profile.zernioProfileId };
   if (redirectUrl) query.redirect_url = redirectUrl;
   const response = await client.connect.getConnectUrl({ path: { platform: option.zernioPlatform }, query });
   const data = unwrapResponse(response, 'Unable to start the Maven Social account connection.');
+  if (data.account || data.accounts) {
+    const returnedAccounts = Array.isArray(data.accounts) ? data.accounts : [data.account];
+    const accounts = returnedAccounts.map((account) => normalizeZernioAccount(account, profile, owner)).filter(Boolean);
+    const stored = await repository.saveAccounts({ ...owner, zernioProfileId: profile.zernioProfileId, accounts });
+    const refreshed = await getZernioEngagementEntitlement({ identity: owner, repository, client });
+    return { accounts: stored.map(sanitizeZernioAccount), entitlement: refreshed };
+  }
   const authUrl = data.authUrl || data.authorizationUrl || data.url;
   if (!authUrl) throw sanitizeZernioError({ code: 'zernio_invalid_connect_response' }, 'Zernio did not return a connection URL.');
   return { authUrl: String(authUrl), state: data.state || null };
+}
+
+export async function disconnectTenantZernioAccount({ identity, zernioAccountId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const owner = requiredIdentity(identity);
+  const profile = await ensureZernioProfile({ identity: owner, repository, client });
+  const account = await repository.getAccount({ ...owner, zernioProfileId: profile.zernioProfileId, zernioAccountId: String(zernioAccountId || '') });
+  if (!account) throw Object.assign(new Error('The requested social account is not available to this tenant.'), { code: 'zernio_account_not_owned', status: 403 });
+  await client.accounts.deleteAccount({ path: { accountId: String(account.zernioAccountId) } });
+  await repository.removeAccount({ ...owner, zernioProfileId: profile.zernioProfileId, zernioAccountId: String(account.zernioAccountId) });
+  const entitlement = await getZernioEngagementEntitlement({ identity: owner, repository, client });
+  return { success: true, accountId: String(account.zernioAccountId), entitlement };
 }
 
 export async function listTenantZernioAccounts({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
@@ -225,9 +269,11 @@ export async function listTenantZernioAccounts({ identity, repository = new MySq
     .map((account) => normalizeZernioAccount(account, profile, owner))
     .filter(Boolean);
   const stored = await repository.saveAccounts({ ...owner, zernioProfileId: profile.zernioProfileId, accounts });
+  const entitlement = zernioEngagementEntitlement(stored.map(sanitizeZernioAccount), (await repository.getEngagementEntitlement(owner))?.purchasedEngagementAccounts || 0);
   return {
     profile: sanitizeZernioProfile(profile),
     accounts: stored.map(sanitizeZernioAccount),
+    entitlement,
   };
 }
 
@@ -916,10 +962,11 @@ export async function cancelTenantZernioScheduledPost({ identity, postId, reposi
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
+  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_engagement_account_limit', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
-  const safe = new Error(safeProviderCode ? error.message : fallback);
+  const safe = new Error(safeProviderCode || error?.code === 'zernio_engagement_account_limit' ? error.message : fallback);
   safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';
   safe.status = [400, 401, 402, 403, 409, 501].includes(error?.status) ? error.status : 502;
+  if (error?.code === 'zernio_engagement_account_limit') safe.entitlement = error.entitlement;
   return safe;
 }

@@ -35,6 +35,7 @@ export class ZernioRepository {
   async listAccounts() { throw new Error('ZernioRepository.listAccounts() must be implemented'); }
   async saveAccounts() { throw new Error('ZernioRepository.saveAccounts() must be implemented'); }
   async getAccount() { throw new Error('ZernioRepository.getAccount() must be implemented'); }
+  async getEngagementEntitlement() { throw new Error('ZernioRepository.getEngagementEntitlement() must be implemented'); }
 }
 
 export class MySqlZernioRepository extends ZernioRepository {
@@ -74,6 +75,21 @@ export class MySqlZernioRepository extends ZernioRepository {
   }
 
   async saveAccounts({ accountId, creatorIdentityKey, zernioProfileId, accounts = [] }) {
+    if (accounts.length > 0) {
+      const ids = accounts.map((account) => String(account.zernioAccountId));
+      const placeholders = ids.map(() => '?').join(', ');
+      await this.db.query(
+        `UPDATE zernio_connected_accounts SET is_active = FALSE, status = 'disconnected'
+         WHERE account_id = ? AND creator_identity_key = ? AND zernio_profile_id = ? AND zernio_account_id NOT IN (${placeholders})`,
+        [accountId, creatorIdentityKey, zernioProfileId, ...ids],
+      );
+    } else {
+      await this.db.query(
+        `UPDATE zernio_connected_accounts SET is_active = FALSE, status = 'disconnected'
+         WHERE account_id = ? AND creator_identity_key = ? AND zernio_profile_id = ?`,
+        [accountId, creatorIdentityKey, zernioProfileId],
+      );
+    }
     for (const account of accounts) {
       await this.db.query(
         `INSERT INTO zernio_connected_accounts
@@ -118,6 +134,23 @@ export class MySqlZernioRepository extends ZernioRepository {
     );
     return accountFromRow(rows[0]);
   }
+
+  async removeAccount({ accountId, creatorIdentityKey, zernioProfileId, zernioAccountId }) {
+    await this.db.query(
+      `DELETE FROM zernio_connected_accounts
+       WHERE account_id = ? AND creator_identity_key = ? AND zernio_profile_id = ? AND zernio_account_id = ?`,
+      [accountId, creatorIdentityKey, zernioProfileId, zernioAccountId],
+    );
+  }
+
+  async getEngagementEntitlement({ accountId, creatorIdentityKey }) {
+    const [rows] = await this.db.query(
+      `SELECT purchased_engagement_accounts FROM zernio_engagement_entitlements
+       WHERE account_id = ? AND creator_identity_key = ? LIMIT 1`,
+      [accountId, creatorIdentityKey],
+    );
+    return { purchasedEngagementAccounts: Number(rows[0]?.purchased_engagement_accounts || 0) };
+  }
 }
 
 export class InMemoryZernioRepository extends ZernioRepository {
@@ -125,6 +158,7 @@ export class InMemoryZernioRepository extends ZernioRepository {
     super();
     this.profiles = new Map();
     this.accounts = new Map();
+    this.engagementEntitlements = new Map();
   }
 
   profileKey({ accountId, creatorIdentityKey }) { return `${accountId}:${creatorIdentityKey}`; }
@@ -158,6 +192,13 @@ export class InMemoryZernioRepository extends ZernioRepository {
   }
 
   async saveAccounts({ accountId, creatorIdentityKey, zernioProfileId, accounts = [] }) {
+    const currentKeys = new Set(accounts.map((account) => this.accountKey({ accountId, creatorIdentityKey, zernioProfileId, zernioAccountId: account.zernioAccountId })));
+    for (const [key, account] of this.accounts) {
+      if (account.accountId === String(accountId) && account.creatorIdentityKey === creatorIdentityKey && account.zernioProfileId === zernioProfileId && !currentKeys.has(key)) {
+        account.isActive = false;
+        account.status = 'disconnected';
+      }
+    }
     for (const input of accounts) {
       const record = {
         zernioAccountId: String(input.zernioAccountId),
@@ -179,6 +220,18 @@ export class InMemoryZernioRepository extends ZernioRepository {
 
   async getAccount(input) {
     return this.accounts.get(this.accountKey(input)) || null;
+  }
+
+  async removeAccount({ accountId, creatorIdentityKey, zernioProfileId, zernioAccountId }) {
+    this.accounts.delete(this.accountKey({ accountId, creatorIdentityKey, zernioProfileId, zernioAccountId }));
+  }
+
+  async getEngagementEntitlement({ accountId, creatorIdentityKey }) {
+    return { purchasedEngagementAccounts: this.engagementEntitlements.get(`${accountId}:${creatorIdentityKey}`) || 0 };
+  }
+
+  setPurchasedEngagementAccounts({ accountId, creatorIdentityKey, purchasedEngagementAccounts }) {
+    this.engagementEntitlements.set(`${accountId}:${creatorIdentityKey}`, Math.max(0, Number(purchasedEngagementAccounts) || 0));
   }
 }
 

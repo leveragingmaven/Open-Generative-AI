@@ -6,6 +6,7 @@ import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { effectivePublishingDraftStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { zernioEngagementEntitlement } from "../lib/publishing/zernioEntitlements.js";
 import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
@@ -222,6 +223,7 @@ export default function PublishingStudio() {
   const [drafts, setDrafts] = useState([]);
   const [history, setHistory] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [engagementEntitlement, setEngagementEntitlement] = useState(() => zernioEngagementEntitlement([]));
   const [providerId, setProviderId] = useState(PUBLISHING_PROVIDER_IDS.MUAPI);
   const [accountsError, setAccountsError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -293,7 +295,11 @@ export default function PublishingStudio() {
       });
       setHistory([...byId.values()]);
       try {
-        setAccounts(await center.getConnectedAccounts());
+        const connectedAccounts = await center.getConnectedAccounts();
+        setAccounts(connectedAccounts);
+        if (center.publishingProvider.id === PUBLISHING_PROVIDER_IDS.ZERNIO) {
+          setEngagementEntitlement(center.publishingProvider.engagementEntitlement || await center.getEngagementEntitlement() || zernioEngagementEntitlement(connectedAccounts));
+        }
         setAccountsError(null);
       } catch (error) {
         setAccounts([]);
@@ -310,7 +316,13 @@ export default function PublishingStudio() {
   const refreshConnectedAccounts = async (center = centerRef.current) => {
     if (!center) return;
     try {
-      setAccounts(await center.getConnectedAccounts());
+      const connectedAccounts = await center.getConnectedAccounts();
+      setAccounts(connectedAccounts);
+      if (center.publishingProvider.id === PUBLISHING_PROVIDER_IDS.ZERNIO) {
+        setEngagementEntitlement(center.publishingProvider.engagementEntitlement || await center.getEngagementEntitlement() || zernioEngagementEntitlement(connectedAccounts));
+      } else {
+        setEngagementEntitlement(zernioEngagementEntitlement([]));
+      }
     } catch (error) {
       setAccountsError(error);
       // The account endpoint remains the source of truth; keep the current state on a transient refresh failure.
@@ -322,6 +334,7 @@ export default function PublishingStudio() {
     const center = new PublishingCenterMVP({ storage: window.localStorage, publishingProvider: provider });
     centerRef.current = center;
     setProviderId(nextProviderId);
+    if (nextProviderId !== PUBLISHING_PROVIDER_IDS.ZERNIO) setEngagementEntitlement(zernioEngagementEntitlement([]));
     await reload(center);
   };
 
@@ -706,9 +719,13 @@ export default function PublishingStudio() {
     setBusyId(`connect:${platform}`);
     setNotice(null);
     try {
-      const response = await centerRef.current.connectAccount(platform, {
-        redirectTo: window.location.href,
-      });
+      const reconnectingAccount = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO
+        ? accounts.find((account) => account.platform === providerPlatformId(option) && (account.needsReconnect || !account.connected))
+        : null;
+      const response = await centerRef.current.connectAccount(reconnectingAccount
+        ? { platform, reconnectAccountId: reconnectingAccount.id, redirectTo: window.location.href }
+        : platform, { redirectTo: window.location.href });
+      if (response.entitlement) setEngagementEntitlement(response.entitlement);
       const url = connectionUrl(response);
       if (url) {
         window.sessionStorage.setItem(PUBLISHING_OAUTH_RETURN_KEY, "1");
@@ -718,7 +735,32 @@ export default function PublishingStudio() {
       setNotice({ tone: "success", text: `${option.label} connection started.` });
       await reload();
     } catch (error) {
-      setNotice({ tone: "error", text: error.message || `Unable to connect ${option.label}.` });
+      if (error.code === "zernio_engagement_account_limit") {
+        setEngagementEntitlement(error.entitlement || { ...engagementEntitlement, canConnectEngagementAccount: false });
+        setNotice({ tone: "warning", text: error.message || `You’ve used your ${engagementEntitlement.allowedEngagementAccounts} engagement accounts.` });
+      } else if (error.code === "zernio_account_not_connected" && providerId === PUBLISHING_PROVIDER_IDS.ZERNIO) {
+        const existing = accounts.find((account) => account.platform === providerPlatformId(option) && (account.needsReconnect || !account.connected));
+        if (existing) {
+          setBusyId(`connect:${platform}`);
+          try {
+            const response = await centerRef.current.connectAccount({ platform, reconnectAccountId: existing.id, redirectTo: window.location.href });
+            const reconnectUrl = connectionUrl(response);
+            if (reconnectUrl) {
+              window.sessionStorage.setItem(PUBLISHING_OAUTH_RETURN_KEY, "1");
+              window.location.href = reconnectUrl;
+              return;
+            }
+            setNotice({ tone: "success", text: `${option.label} account reconnected.` });
+            await reload();
+          } catch (reconnectError) {
+            setNotice({ tone: "error", text: reconnectError.message || `Unable to reconnect ${option.label}.` });
+          }
+        } else {
+          setNotice({ tone: "error", text: error.message || `Unable to connect ${option.label}.` });
+        }
+      } else {
+        setNotice({ tone: "error", text: error.message || `Unable to connect ${option.label}.` });
+      }
     } finally {
       setBusyId(null);
     }
@@ -1081,7 +1123,7 @@ export default function PublishingStudio() {
             <option value={PUBLISHING_PROVIDER_IDS.ZERNIO}>Maven Social</option>
           </select>
         </div>
-        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social Publish Now and scheduling are available for connected accounts.</p> : null}
+        {isAccountOnlyProvider(providerId) ? <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><div><p className="text-xs font-semibold">{engagementEntitlement.connectedEngagementAccounts} of {engagementEntitlement.allowedEngagementAccounts} engagement accounts connected</p><p className="mt-1 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">{engagementEntitlement.canConnectEngagementAccount ? `${engagementEntitlement.includedEngagementAccounts} included accounts · Additional accounts +$6/month.` : `You’ve used all ${engagementEntitlement.allowedEngagementAccounts} engagement account slots (${engagementEntitlement.includedEngagementAccounts} included${engagementEntitlement.purchasedEngagementAccounts ? `, ${engagementEntitlement.purchasedEngagementAccounts} purchased` : ""}).`}</p></div>{!engagementEntitlement.canConnectEngagementAccount ? <div className="flex flex-wrap gap-2"><SecondaryButton type="button" onClick={() => setNotice({ tone: "neutral", text: "Add engagement account (+$6/month): billing checkout will be available later." })} className="min-h-9 px-3 py-2 text-[10px]">Add Account / Upgrade</SecondaryButton><span className="self-center text-[9px] text-[var(--ms-color-text-muted)]">Publishing-only: MuAPI where supported · CRM + social: GHL</span></div> : null}</div> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {platformOptions.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
             const platformKey = platform.key || platform.id;
@@ -1089,8 +1131,9 @@ export default function PublishingStudio() {
             const platformAccounts = allPlatformAccounts.filter((account) => account.connected !== false);
             const account = platformAccounts[0] || null;
             const connected = platformAccounts.length > 0;
-            const needsAttention = allPlatformAccounts.some((account) => !account.connected || [PUBLISHING_STATUS.FAILED, PUBLISHING_STATUS.CANCELLED, PUBLISHING_STATUS.UNKNOWN].includes(account.status));
+            const needsAttention = allPlatformAccounts.some((account) => account.needsReconnect || !account.connected || [PUBLISHING_STATUS.FAILED, PUBLISHING_STATUS.CANCELLED, PUBLISHING_STATUS.UNKNOWN].includes(account.status));
             const specialFlow = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && !platform.connectable;
+            const zernioAtLimit = providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && !engagementEntitlement.canConnectEngagementAccount;
             return (
               <WorkspaceCard key={platform.id} className="flex min-h-40 flex-col gap-3">
                 <div className="flex items-center gap-3">
@@ -1104,7 +1147,7 @@ export default function PublishingStudio() {
                 </div>
                 <div className="mt-auto flex items-center justify-between gap-2">
                   {needsAttention ? <StatusBadge tone="warning">Needs attention</StatusBadge> : connected ? <StatusBadge tone="success">Connected</StatusBadge> : specialFlow ? <StatusBadge tone="neutral">Setup coming</StatusBadge> : <StatusBadge tone="neutral">Not connected</StatusBadge>}
-                  {isReadOnlyProvider(providerId) ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : connected ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{platformAccounts.length > 1 ? `${platformAccounts.length} accounts` : "Connected"}</span> : specialFlow ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Coming separately</span> : platform.enabled !== false ? <SecondaryButton type="button" disabled={busyId === `connect:${platformKey}`} onClick={() => connectPlatform(platformKey)} className="min-h-8 px-3 py-2 text-[10px]">{needsAttention ? "Reconnect" : "Connect"}</SecondaryButton> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
+                  {isReadOnlyProvider(providerId) ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{accountsError?.code === "hub_session_expired" ? "Reconnect through Hub" : "Read-only discovery"}</span> : specialFlow ? <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Coming separately</span> : needsAttention && providerId === PUBLISHING_PROVIDER_IDS.ZERNIO ? <div className="flex items-center gap-2"><StatusBadge tone="warning">Needs attention</StatusBadge><SecondaryButton type="button" disabled={busyId === `connect:${platformKey}`} onClick={() => connectPlatform(platformKey)} className="min-h-8 px-2 py-2 text-[9px]">Reconnect</SecondaryButton><SecondaryButton type="button" disabled={busyId === `disconnect:${account?.id}`} onClick={async () => { if (!account?.id || !window.confirm(`Disconnect ${account.name || platform.label}? This frees one engagement account slot.`)) return; setBusyId(`disconnect:${account.id}`); try { await centerRef.current.disconnectAccount(account.id); setNotice({ tone: "success", text: "Maven Social account disconnected. The engagement account slot is available again." }); await reload(); } catch (error) { setNotice({ tone: "error", text: error.message || "Unable to disconnect account." }); } finally { setBusyId(null); } }} className="min-h-8 px-2 py-2 text-[9px]">Disconnect</SecondaryButton></div> : connected ? <div className="flex items-center gap-2"><span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">{platformAccounts.length > 1 ? `${platformAccounts.length} accounts` : "Connected"}</span>{providerId === PUBLISHING_PROVIDER_IDS.ZERNIO && engagementEntitlement.canConnectEngagementAccount ? <SecondaryButton type="button" disabled={busyId === `connect:${platformKey}`} onClick={() => connectPlatform(platformKey)} className="min-h-8 px-2 py-2 text-[9px]">Add account</SecondaryButton> : null}{providerId === PUBLISHING_PROVIDER_IDS.ZERNIO ? <SecondaryButton type="button" disabled={busyId === `disconnect:${account.id}`} onClick={async () => { if (!window.confirm(`Disconnect ${account.name || platform.label}? This frees one engagement account slot.`)) return; setBusyId(`disconnect:${account.id}`); try { await centerRef.current.disconnectAccount(account.id); setNotice({ tone: "success", text: "Maven Social account disconnected. The engagement account slot is available again." }); await reload(); } catch (error) { setNotice({ tone: "error", text: error.message || "Unable to disconnect account." }); } finally { setBusyId(null); } }} className="min-h-8 px-2 py-2 text-[9px]">Disconnect</SecondaryButton> : null}</div> : platform.enabled !== false && !zernioAtLimit ? <SecondaryButton type="button" disabled={busyId === `connect:${platformKey}`} onClick={() => connectPlatform(platformKey)} className="min-h-8 px-3 py-2 text-[10px]">Connect</SecondaryButton> : zernioAtLimit ? <span className="text-right text-[9px] text-[var(--ms-color-gold-muted)]">Add account to connect</span> : <span className="text-right text-[9px] text-[var(--ms-color-text-muted)]">Unavailable</span>}
                 </div>
               </WorkspaceCard>
             );

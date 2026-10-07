@@ -21,6 +21,8 @@ import {
   listTenantZernioScheduledPosts,
   rescheduleTenantZernioPost,
   cancelTenantZernioScheduledPost,
+  disconnectTenantZernioAccount,
+  getZernioEngagementEntitlement,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
 
@@ -33,6 +35,7 @@ function routeKey(path = []) {
   if (path.length === 0) return '';
   if (path.join('/') === 'accounts') return 'accounts';
   if (path.join('/') === 'accounts/connect') return 'accounts/connect';
+  if (path.join('/') === 'accounts/entitlement') return 'accounts/entitlement';
   if (path.join('/') === 'posts') return 'posts';
   if (path[0] === 'posts' && path.length === 2) return 'posts/:postId';
   if (path.join('/') === 'profile') return 'profile';
@@ -123,6 +126,14 @@ export async function handleZernioPublishingRequest(request, {
       return NextResponse.json(await listTenantZernioAccounts({ identity: auth.identity, repository, client }));
     } catch (error) {
       return jsonError(error, 'Unable to load Maven Social accounts.');
+    }
+  }
+
+  if (request.method === 'GET' && key === 'accounts/entitlement') {
+    try {
+      return NextResponse.json({ entitlement: await getZernioEngagementEntitlement({ identity: auth.identity, repository, client }) });
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social account entitlements.');
     }
   }
 
@@ -308,6 +319,14 @@ export async function handleZernioPublishingRequest(request, {
     }
   }
 
+  if (request.method === 'DELETE' && key === 'accounts/:accountId') {
+    try {
+      return NextResponse.json(await disconnectTenantZernioAccount({ identity: auth.identity, zernioAccountId: resolvedParams.path[1], repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to disconnect this Maven Social account.');
+    }
+  }
+
   if (request.method === 'POST' && key === 'accounts/connect') {
     try {
       const input = await body(request);
@@ -315,6 +334,7 @@ export async function handleZernioPublishingRequest(request, {
         identity: auth.identity,
         platform: input.platform,
         redirectUrl: sameOriginRedirect(request, input.redirectTo || input.redirect_to),
+        reconnectAccountId: input.reconnectAccountId || input.reconnect_account_id,
         repository,
         client,
       });

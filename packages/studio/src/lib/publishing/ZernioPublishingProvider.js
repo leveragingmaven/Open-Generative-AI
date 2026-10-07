@@ -32,7 +32,21 @@ export class ZernioPublishingProvider extends PublishingProvider {
 
   async getConnectedAccounts() {
     const response = await this.request('/accounts');
+    this.engagementEntitlement = response.entitlement || null;
     return Array.isArray(response.accounts) ? response.accounts : [];
+  }
+
+  async getEngagementEntitlement() {
+    if (this.engagementEntitlement) return this.engagementEntitlement;
+    const response = await this.request('/accounts/entitlement');
+    this.engagementEntitlement = response.entitlement || null;
+    return this.engagementEntitlement;
+  }
+
+  async disconnectAccount(accountId) {
+    const result = await this.request(`/accounts/${encodeURIComponent(String(accountId))}`, { method: 'DELETE' });
+    if (this.engagementEntitlement) this.engagementEntitlement = { ...this.engagementEntitlement, connectedEngagementAccounts: Math.max(0, this.engagementEntitlement.connectedEngagementAccounts - 1) };
+    return result;
   }
 
   async listAutomations() {
@@ -79,13 +93,14 @@ export class ZernioPublishingProvider extends PublishingProvider {
 
   connectAccount(platformOrPayload, options = {}) {
     const payload = typeof platformOrPayload === 'string'
-      ? { platform: platformOrPayload, redirectTo: options.redirectTo }
+      ? { platform: platformOrPayload, ...options }
       : platformOrPayload || {};
     return this.request('/accounts/connect', {
       method: 'POST',
       body: {
         platform: payload.platform,
         redirectTo: payload.redirectTo || payload.redirect_to,
+        reconnectAccountId: payload.reconnectAccountId || payload.reconnect_account_id,
       },
     });
   }

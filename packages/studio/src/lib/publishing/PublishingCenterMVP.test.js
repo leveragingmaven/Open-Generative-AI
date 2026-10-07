@@ -249,6 +249,19 @@ test("scheduleDraft leaves the stored draft unchanged when provider submission f
   assert.equal(center.getDrafts()[0].scheduledAt, null);
 });
 
+test("connectAccount forwards explicit reconnection targets without altering platform-only calls", async () => {
+  const calls = [];
+  const provider = new ZernioPublishingProvider({ fetchFn: async (url, options = {}) => {
+    calls.push({ url, body: options.body ? JSON.parse(options.body) : null });
+    return { ok: true, json: async () => ({ authUrl: "https://zernio.test/reconnect" }) };
+  } });
+  const center = new PublishingCenterMVP({ storage: createMemoryStorage(), publishingProvider: provider });
+  await center.connectAccount("instagram", { redirectTo: "https://creator.test/studio/publishing" });
+  await center.connectAccount({ platform: "instagram", reconnectAccountId: "account-1", redirectTo: "https://creator.test/studio/publishing" });
+  assert.equal(calls[0].body.reconnectAccountId, undefined);
+  assert.equal(calls[1].body.reconnectAccountId, "account-1");
+});
+
 test("getRemoteHistory skips providers that inherit the unsupported default", async () => {
   let fetchCalled = false;
   const provider = new GhlHubPublishingProvider({ fetchFn: async () => { fetchCalled = true; } });

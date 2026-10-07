@@ -9,6 +9,8 @@ import {
   getTenantZernioAccount,
   getZernioConnectUrl,
   listTenantZernioAccounts,
+  getZernioEngagementEntitlement,
+  disconnectTenantZernioAccount,
   normalizeZernioAccount,
 } from '../src/lib/zernioSocialService.js';
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from '../packages/studio/src/lib/publishing/zernioOAuth.js';
@@ -44,6 +46,11 @@ function fakeClient() {
       listAccounts: async ({ query }) => {
         calls.push({ method: 'listAccounts', query });
         return { data: { accounts: accounts.get(query.profileId) || [] } };
+      },
+      deleteAccount: async ({ path }) => {
+        calls.push({ method: 'deleteAccount', path });
+        for (const [profileId, entries] of accounts) accounts.set(profileId, entries.filter((entry) => String(entry._id || entry.id) !== String(path.accountId)));
+        return { data: { message: 'disconnected' } };
       },
     },
     seedAccounts(profileId, value) {
@@ -110,6 +117,114 @@ test('connect URL always uses the server-resolved tenant profile', async () => {
   assert.equal(call.input.query.profileId, 'profile-1');
   assert.equal(call.input.query.profileId, (await repository.getProfile({ ...tenantA, creatorIdentityKey: tenantA.identityKey })).zernioProfileId);
   assert.equal(call.input.query.tenantId, undefined);
+});
+
+test('engagement account entitlements enforce two included connections, extras, and release on disconnect', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const profile = await ensureZernioProfile({ identity: tenantA, repository, client });
+  const entitlement0 = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(entitlement0.connectedEngagementAccounts, 0);
+  assert.equal(entitlement0.allowedEngagementAccounts, 2);
+  assert.equal(entitlement0.canConnectEngagementAccount, true);
+
+  const first = await getZernioConnectUrl({ identity: tenantA, platform: 'instagram', repository, client });
+  assert.match(first.authUrl, /instagram/);
+  client.seedAccounts(profile.zernioProfileId, [{ _id: 'account-1', platform: 'instagram', isActive: true }]);
+  const entitlement1 = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(entitlement1.connectedEngagementAccounts, 1);
+  assert.equal(entitlement1.canConnectEngagementAccount, true);
+  const second = await getZernioConnectUrl({ identity: tenantA, platform: 'facebook', repository, client });
+  assert.match(second.authUrl, /facebook/);
+
+  client.seedAccounts(profile.zernioProfileId, [
+    { _id: 'account-1', platform: 'instagram', isActive: true },
+    { _id: 'account-2', platform: 'facebook', isActive: true },
+  ]);
+  const entitlement2 = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(entitlement2.connectedEngagementAccounts, 2);
+  assert.equal(entitlement2.canConnectEngagementAccount, false);
+  const connectCallsBeforeLimit = client.calls.filter((call) => call.method === 'getConnectUrl').length;
+  await assert.rejects(
+    () => getZernioConnectUrl({ identity: tenantA, platform: 'youtube', repository, client }),
+    (error) => error.code === 'zernio_engagement_account_limit' && error.status === 409,
+  );
+  await repository.saveAccounts({ ...tenantA, creatorIdentityKey: tenantA.identityKey, zernioProfileId: profile.zernioProfileId, accounts: [
+    { zernioAccountId: 'account-1', platform: 'instagram', isActive: true, needsReconnect: true },
+    { zernioAccountId: 'account-2', platform: 'facebook', isActive: true },
+  ] });
+  const reconnect = await getZernioConnectUrl({ identity: tenantA, platform: 'instagram', reconnectAccountId: 'account-1', repository, client });
+  assert.match(reconnect.authUrl, /instagram/);
+  assert.equal(client.calls.filter((call) => call.method === 'getConnectUrl').length, connectCallsBeforeLimit + 1);
+  assert.equal(client.calls.findLast((call) => call.method === 'getConnectUrl').input.query.profileId, profile.zernioProfileId);
+  const connectCallsAfterReconnect = client.calls.filter((call) => call.method === 'getConnectUrl').length;
+
+  const blockedRequest = new Request('https://creator.test/api/publishing/zernio/accounts/connect', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'youtube', redirectTo: 'https://creator.test/studio/publishing' }),
+  });
+  const blockedResponse = await handleZernioPublishingRequest(blockedRequest, {
+    params: { path: ['accounts', 'connect'] }, authenticate: async () => ({ identity: tenantA }),
+    rateLimit: () => null, repository, client,
+  });
+  assert.equal(blockedResponse.status, 409);
+  const blockedPayload = await blockedResponse.json();
+  assert.equal(blockedPayload.code, 'zernio_engagement_account_limit');
+  assert.match(blockedPayload.error, /used your 2 included engagement accounts/);
+  assert.equal(client.calls.filter((call) => call.method === 'getConnectUrl').length, connectCallsAfterReconnect);
+
+  await disconnectTenantZernioAccount({ identity: tenantA, zernioAccountId: 'account-1', repository, client });
+  const afterDisconnect = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(afterDisconnect.connectedEngagementAccounts, 1);
+  assert.equal(afterDisconnect.canConnectEngagementAccount, true);
+  const replacement = await getZernioConnectUrl({ identity: tenantA, platform: 'youtube', repository, client });
+  assert.match(replacement.authUrl, /youtube/);
+
+  repository.setPurchasedEngagementAccounts({ accountId: tenantA.accountId, creatorIdentityKey: tenantA.identityKey, purchasedEngagementAccounts: 1 });
+  client.seedAccounts(profile.zernioProfileId, [
+    { _id: 'account-2', platform: 'facebook', isActive: true },
+    { _id: 'replacement-account', platform: 'youtube', isActive: true },
+  ]);
+  const twoWithExtra = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(twoWithExtra.allowedEngagementAccounts, 3);
+  assert.equal(twoWithExtra.connectedEngagementAccounts, 2);
+  assert.equal(twoWithExtra.canConnectEngagementAccount, true);
+  const third = await getZernioConnectUrl({ identity: tenantA, platform: 'reddit', repository, client });
+  assert.match(third.authUrl, /reddit/);
+
+  client.seedAccounts(profile.zernioProfileId, [
+    { _id: 'account-2', platform: 'facebook', isActive: true },
+    { _id: 'replacement-account', platform: 'youtube', isActive: true },
+    { _id: 'third-account', platform: 'reddit', isActive: true },
+  ]);
+  const withExtra = await getZernioEngagementEntitlement({ identity: tenantA, repository, client });
+  assert.equal(withExtra.purchasedEngagementAccounts, 1);
+  assert.equal(withExtra.allowedEngagementAccounts, 3);
+  assert.equal(withExtra.connectedEngagementAccounts, 3);
+  assert.equal(withExtra.canConnectEngagementAccount, false);
+
+  const profileB = await ensureZernioProfile({ identity: tenantB, repository, client });
+  client.seedAccounts(profileB.zernioProfileId, [
+    { _id: 'b1', platform: 'instagram', isActive: true },
+    { _id: 'b2', platform: 'facebook', isActive: true },
+    { _id: 'b3', platform: 'youtube', isActive: true },
+  ]);
+  await assert.rejects(
+    () => getZernioConnectUrl({ identity: tenantB, platform: 'reddit', repository, client }),
+    (error) => error.code === 'zernio_engagement_account_limit',
+  );
+});
+
+test('disconnecting a tenant-owned Zernio account deletes it remotely and frees the entitlement slot', async () => {
+  const repository = new InMemoryZernioRepository();
+  const client = fakeClient();
+  const profile = await ensureZernioProfile({ identity: tenantA, repository, client });
+  client.seedAccounts(profile.zernioProfileId, [{ _id: 'account-1', platform: 'instagram', isActive: true }]);
+  await listTenantZernioAccounts({ identity: tenantA, repository, client });
+  const result = await disconnectTenantZernioAccount({ identity: tenantA, zernioAccountId: 'account-1', repository, client });
+  assert.equal(result.success, true);
+  assert.equal(result.entitlement.connectedEngagementAccounts, 0);
+  assert.equal(client.calls.find((call) => call.method === 'deleteAccount').path.accountId, 'account-1');
 });
 
 test('connect URL validates the catalog and maps Maven X to Zernio twitter', async () => {
