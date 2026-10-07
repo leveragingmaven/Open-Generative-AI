@@ -208,6 +208,9 @@ export class PublishingCenterMVP {
       throw new PublishingValidationError("This scheduled draft has no provider job to cancel.", { field: "providerJobId" });
     }
     const provider = this.providerForDraft(draft);
+    if (!provider.supportsCapability("cancelScheduledPost")) {
+      throw new UnsupportedPublishingCapabilityError("cancelScheduledPost", provider.id);
+    }
     const result = await provider.cancelScheduledPost(providerJobId, { storage: this.storage });
     const cancelledDraft = provider.updateDraft({
       ...draft,

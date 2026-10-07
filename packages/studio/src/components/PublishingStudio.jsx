@@ -6,6 +6,7 @@ import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { effectivePublishingDraftStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
+import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
@@ -91,9 +92,24 @@ function readableDate(value, withTime = false) {
     : { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
-function dateTimeInputValue(date = new Date(Date.now() + 24 * 60 * 60 * 1000)) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const TIME_ZONE_OPTIONS = (() => {
+  try {
+    return ["UTC", ...Intl.supportedValuesOf("timeZone")].filter((zone, index, zones) => zones.indexOf(zone) === index).sort();
+  } catch {
+    return ["UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York", "Europe/London", "Europe/Paris", "Asia/Tokyo", "Australia/Sydney"];
+  }
+})();
+
+function ScheduleControls({ date, time, timezone, onDateChange, onTimeChange, onTimezoneChange, labelPrefix }) {
+  const timezones = [...new Set([timezone, ...TIME_ZONE_OPTIONS])].filter(Boolean).sort();
+  const today = scheduleFieldsForInstant(new Date(), timezone).date;
+  const clock = clockPartsFromTime(time);
+  const inputClass = "mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]";
+  return <>
+    <label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date</span><input aria-label={`${labelPrefix} date`} type="date" min={today} value={date} onChange={(event) => onDateChange(event.target.value)} className={inputClass} /></label>
+    <fieldset className="block"><legend className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Time</legend><div className="mt-2 flex items-center gap-1"><select aria-label={`${labelPrefix} hour`} value={clock.hour} onChange={(event) => onTimeChange(timeFromClockParts(event.target.value, clock.minute, clock.period))} className={inputClass}>{Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")).map((hour) => <option key={hour} value={hour}>{hour}</option>)}</select><span>:</span><select aria-label={`${labelPrefix} minute`} value={clock.minute} onChange={(event) => onTimeChange(timeFromClockParts(clock.hour, event.target.value, clock.period))} className={inputClass}>{Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0")).map((minute) => <option key={minute} value={minute}>{minute}</option>)}</select><select aria-label={`${labelPrefix} AM or PM`} value={clock.period} onChange={(event) => onTimeChange(timeFromClockParts(clock.hour, clock.minute, event.target.value))} className={inputClass}><option value="AM">AM</option><option value="PM">PM</option></select></div></fieldset>
+    <label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Timezone</span><select aria-label={`${labelPrefix} timezone`} value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} className={inputClass}>{timezones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
+  </>;
 }
 
 function calendarDateKey(value, timezone) {
@@ -235,7 +251,9 @@ export default function PublishingStudio() {
   const [analyticsError, setAnalyticsError] = useState(null);
   const inboxRequestRef = useRef(0);
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
-  const [scheduleValue, setScheduleValue] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleTimezone, setScheduleTimezone] = useState(() => resolvedScheduleTimeZone());
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -707,32 +725,32 @@ export default function PublishingStudio() {
   };
 
   const openSchedule = (draft) => {
+    const timezone = draft.scheduledAt ? (draft.timezone || resolvedScheduleTimeZone()) : (draft.timezone && draft.timezone !== "UTC" ? draft.timezone : resolvedScheduleTimeZone());
+    const initialFields = scheduleFieldsForInstant(draft.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000), timezone);
     setScheduleDraftId(draft.id);
-    setScheduleValue(draft.scheduledAt ? dateTimeInputValue(new Date(draft.scheduledAt)) : dateTimeInputValue());
+    setScheduleDate(initialFields.date);
+    setScheduleTime(initialFields.time);
+    setScheduleTimezone(timezone);
   };
 
   const scheduleDraft = async (draft) => {
-    if (isAccountOnlyProvider(providerId)) {
-      setNotice({ tone: "neutral", text: "Maven Social scheduling will be enabled in a later phase." });
+    const scheduledFor = scheduledForFromFields(scheduleDate, scheduleTime, scheduleTimezone);
+    if (!scheduledFor) {
+      setNotice({ tone: "error", text: "Choose a valid date and time for the selected timezone." });
       return;
     }
-    if (!scheduleValue) {
-      setNotice({ tone: "error", text: "Choose a date and time before scheduling." });
-      return;
-    }
-    const scheduledAt = new Date(scheduleValue);
-    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+    if (new Date(scheduledFor).getTime() <= Date.now()) {
       setNotice({ tone: "error", text: "Choose a future date and time before scheduling." });
       return;
     }
-    if (!window.confirm(`Schedule ${draftField(draft, "title") || "this draft"} for ${readableDate(scheduledAt.toISOString(), true)}?`)) return;
+    if (!window.confirm(`Schedule ${draftField(draft, "title") || "this draft"} for ${readableDate(scheduledFor, true)} (${scheduleTimezone})?`)) return;
     setBusyId(draft.id);
     setNotice(null);
     try {
       const savedDraft = saveDraftEdits(draft, { silent: true });
-      await centerRef.current.scheduleDraft(savedDraft.id, scheduledAt.toISOString(), savedDraft.timezone || "UTC");
+      await centerRef.current.scheduleDraft(savedDraft.id, scheduledFor, scheduleTimezone);
       setScheduleDraftId(null);
-      setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} scheduled for ${readableDate(scheduledAt.toISOString(), true)}.` });
+      setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} scheduled for ${readableDate(scheduledFor, true)} (${scheduleTimezone}).` });
     } catch (error) {
       setNotice({
         tone: error.code === "unsupported_capability" ? "neutral" : "error",
@@ -955,7 +973,7 @@ export default function PublishingStudio() {
                 <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedDraft.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedDraft.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedDraft.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedDraft.accountIds?.[platform] || focusedDraft.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
                  <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
-                 {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date and time</span><input aria-label="Schedule date and time" type="datetime-local" min={dateTimeInputValue(new Date())} value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} className="mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" /></label><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button><span className="text-[10px] text-[var(--ms-color-text-muted)]">Timezone: {focusedDraft.timezone || "UTC"}</span></div>}
+                 {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
              ) : <EmptyState title="Start a new post" description="Write a post, upload an image or video, or choose existing creative work." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
@@ -1063,7 +1081,7 @@ export default function PublishingStudio() {
             <option value={PUBLISHING_PROVIDER_IDS.ZERNIO}>Maven Social</option>
           </select>
         </div>
-        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social Publish Now is available for connected accounts. Scheduling remains unavailable in this phase.</p> : null}
+        {isAccountOnlyProvider(providerId) ? <p className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">Maven Social Publish Now and scheduling are available for connected accounts.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {platformOptions.filter((platform) => providerId === PUBLISHING_PROVIDER_IDS.GHL_HUB ? ["facebook", "instagram", "threads", "pinterest"].includes(platform.id) : true).map((platform) => {
             const platformKey = platform.key || platform.id;
@@ -1121,7 +1139,7 @@ export default function PublishingStudio() {
                   </div>
                 </div>
 
-                {scheduleDraftId === draft.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Date and time</span><input aria-label={`Schedule ${draft.title || "draft"} date and time`} type="datetime-local" min={dateTimeInputValue(new Date())} value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} className="mt-2 min-h-10 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" /></label><SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => scheduleDraft(draft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button><span className="text-[10px] text-[var(--ms-color-text-muted)]">Timezone: {draft.timezone || "UTC"}</span></div>}
+                {scheduleDraftId === draft.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Schedule ${draft.title || "draft"}`} /><SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => scheduleDraft(draft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
 
                 <div className="mt-5 grid gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4 lg:grid-cols-[minmax(180px,0.4fr)_minmax(0,0.6fr)]">
                   <label className="block">

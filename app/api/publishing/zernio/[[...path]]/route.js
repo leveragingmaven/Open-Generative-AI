@@ -17,6 +17,10 @@ import {
   updateTenantCommentAutomation,
   deleteTenantCommentAutomation,
   publishZernioNow,
+  scheduleZernioPost,
+  listTenantZernioScheduledPosts,
+  rescheduleTenantZernioPost,
+  cancelTenantZernioScheduledPost,
   sanitizeZernioError,
 } from '../../../../../src/lib/zernioSocialService.js';
 
@@ -30,6 +34,7 @@ function routeKey(path = []) {
   if (path.join('/') === 'accounts') return 'accounts';
   if (path.join('/') === 'accounts/connect') return 'accounts/connect';
   if (path.join('/') === 'posts') return 'posts';
+  if (path[0] === 'posts' && path.length === 2) return 'posts/:postId';
   if (path.join('/') === 'profile') return 'profile';
   if (path.join('/') === 'inbox/conversations') return 'inbox/conversations';
   if (path.join('/') === 'analytics') return 'analytics';
@@ -234,10 +239,19 @@ export async function handleZernioPublishingRequest(request, {
     }
   }
 
+  if (request.method === 'GET' && key === 'posts') {
+    try {
+      return NextResponse.json(await listTenantZernioScheduledPosts({ identity: auth.identity, repository, client }));
+    } catch (error) {
+      return jsonError(error, 'Unable to load Maven Social scheduled posts.');
+    }
+  }
+
   if (request.method === 'POST' && key === 'posts') {
     try {
       const input = await body(request);
-      const result = await publishZernioNow({
+      const submitPost = input.scheduledFor ? scheduleZernioPost : publishZernioNow;
+      const result = await submitPost({
         identity: auth.identity,
         draftId: input.draftId,
         content: input.content,
@@ -245,6 +259,8 @@ export async function handleZernioPublishingRequest(request, {
         assetIds: Array.isArray(input.assetIds) ? input.assetIds : [],
         platforms: Array.isArray(input.platforms) ? input.platforms : [],
         accountIds: input.accountIds && typeof input.accountIds === 'object' ? input.accountIds : {},
+        scheduledFor: input.scheduledFor || null,
+        timezone: input.timezone || 'UTC',
         repository,
         assetRepository: assetRepository || (Array.isArray(input.assetIds) && input.assetIds.length ? new MySqlCreativeAssetRepository() : undefined),
         client,
@@ -252,11 +268,43 @@ export async function handleZernioPublishingRequest(request, {
       return NextResponse.json({
         status: result.status,
         postId: result.postId,
+        providerJobId: result.providerJobId || result.postId,
+        scheduledFor: result.scheduledFor || null,
+        timezone: result.timezone || null,
         platformResults: result.platformResults,
         publishedUrls: result.publishedUrls,
       }, { status: result.httpStatus });
     } catch (error) {
-      return jsonError(error, 'Unable to publish with Maven Social.');
+      return jsonError(error, 'Unable to publish or schedule with Maven Social.');
+    }
+  }
+
+  if (request.method === 'PUT' && key === 'posts/:postId') {
+    try {
+      const input = await body(request);
+      return NextResponse.json(await rescheduleTenantZernioPost({
+        identity: auth.identity,
+        postId: resolvedParams.path[1],
+        scheduledFor: input.scheduledFor,
+        timezone: input.timezone || 'UTC',
+        repository,
+        client,
+      }));
+    } catch (error) {
+      return jsonError(error, 'Unable to reschedule this Maven Social post.');
+    }
+  }
+
+  if (request.method === 'DELETE' && key === 'posts/:postId') {
+    try {
+      return NextResponse.json(await cancelTenantZernioScheduledPost({
+        identity: auth.identity,
+        postId: resolvedParams.path[1],
+        repository,
+        client,
+      }));
+    } catch (error) {
+      return jsonError(error, 'Unable to cancel this Maven Social post.');
     }
   }
 
@@ -284,5 +332,13 @@ export async function GET(request, context) {
 }
 
 export async function POST(request, context) {
+  return handleZernioPublishingRequest(request, context);
+}
+
+export async function PUT(request, context) {
+  return handleZernioPublishingRequest(request, context);
+}
+
+export async function DELETE(request, context) {
   return handleZernioPublishingRequest(request, context);
 }

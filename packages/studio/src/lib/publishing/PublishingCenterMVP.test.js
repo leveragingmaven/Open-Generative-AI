@@ -266,10 +266,36 @@ test("effective scheduled status is consistent and respects scheduling capabilit
   assert.equal(effectivePublishingDraftStatus(draft, true, Date.parse("2036-01-01T00:00:00Z")), PUBLISHING_STATUS.DRAFT);
 });
 
-test("Zernio advertises that scheduling is unavailable despite defining a rejecting method", () => {
-  const provider = new ZernioPublishingProvider({ fetchFn: async () => ({ ok: true, json: async () => ({}) }) });
-  assert.equal(provider.supportsCapability("schedulePost"), false);
-  assert.equal(provider.supportsCapability("getScheduledPosts"), true);
+test("Zernio schedule acceptance persists local status and calendar metadata; reschedule and cancel use the provider post id", async () => {
+  const calls = [];
+  const provider = new ZernioPublishingProvider({ fetchFn: async (url, options = {}) => {
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (options.method === "POST") return { ok: true, json: async () => ({ status: "scheduled", postId: "zernio-post-1", providerJobId: "zernio-post-1", scheduledFor: "2035-01-01T10:00:00.000Z", timezone: "America/Los_Angeles", platformResults: [{ platform: "instagram", status: "scheduled" }] }) };
+    if (options.method === "PUT") return { ok: true, json: async () => ({ postId: "zernio-post-1", status: "scheduled", scheduledFor: "2035-01-02T10:00:00.000Z", timezone: "UTC" }) };
+    return { ok: true, json: async () => ({ success: true }) };
+  } });
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({ caption: "Calendar post", platforms: ["instagram"], accountIds: { instagram: "account-1" } });
+  const scheduled = await center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "America/Los_Angeles");
+  assert.equal(scheduled.status, PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.SCHEDULED);
+  assert.equal(center.getDrafts()[0].providerJobId, "zernio-post-1");
+  assert.equal(center.getDrafts()[0].scheduledAt, "2035-01-01T10:00:00.000Z");
+  assert.equal(center.getDrafts()[0].timezone, "America/Los_Angeles");
+
+  await center.scheduleDraft(draft.id, "2035-01-02T10:00:00.000Z", "UTC");
+  assert.equal(center.getDrafts()[0].scheduledAt, "2035-01-02T10:00:00.000Z");
+  assert.equal(center.getDrafts()[0].timezone, "UTC");
+  await center.cancelScheduledDraft(draft.id);
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.CANCELLED);
+  assert.equal(center.getDrafts()[0].scheduledAt, null);
+  assert.deepEqual(calls.map(({ options }) => options.method), ["POST", "PUT", "DELETE"]);
+  assert.deepEqual(calls.map(({ url }) => url), [
+    "/api/publishing/zernio/posts",
+    "/api/publishing/zernio/posts/zernio-post-1",
+    "/api/publishing/zernio/posts/zernio-post-1",
+  ]);
 });
 
 test("duplicateDraft creates a fresh editable draft without provider submission identifiers", () => {

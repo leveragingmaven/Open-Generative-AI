@@ -102,10 +102,11 @@ export class ZernioPublishingProvider extends PublishingProvider {
     return { ok: true, draftId };
   }
 
-  async publishNow(draft = {}) {
+  async submitPost(draft = {}, scheduledAt = null) {
     const assetIds = Array.isArray(draft.assetIds)
       ? draft.assetIds
       : (Array.isArray(draft.assets) ? draft.assets.map((asset) => asset.assetId || asset.id).filter(Boolean) : []);
+    const scheduledFor = scheduledAt;
     const response = await this.request('/posts', {
       method: 'POST',
       body: {
@@ -115,49 +116,102 @@ export class ZernioPublishingProvider extends PublishingProvider {
         platforms: Array.isArray(draft.platforms) ? draft.platforms : [],
         accountIds: draft.accountIds || draft.platformAccountIds || {},
         firstComment: draft.firstComment || '',
+        ...(scheduledFor ? { scheduledFor: new Date(scheduledFor).toISOString(), timezone: draft.timezone || 'UTC' } : { publishNow: true }),
       },
     });
-    const status = response.status === 'published'
-      ? PUBLISHING_STATUS.PUBLISHED
-      : response.status === 'partially_published'
-        ? PUBLISHING_STATUS.PARTIALLY_PUBLISHED
-        : PUBLISHING_STATUS.FAILED;
+    const status = response.status === 'scheduled'
+      ? PUBLISHING_STATUS.SCHEDULED
+      : response.status === 'published'
+        ? PUBLISHING_STATUS.PUBLISHED
+        : response.status === 'partially_published'
+          ? PUBLISHING_STATUS.PARTIALLY_PUBLISHED
+          : PUBLISHING_STATUS.FAILED;
     const platformResults = Object.fromEntries((response.platformResults || []).map((result) => [result.platform, {
       platform: result.platform,
-      status: result.status === 'published' ? PUBLISHING_STATUS.PUBLISHED : PUBLISHING_STATUS.FAILED,
+      status: result.status === 'scheduled'
+        ? PUBLISHING_STATUS.SCHEDULED
+        : result.status === 'published'
+          ? PUBLISHING_STATUS.PUBLISHED
+          : PUBLISHING_STATUS.FAILED,
       publishedUrl: result.url || result.platformPostUrl || null,
       error: result.error || null,
     }]));
+    const providerPostId = response.postId || response.providerPostId || null;
     return normalizePublishingJob({
-      id: response.postId || draft.id,
+      id: providerPostId || draft.id,
       draftId: draft.id,
       provider: this.id,
       platforms: draft.platforms || [],
       status,
-      providerPostId: response.postId || null,
-      providerPostIds: response.postId ? { zernio: response.postId } : {},
+      providerJobId: response.providerJobId || providerPostId,
+      providerPostId,
+      providerPostIds: providerPostId ? { zernio: providerPostId } : {},
+      scheduledAt: response.scheduledFor || scheduledFor,
+      timezone: response.timezone || draft.timezone || 'UTC',
       publishedUrls: response.publishedUrls || [],
       platformResults,
       error: status === PUBLISHING_STATUS.FAILED ? 'Maven Social publishing failed.' : null,
-      raw: { status, postId: response.postId || null, platformResults },
+      raw: { status, postId: providerPostId, scheduledFor: response.scheduledFor || scheduledFor, platformResults },
     });
   }
 
-  getScheduledPosts() {
-    // Phase 1 exposes account management only; an empty remote history is intentional.
-    return [];
+  async publishNow(draft = {}) {
+    return this.submitPost(draft);
+  }
+
+  async schedulePost(draft = {}) {
+    if (!draft.scheduledAt || !Number.isFinite(new Date(draft.scheduledAt).getTime()) || new Date(draft.scheduledAt).getTime() <= Date.now()) {
+      throw new PublishingError('Choose a future Maven Social publishing time.', { code: 'zernio_schedule_invalid', status: 400 });
+    }
+    return this.submitPost(draft, draft.scheduledAt);
+  }
+
+  async getScheduledPosts() {
+    const response = await this.request('/posts', { query: { status: 'scheduled', limit: 100 } });
+    const posts = Array.isArray(response.posts) ? response.posts : Array.isArray(response.data?.posts) ? response.data.posts : [];
+    return posts.map((post) => normalizePublishingJob({
+      id: post._id || post.id,
+      draftId: post.draftId || post.metadata?.draftId,
+      provider: this.id,
+      providerJobId: post._id || post.id,
+      providerPostId: post._id || post.id,
+      platforms: (post.platforms || []).map((platform) => typeof platform === 'string' ? platform : platform.platform).filter(Boolean),
+      status: normalizePublishingJob({ status: post.status || PUBLISHING_STATUS.SCHEDULED }).status === PUBLISHING_STATUS.QUEUED
+        ? PUBLISHING_STATUS.QUEUED
+        : PUBLISHING_STATUS.SCHEDULED,
+      scheduledAt: post.scheduledFor,
+      timezone: post.timezone,
+      raw: post,
+    }));
+  }
+
+  async reschedulePost(postId, schedule) {
+    const scheduledFor = schedule.scheduledFor || schedule.scheduled_at || schedule.scheduledAt;
+    if (!scheduledFor || !Number.isFinite(new Date(scheduledFor).getTime()) || new Date(scheduledFor).getTime() <= Date.now()) {
+      throw new PublishingError('Choose a future Maven Social publishing time.', { code: 'zernio_schedule_invalid', status: 400 });
+    }
+    const response = await this.request(`/posts/${encodeURIComponent(String(postId))}`, {
+      method: 'PUT',
+      body: { isDraft: false, scheduledFor: new Date(scheduledFor).toISOString(), timezone: schedule.timezone || 'UTC' },
+    });
+    return normalizePublishingJob({
+      ...(response.post || response),
+      id: response.post?._id || response.post?.id || postId,
+      providerJobId: response.post?._id || response.post?.id || postId,
+      provider: this.id,
+      status: response.post?.status || response.status || PUBLISHING_STATUS.SCHEDULED,
+      scheduledAt: response.post?.scheduledFor || response.scheduledFor || new Date(scheduledFor).toISOString(),
+      timezone: response.post?.timezone || response.timezone || schedule.timezone || 'UTC',
+    });
+  }
+
+  async cancelScheduledPost(postId) {
+    return this.request(`/posts/${encodeURIComponent(String(postId))}`, { method: 'DELETE' });
   }
 
   supportsCapability(methodName) {
-    if (methodName === 'schedulePost') return false;
+    if (['schedulePost', 'getScheduledPosts', 'reschedulePost', 'cancelScheduledPost'].includes(methodName)) return true;
     return super.supportsCapability(methodName);
-  }
-
-  schedulePost() {
-    throw new PublishingError('Maven Social scheduling will be enabled in a later phase.', {
-      code: 'zernio_scheduling_not_available',
-      status: 501,
-    });
   }
 }
 

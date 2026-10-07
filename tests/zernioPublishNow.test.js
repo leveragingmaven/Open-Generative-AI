@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolveZernioMedia } from '../src/lib/zernioMediaResolver.js';
 import { InMemoryZernioRepository } from '../src/lib/zernioRepository.js';
-import { ensureZernioProfile, publishZernioNow } from '../src/lib/zernioSocialService.js';
+import { cancelTenantZernioScheduledPost, ensureZernioProfile, listTenantZernioScheduledPosts, publishZernioNow, rescheduleTenantZernioPost } from '../src/lib/zernioSocialService.js';
 import { handleZernioPublishingRequest } from '../app/api/publishing/zernio/[[...path]]/route.js';
 
 const tenantA = { accountId: 'account-a', identityKey: 'creator-a' };
@@ -25,14 +25,21 @@ function clientFor({ status = 201 } = {}) {
     profiles: {
       createProfile: async ({ body }) => ({ data: { profile: { _id: `profile-${body.name}`, name: body.name } } }),
     },
+    accounts: {
+      listAccounts: async ({ query }) => ({ data: { accounts: query.profileId.includes('account-a') ? [{ _id: 'z-account-1', platform: 'instagram', isActive: true }] : [] } }),
+    },
     media: {
       getMediaPresignedUrl: async (input) => { calls.push({ method: 'presign', input }); return { data: { uploadUrl: 'https://uploads.zernio.test/upload', publicUrl: 'https://media.zernio.test/asset.jpg' } }; },
     },
     posts: {
       createPost: async (input) => {
         calls.push({ method: 'post', input });
+        if (input.body.scheduledFor) return { response: { status: 201 }, data: { post: { _id: 'post-1', status: 'scheduled', scheduledFor: input.body.scheduledFor, timezone: input.body.timezone, platforms: input.body.platforms.map(({ platform }) => ({ platform, status: 'scheduled' })) } } };
         return { response: { status }, data: status === 207 ? { message: 'partial', post: { _id: 'post-1', status: 'partial', platforms: [{ platform: 'instagram', status: 'published', platformPostUrl: 'https://instagram.test/post-1' }, { platform: 'facebook', status: 'failed' }] }, platformResults: [{ platform: 'instagram', status: 'published', error: null }, { platform: 'facebook', status: 'failed', error: 'provider internals' }] } : { message: 'published', post: { _id: 'post-1', status: 'published', platforms: [{ platform: 'instagram', status: 'published', platformPostUrl: 'https://instagram.test/post-1' }] } } };
       },
+      listPosts: async (input) => { calls.push({ method: 'listPosts', input }); return { data: { posts: [] } }; },
+      updatePost: async (input) => { calls.push({ method: 'updatePost', input }); return { data: { post: { _id: input.path.postId, status: 'scheduled', scheduledFor: input.body.scheduledFor, timezone: input.body.timezone } } }; },
+      deletePost: async (input) => { calls.push({ method: 'deletePost', input }); return { data: { success: true } }; },
     },
   };
 }
@@ -97,6 +104,73 @@ test('Publish Now constructs the exact Zernio body and uploads byte media throug
   assert.equal(client.calls.filter((call) => call.method === 'presign').length, 1);
   assert.equal(calls.some((call) => call.options.method === 'PUT'), true);
   assert.equal(JSON.stringify(post).includes('ZERNIO_API_KEY'), false);
+});
+
+test('Schedule uses the existing Zernio create endpoint with scheduledFor and timezone, never publishNow', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  const scheduledFor = '2035-01-01T10:00:00.000Z';
+  const result = await publishZernioNow({ identity: tenantA, draftId: 'draft-scheduled', content: 'Hello later', firstComment: 'First!', scheduledFor, timezone: 'America/Los_Angeles', platforms: ['instagram'], accountIds: { instagram: 'z-account-1' }, repository, client });
+  const post = client.calls.find((call) => call.method === 'post');
+  assert.equal(result.status, 'scheduled');
+  assert.equal(result.postId, 'post-1');
+  assert.equal(result.scheduledFor, scheduledFor);
+  assert.equal(result.timezone, 'America/Los_Angeles');
+  assert.deepEqual(post.input.body, { content: 'Hello later', platforms: [{ platform: 'instagram', accountId: 'z-account-1', platformSpecificData: { firstComment: 'First!' } }], scheduledFor, timezone: 'America/Los_Angeles' });
+  assert.equal(Object.hasOwn(post.input.body, 'publishNow'), false);
+});
+
+test('scheduled request identity includes the selected schedule independently of Publish Now', async () => {
+  const { stablePublishRequestId } = await import('../src/lib/zernioSocialService.js');
+  const input = { identity: tenantA, draftId: 'same-draft', content: 'Hello', platforms: ['instagram'], accountIds: { instagram: 'account-1' } };
+  const immediate = stablePublishRequestId(input);
+  const firstSchedule = stablePublishRequestId({ ...input, scheduledFor: '2035-01-01T10:00:00.000Z', timezone: 'UTC' });
+  const otherSchedule = stablePublishRequestId({ ...input, scheduledFor: '2035-01-01T11:00:00.000Z', timezone: 'UTC' });
+  assert.notEqual(firstSchedule, immediate);
+  assert.notEqual(firstSchedule, otherSchedule);
+});
+
+test('scheduled listing filters posts to connected accounts owned by the authenticated tenant', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async ({ query }) => {
+    client.calls.push({ method: 'listPosts', query });
+    return query.page === 2
+      ? { data: { posts: [{ _id: 'owned-post-2', status: 'scheduled', scheduledFor: '2035-01-02T10:00:00.000Z', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }], pagination: { page: 2, limit: 500, total: 501, pages: 2 } } }
+      : { data: { posts: [
+        { _id: 'owned-post', status: 'scheduled', scheduledFor: '2035-01-01T10:00:00.000Z', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] },
+        { _id: 'foreign-post', status: 'scheduled', scheduledFor: '2035-01-01T11:00:00.000Z', platforms: [{ platform: 'instagram', accountId: 'other-account' }] },
+      ], pagination: { page: 1, limit: 500, total: 501, pages: 2 } } };
+  };
+  const result = await listTenantZernioScheduledPosts({ identity: tenantA, repository, client });
+  assert.deepEqual(result.posts.map(({ id }) => id), ['owned-post', 'owned-post-2']);
+  assert.equal(result.posts[0].status, 'scheduled');
+  assert.equal(result.posts[0].scheduledAt, '2035-01-01T10:00:00.000Z');
+  assert.deepEqual(client.calls.filter((call) => call.method === 'listPosts').map((call) => call.query), [
+    { profileId: 'profile-mavensync-creator-account-a', status: 'scheduled', limit: 500, sortBy: 'scheduled-asc', page: 1 },
+    { profileId: 'profile-mavensync-creator-account-a', status: 'scheduled', limit: 500, sortBy: 'scheduled-asc', page: 2 },
+  ]);
+});
+
+test('reschedule updates only an owned scheduled post and cancellation deletes only that post', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'owned-post', content: 'Existing', mediaItems: [], status: 'scheduled', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+  const scheduledFor = '2035-02-01T10:00:00.000Z';
+  const rescheduled = await rescheduleTenantZernioPost({ identity: tenantA, postId: 'owned-post', scheduledFor, timezone: 'America/Los_Angeles', repository, client });
+  assert.deepEqual(rescheduled, { postId: 'owned-post', status: 'scheduled', scheduledFor, timezone: 'America/Los_Angeles' });
+  assert.deepEqual(client.calls.find((call) => call.method === 'updatePost').input, { path: { postId: 'owned-post' }, body: { content: 'Existing', mediaItems: [], platforms: [{ platform: 'instagram', accountId: 'z-account-1' }], isDraft: false, scheduledFor, timezone: 'America/Los_Angeles' } });
+  assert.deepEqual(await cancelTenantZernioScheduledPost({ identity: tenantA, postId: 'owned-post', repository, client }), { success: true, postId: 'owned-post' });
+  assert.deepEqual(client.calls.find((call) => call.method === 'deletePost').input, { path: { postId: 'owned-post' } });
+});
+
+test('foreign, missing, and non-scheduled posts cannot be rescheduled or cancelled', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'not-scheduled', status: 'published', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+  await assert.rejects(() => rescheduleTenantZernioPost({ identity: tenantA, postId: 'not-scheduled', scheduledFor: '2035-01-01T10:00:00.000Z', repository, client }), (error) => error.code === 'zernio_post_not_owned');
+  await assert.rejects(() => cancelTenantZernioScheduledPost({ identity: tenantA, postId: 'not-scheduled', repository, client }), (error) => error.code === 'zernio_post_not_owned');
+  assert.equal(client.calls.some((call) => call.method === 'updatePost' || call.method === 'deletePost'), false);
 });
 
 test('Publish Now reuses the same server-controlled request ID for the same logical draft', async () => {
@@ -176,6 +250,35 @@ test('Publish route accepts asset identities only and never exposes provider cre
   assert.equal(result.status, 'published');
   assert.equal(JSON.stringify(result).includes('browser-secret'), false);
   assert.equal(client.calls.find((call) => call.method === 'post').input.body.mediaItems, undefined);
+});
+
+test('Zernio posts route shares creation, listing, rescheduling, and cancellation through the authenticated proxy', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  const scheduledFor = '2035-03-01T10:00:00.000Z';
+  const postRequest = new Request('https://creator.test/api/publishing/zernio/posts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draftId: 'draft-route-scheduled', content: 'Scheduled via Creator OS', platforms: ['instagram'], accountIds: { instagram: 'z-account-1' }, scheduledFor, timezone: 'UTC' }) });
+  const postResponse = await handleZernioPublishingRequest(postRequest, { params: { path: ['posts'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  const postPayload = await postResponse.json();
+  assert.equal(postResponse.status, 201);
+  assert.equal(postPayload.status, 'scheduled');
+  assert.equal(postPayload.providerJobId, 'post-1');
+  assert.equal(client.calls.find((call) => call.method === 'post').input.body.scheduledFor, scheduledFor);
+  assert.equal(Object.hasOwn(client.calls.find((call) => call.method === 'post').input.body, 'publishNow'), false);
+
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'post-1', content: 'Scheduled via Creator OS', mediaItems: [], status: 'scheduled', scheduledFor, platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+  const listRequest = new Request('https://creator.test/api/publishing/zernio/posts');
+  const listResponse = await handleZernioPublishingRequest(listRequest, { params: { path: ['posts'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  assert.equal((await listResponse.json()).posts[0].id, 'post-1');
+
+  const updateRequest = new Request('https://creator.test/api/publishing/zernio/posts/post-1', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scheduledFor: '2035-03-02T10:00:00.000Z', timezone: 'UTC' }) });
+  const updateResponse = await handleZernioPublishingRequest(updateRequest, { params: { path: ['posts', 'post-1'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  assert.equal(updateResponse.status, 200);
+  assert.equal(client.calls.find((call) => call.method === 'updatePost').input.path.postId, 'post-1');
+
+  const deleteRequest = new Request('https://creator.test/api/publishing/zernio/posts/post-1', { method: 'DELETE' });
+  const deleteResponse = await handleZernioPublishingRequest(deleteRequest, { params: { path: ['posts', 'post-1'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  assert.equal(deleteResponse.status, 200);
+  assert.equal(client.calls.find((call) => call.method === 'deletePost').input.path.postId, 'post-1');
 });
 
 test('Publish Now sends an optional first comment only as platformSpecificData on a supporting platform', async () => {

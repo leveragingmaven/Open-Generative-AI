@@ -681,7 +681,7 @@ function canonicalPublishInput({ assetIds = [], platforms = [], accountIds = {} 
   };
 }
 
-export function stablePublishRequestId({ identity, draftId, content, firstComment = '', assetIds, platforms, accountIds }) {
+export function stablePublishRequestId({ identity, draftId, content, firstComment = '', assetIds, platforms, accountIds, scheduledFor = null, timezone = 'UTC' }) {
   const canonical = canonicalPublishInput({ assetIds, platforms, accountIds });
   const payload = JSON.stringify({
     accountId: String(identity.accountId),
@@ -689,6 +689,7 @@ export function stablePublishRequestId({ identity, draftId, content, firstCommen
     draftId: String(draftId || ''),
     content: String(content || ''),
     firstComment: String(firstComment || '').trim(),
+    ...(scheduledFor ? { scheduledFor: new Date(scheduledFor).toISOString(), timezone: String(timezone || 'UTC') } : {}),
     ...canonical,
   });
   return `maven-social-${crypto.createHash('sha256').update(payload).digest('hex')}`;
@@ -710,23 +711,49 @@ function safePlatformFailure(platform, status, message, url = null) {
   return { platform, status: String(status || 'failed').toLowerCase(), url: url || null, error: message ? `${platform} publishing failed.` : null };
 }
 
-function sanitizePublishResponse(data, platforms, httpStatus) {
+function sanitizePublishResponse(data, platforms, httpStatus, schedule = null) {
   const post = data?.post || data?.existingPost || {};
   const returned = Array.isArray(post.platforms) ? post.platforms : [];
   const providerResults = Array.isArray(data?.platformResults) ? data.platformResults : [];
   const platformResults = platforms.map((platform) => {
     const result = returned.find((item) => String(item.platform).toLowerCase() === String(platform).toLowerCase()) || providerResults.find((item) => String(item.platform).toLowerCase() === String(platform).toLowerCase());
+    if (schedule) {
+      const resultStatus = String(result?.status || 'scheduled').toLowerCase();
+      const scheduled = ['scheduled', 'pending', 'queued'].includes(resultStatus);
+      return {
+        platform,
+        status: scheduled ? 'scheduled' : resultStatus,
+        url: result?.platformPostUrl || null,
+        error: scheduled ? null : `${platform} scheduling failed.`,
+      };
+    }
     const failedMessage = result?.status === 'failed' ? (result?.error || 'provider failure') : (result?.status === 'published' || result?.platformPostUrl ? null : result?.error);
     return safePlatformFailure(platform, result?.status, failedMessage, result?.platformPostUrl || null);
   });
-  const successes = platformResults.filter((item) => item.status === 'published');
+  const successes = platformResults.filter((item) => schedule ? item.status === 'scheduled' : item.status === 'published');
   const failures = platformResults.filter((item) => item.status === 'failed');
+  const responsePostId = post._id || post.id || data?.postId || null;
+  if (schedule) {
+    const scheduledStatus = ['scheduled', 'pending', 'queued'].includes(String(post.status || '').toLowerCase()) || post.scheduledFor || (httpStatus === 202 && responsePostId);
+    const status = responsePostId && scheduledStatus && successes.length === platforms.length ? 'scheduled' : 'failed';
+    if (status === 'failed' && failures.length === 0) platformResults.forEach((item) => { item.status = 'failed'; item.error = `${item.platform} scheduling failed.`; });
+    return {
+      status,
+      postId: responsePostId,
+      providerJobId: responsePostId,
+      scheduledFor: post.scheduledFor || schedule.scheduledFor,
+      timezone: post.timezone || schedule.timezone,
+      platformResults,
+      publishedUrls: [],
+      httpStatus: status === 'scheduled' ? (httpStatus || 201) : 502,
+    };
+  }
   const status = httpStatus === 207 || String(post.status).toLowerCase() === 'partial' ? (successes.length ? 'partially_published' : 'failed') : (post.status === 'published' || (platformResults.length && !failures.length) ? 'published' : 'failed');
   if (status === 'failed' && failures.length === 0) platformResults.forEach((item) => { item.status = 'failed'; item.error = `${item.platform} publishing failed.`; });
-  return { status, postId: post._id || null, platformResults, publishedUrls: returned.filter((item) => item.platformPostUrl).map((item) => item.platformPostUrl), httpStatus: status === 'partially_published' ? 207 : status === 'published' ? (httpStatus || 201) : 502 };
+  return { status, postId: responsePostId, platformResults, publishedUrls: returned.filter((item) => item.platformPostUrl).map((item) => item.platformPostUrl), httpStatus: status === 'partially_published' ? 207 : status === 'published' ? (httpStatus || 201) : 502 };
 }
 
-export async function publishZernioNow({ identity, draftId, content = '', firstComment = '', assetIds = [], platforms = [], accountIds = {}, repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
+export async function publishZernioNow({ identity, draftId, content = '', firstComment = '', assetIds = [], platforms = [], accountIds = {}, scheduledFor = null, timezone = 'UTC', repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
   const owner = requiredIdentity(identity);
   const selectedPlatforms = [...new Set(platforms.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
   if (!selectedPlatforms.length) throw Object.assign(new Error('Choose at least one Maven Social destination.'), { code: 'zernio_publish_invalid', status: 400 });
@@ -758,15 +785,138 @@ export async function publishZernioNow({ identity, draftId, content = '', firstC
     });
   }
   if (!String(content || '').trim() && !mediaItems.length) throw Object.assign(new Error('Add text or creative media before publishing.'), { code: 'zernio_publish_invalid', status: 400 });
-  const requestId = stablePublishRequestId({ identity: owner, draftId, content, firstComment, assetIds, platforms: selectedPlatforms, accountIds });
-  const response = await client.posts.createPost({ headers: { 'x-request-id': requestId }, body: { ...(String(content || '').trim() ? { content: String(content) } : {}), ...(mediaItems.length ? { mediaItems } : {}), platforms: targets, publishNow: true } });
-  if (response?.error) throw unwrapResponse(response, 'Maven Social could not publish this post.');
+  let schedule = null;
+  if (scheduledFor) {
+    const scheduledTime = new Date(scheduledFor).getTime();
+    if (!Number.isFinite(scheduledTime) || scheduledTime <= Date.now()) {
+      throw Object.assign(new Error('Choose a future Maven Social publishing time.'), { code: 'zernio_schedule_invalid', status: 400 });
+    }
+    schedule = { scheduledFor: new Date(scheduledTime).toISOString(), timezone: String(timezone || 'UTC') };
+  }
+  const requestId = stablePublishRequestId({ identity: owner, draftId, content, firstComment, assetIds, platforms: selectedPlatforms, accountIds, ...schedule });
+  const response = await client.posts.createPost({
+    headers: { 'x-request-id': requestId },
+    body: {
+      ...(String(content || '').trim() ? { content: String(content) } : {}),
+      ...(mediaItems.length ? { mediaItems } : {}),
+      platforms: targets,
+      ...(schedule ? schedule : { publishNow: true }),
+    },
+  });
+  if (response?.error) throw unwrapResponse(response, schedule ? 'Maven Social could not schedule this post.' : 'Maven Social could not publish this post.');
   const httpStatus = response?.response?.status || response?.status || (response?.data?.existingPost ? 200 : 201);
-  return sanitizePublishResponse(response?.data || response, targets.map((target) => target.platform), httpStatus);
+  return sanitizePublishResponse(response?.data || response, targets.map((target) => target.platform), httpStatus, schedule);
+}
+
+export async function scheduleZernioPost(options = {}) {
+  if (!options.scheduledFor) {
+    throw Object.assign(new Error('Choose a future Maven Social publishing time.'), { code: 'zernio_schedule_invalid', status: 400 });
+  }
+  return publishZernioNow(options);
+}
+
+function postListResultOf(response) {
+  const data = dataOf(response);
+  const payload = data?.data && !Array.isArray(data.data) ? data.data : data;
+  return {
+    posts: Array.isArray(payload?.posts) ? payload.posts : Array.isArray(data?.data) ? data.data : [],
+    pagination: payload?.pagination || data?.pagination || null,
+  };
+}
+
+async function listTenantZernioScheduledPostRecords({ identity, repository, client }) {
+  const owner = requiredIdentity(identity);
+  const profile = await ensureZernioProfile({ identity: owner, repository, client });
+  const accounts = await listTenantZernioAccounts({ identity: owner, repository, client });
+  const ownedAccountIds = new Set(accounts.accounts.map((account) => String(account.id)));
+  const records = [];
+  let page = 1;
+  let pageCount = 1;
+  do {
+    const response = await client.posts.listPosts({ query: { profileId: profile.zernioProfileId, status: 'scheduled', limit: 500, sortBy: 'scheduled-asc', page } });
+    const result = postListResultOf(response);
+    records.push(...result.posts);
+    const reportedPages = Number(result.pagination?.pages);
+    const reportedPage = Number(result.pagination?.page);
+    if (!Number.isInteger(reportedPages) || reportedPages < 1) break;
+    pageCount = reportedPages;
+    page = (Number.isInteger(reportedPage) && reportedPage >= page ? reportedPage : page) + 1;
+  } while (page <= pageCount);
+
+  return records.filter((post) => {
+    const targets = Array.isArray(post.platforms) ? post.platforms : [];
+    return targets.length > 0 && targets.every((target) => {
+      const accountId = typeof target.accountId === 'object' ? target.accountId?._id || target.accountId?.id : target.accountId;
+      return accountId && ownedAccountIds.has(String(accountId));
+    });
+  });
+}
+
+function normalizedZernioScheduledPost(post = {}) {
+  const postId = post._id || post.id;
+  return {
+    id: String(postId || ''),
+    draftId: post.draftId || post.metadata?.draftId || null,
+    provider: 'zernio',
+    providerJobId: String(postId || ''),
+    providerPostId: String(postId || ''),
+    platforms: (Array.isArray(post.platforms) ? post.platforms : []).map((target) => target.platform).filter(Boolean),
+    status: post.status || 'scheduled',
+    scheduledFor: post.scheduledFor || null,
+    scheduledAt: post.scheduledFor || null,
+    timezone: post.timezone || 'UTC',
+    content: post.content || '',
+    raw: { id: postId || null, status: post.status || 'scheduled', scheduledFor: post.scheduledFor || null },
+  };
+}
+
+export async function listTenantZernioScheduledPosts({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const records = await listTenantZernioScheduledPostRecords({ identity, repository, client });
+  return { posts: records.map(normalizedZernioScheduledPost).filter((post) => post.id && post.scheduledAt) };
+}
+
+async function ownedZernioScheduledPost({ identity, postId, repository, client }) {
+  const id = String(postId || '').trim();
+  if (!id) throw Object.assign(new Error('A Maven Social post is required.'), { code: 'zernio_post_id_required', status: 400 });
+  const records = await listTenantZernioScheduledPostRecords({ identity, repository, client });
+  const post = records.find((record) => String(record._id || record.id) === id && String(record.status).toLowerCase() === 'scheduled');
+  if (!post) throw Object.assign(new Error('The requested scheduled post is not available to this tenant.'), { code: 'zernio_post_not_owned', status: 403 });
+  return { post, id };
+}
+
+export async function rescheduleTenantZernioPost({ identity, postId, scheduledFor, timezone = 'UTC', repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const { post, id } = await ownedZernioScheduledPost({ identity, postId, repository, client });
+  const timestamp = new Date(scheduledFor).getTime();
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) throw Object.assign(new Error('Choose a future Maven Social publishing time.'), { code: 'zernio_schedule_invalid', status: 400 });
+  const normalizedScheduledFor = new Date(timestamp).toISOString();
+  const updated = dataOf(await client.posts.updatePost({
+    path: { postId: id },
+    body: {
+      ...(typeof post.content === 'string' ? { content: post.content } : {}),
+      ...(Array.isArray(post.mediaItems) ? { mediaItems: post.mediaItems } : {}),
+      ...(Array.isArray(post.platforms) ? { platforms: post.platforms } : {}),
+      isDraft: false,
+      scheduledFor: normalizedScheduledFor,
+      timezone: String(timezone || 'UTC'),
+    },
+  }));
+  const updatedPost = updated?.post || updated;
+  return {
+    postId: updatedPost?._id || updatedPost?.id || id,
+    status: updatedPost?.status || 'scheduled',
+    scheduledFor: updatedPost?.scheduledFor || normalizedScheduledFor,
+    timezone: updatedPost?.timezone || String(timezone || 'UTC'),
+  };
+}
+
+export async function cancelTenantZernioScheduledPost({ identity, postId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  const { id } = await ownedZernioScheduledPost({ identity, postId, repository, client });
+  await client.posts.deletePost({ path: { postId: id } });
+  return { success: true, postId: id };
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
+  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
   const safe = new Error(safeProviderCode ? error.message : fallback);
   safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';

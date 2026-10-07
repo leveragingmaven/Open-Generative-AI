@@ -392,13 +392,40 @@ test('SDK provider errors preserve a safe actionable code without leaking creden
   assert.equal(await repository.getProfile(tenantA), null);
 });
 
-test('Maven Social returns an empty remote schedule during Phase 1 while scheduling stays disabled', async () => {
-  const provider = new ZernioPublishingProvider({ fetchFn: async () => { throw new Error('must not fetch'); } });
-  assert.deepEqual(await provider.getScheduledPosts(), []);
-  assert.throws(
-    () => provider.schedulePost(),
-    (error) => error.code === 'zernio_scheduling_not_available' && error.status === 501,
-  );
+test('Maven Social schedules through the existing posts endpoint and exposes supported schedule operations', async () => {
+  const calls = [];
+  const provider = new ZernioPublishingProvider({ fetchFn: async (url, options = {}) => {
+    calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    const payload = options.method === 'POST'
+      ? { status: 'scheduled', postId: 'post-1', scheduledFor: '2035-01-01T10:00:00.000Z', timezone: 'America/Los_Angeles', platformResults: [{ platform: 'instagram', status: 'scheduled' }] }
+      : options.method === 'GET'
+        ? { posts: [{ _id: 'post-2', status: 'scheduled', scheduledFor: '2035-01-02T10:00:00.000Z', timezone: 'UTC', platforms: [{ platform: 'instagram' }] }] }
+        : options.method === 'PUT'
+          ? { post: { _id: 'post-1', status: 'scheduled', scheduledFor: '2035-01-03T10:00:00.000Z', timezone: 'UTC' } }
+          : { success: true };
+    return { ok: true, json: async () => payload };
+  } });
+  assert.equal(provider.supportsCapability('schedulePost'), true);
+  assert.equal(provider.supportsCapability('getScheduledPosts'), true);
+  assert.equal(provider.supportsCapability('reschedulePost'), true);
+  assert.equal(provider.supportsCapability('cancelScheduledPost'), true);
+
+  const scheduled = await provider.schedulePost({ id: 'draft-1', caption: 'Queued copy', platforms: ['instagram'], accountIds: { instagram: 'account-1' }, firstComment: 'First!', scheduledAt: '2035-01-01T10:00:00.000Z', timezone: 'America/Los_Angeles' });
+  assert.equal(scheduled.status, 'scheduled');
+  assert.equal(scheduled.scheduledAt, '2035-01-01T10:00:00.000Z');
+  assert.equal(scheduled.providerJobId, 'post-1');
+  assert.deepEqual(calls[0].body, { draftId: 'draft-1', content: 'Queued copy', assetIds: [], platforms: ['instagram'], accountIds: { instagram: 'account-1' }, firstComment: 'First!', scheduledFor: '2035-01-01T10:00:00.000Z', timezone: 'America/Los_Angeles' });
+  assert.equal(Object.hasOwn(calls[0].body, 'publishNow'), false);
+
+  const remote = await provider.getScheduledPosts();
+  assert.equal(calls[1].url, '/api/publishing/zernio/posts?status=scheduled&limit=100');
+  assert.equal(remote[0].status, 'scheduled');
+  assert.equal(remote[0].scheduledAt, '2035-01-02T10:00:00.000Z');
+  await provider.reschedulePost('post-1', { scheduledFor: '2035-01-03T10:00:00.000Z', timezone: 'UTC' });
+  assert.equal(calls[2].options.method, 'PUT');
+  assert.deepEqual(calls[2].body, { isDraft: false, scheduledFor: '2035-01-03T10:00:00.000Z', timezone: 'UTC' });
+  await provider.cancelScheduledPost('post-1');
+  assert.equal(calls[3].options.method, 'DELETE');
 });
 
 test('official authUrl is preferred while existing provider URL aliases remain supported', () => {

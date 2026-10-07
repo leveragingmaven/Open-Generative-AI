@@ -153,6 +153,8 @@ export function normalizePublishingJob(input = {}) {
     providerContentId: input.providerContentId || null,
     providerRequestId: input.providerRequestId || input.request_id || input.requestId || null,
     publishedUrls: input.publishedUrls || input.urls || [],
+    scheduledAt: input.scheduledAt || input.scheduledFor || null,
+    timezone: input.timezone || null,
     error: input.error || null,
     updatedAt: input.updatedAt || new Date().toISOString(),
     raw: input.raw || input,
