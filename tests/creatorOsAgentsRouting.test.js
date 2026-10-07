@@ -47,9 +47,10 @@ test("Other Studio destinations retain their existing routing", () => {
   assert.match(commandNavigateBlock, /router\.push\(route\);/);
 });
 
-test("Maven Front Door is untouched", () => {
-  // Maven's Front Door keeps its own Agents destination inside MavenHomeDashboard.
-  assert.match(mavenHomeSource, /styles\.frontDoor/, "expected the Maven Front Door section");
+test("Maven Workspace keeps its Agents destination available in the studio picker", () => {
+  // Maven Workspace keeps the existing studio shortcuts, including Agents, in its expandable picker.
+  assert.match(mavenHomeSource, /styles\.workspace/, "expected the Maven Workspace shell");
+  assert.match(mavenHomeSource, /MORE_ACTIONS\.map\(\(item\) => <QuickActionButton/);
   assert.match(mavenHomeSource, /title: "Agents", icon: "design", href: "\/studio\/agents"/);
   assert.doesNotMatch(mavenHomeSource, /\/agents\/create/);
 });

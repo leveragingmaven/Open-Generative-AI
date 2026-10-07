@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -9,12 +9,26 @@ import {
   readStoredDashboardSessionId,
   storeDashboardSessionId,
 } from "design-agent";
-import { CampaignStore } from "../../lib/campaigns/CampaignStore.js";
-import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
-import { readPublishingDrafts } from "../../lib/publishing/publishingHistory.js";
-import { assetLabel, assetPreview, assetRoute, assetTimestamp, relativeTime, titleCase } from "./experienceAssetUtils.js";
-import { ExperiencePage, WorkspaceCard } from "./ExperienceComponents.jsx";
+import { ExperiencePage } from "./ExperienceComponents.jsx";
 import styles from "./MavenHomeDashboard.module.css";
+
+const DASHBOARD_CHAT_LIST_STORAGE_KEY = "mavensync_dashboard_chat_sessions";
+
+function readDashboardChatList(storage = window.localStorage) {
+  try {
+    const parsed = JSON.parse(storage.getItem(DASHBOARD_CHAT_LIST_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((chat) => chat && typeof chat.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDashboardChat(storage, chat) {
+  const chats = readDashboardChatList(storage);
+  const next = [{ ...chat, title: chat.title?.trim() || "Maven conversation", updatedAt: new Date().toISOString() }, ...chats.filter((item) => item.id !== chat.id)];
+  storage.setItem(DASHBOARD_CHAT_LIST_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
 
 function Icon({ type, size = 18 }) {
   const paths = {
@@ -30,6 +44,13 @@ function Icon({ type, size = 18 }) {
     library: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></>,
     maven: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
+    chat: <><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></>,
+    skills: <><path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /><path d="m18 15 .7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7z" /></>,
+    connectors: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M10 6.5h4a2 2 0 0 1 2 2v5.5M6.5 10v4a2 2 0 0 0 2 2H14" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    attach: <><path d="m21.4 11.1-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></>,
+    sparkle: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" /></>,
+    chevron: <><path d="m7 10 5 5 5-5" /></>,
   };
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
 }
@@ -76,77 +97,51 @@ function QuickActionButton({ item }) {
   );
 }
 
-function AttentionTile({ icon, label, value, zeroDetail, actionHref, actionLabel }) {
-  const hasWork = value > 0;
-  return (
-    <WorkspaceCard interactive className="flex min-h-24 flex-col justify-between p-3.5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-2xl font-semibold tracking-[-0.04em]">{hasWork ? value : "0"}</p>
-          <p className="mt-1 text-xs font-medium text-[var(--ms-color-text-secondary)]">{label}</p>
-        </div>
-        <span className={`flex h-8 w-8 items-center justify-center rounded-[var(--ms-radius-card-small)] border ${hasWork ? "border-[rgba(232,32,112,0.35)] bg-[rgba(232,32,112,0.08)] text-[var(--ms-color-pink-primary)]" : "border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.07)] text-[var(--ms-color-gold-primary)]"}`}><Icon type={icon} size={16} /></span>
-      </div>
-      {hasWork && actionHref ? (
-        <a href={actionHref} className="mt-2 inline-flex w-fit items-center gap-1 text-[10px] font-semibold text-[var(--ms-color-pink-primary)] hover:text-[var(--ms-color-text-primary)]">{actionLabel} <Icon type="arrow" size={11} /></a>
-      ) : (
-        <p className="mt-2 text-[10px] text-[var(--ms-color-text-muted)]">{zeroDetail}</p>
-      )}
-    </WorkspaceCard>
-  );
-}
-
 function MavenBubble({ message, streaming }) {
   const isUser = message.role === "user";
   const markdownComponents = {
     a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
   };
   return (
-    <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser && (
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--ms-color-border-emphasized)] bg-black/20 text-[var(--ms-color-gold-primary)]">
-          <Icon type="maven" size={14} />
-        </span>
-      )}
-      <div
-        className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-          isUser
-            ? "rounded-br-sm bg-[var(--ms-color-pink-primary)] text-white"
-            : "rounded-bl-sm border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] text-[var(--ms-color-text-primary)]"
-        }`}
-      >
-        {isUser ? (
-          message.content || ""
-        ) : (
-          <div className={styles.markdown}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
-              {message.content || ""}
-            </ReactMarkdown>
-          </div>
-        )}
-        {streaming && (
-          <span className="ml-1 inline-flex gap-0.5 align-middle">
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
-          </span>
-        )}
+    <article className={`${styles.messageRow} ${isUser ? styles.userRow : styles.assistantRow}`}>
+      {!isUser && <span className={styles.messageMark} aria-hidden="true"><Icon type="maven" size={15} /></span>}
+      <div className={styles.messageContent}>
+        <p className={styles.messageIdentity}>{isUser ? "You" : "Maven"}</p>
+        <div className={`${styles.messageBody} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
+          {isUser ? (
+            message.content || ""
+          ) : (
+            <div className={styles.markdown}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
+                {message.content || ""}
+              </ReactMarkdown>
+            </div>
+          )}
+          {streaming && (
+            <span className="ml-1 inline-flex gap-0.5 align-middle" aria-label="Maven is responding">
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+            </span>
+          )}
+        </div>
       </div>
-    </div>
+    </article>
   );
 }
 
-export default function MavenHomeDashboard() {
-  const [campaigns, setCampaigns] = useState([]);
-  const [assets, setAssets] = useState([]);
-  const [publishingDrafts, setPublishingDrafts] = useState([]);
+export default function MavenHomeDashboard({ onOpenSettings }) {
   const [mavenMessage, setMavenMessage] = useState("");
   const [mavenMessages, setMavenMessages] = useState([]);
+  const [savedChats, setSavedChats] = useState([]);
+  const [chatError, setChatError] = useState(null);
   const [mavenBusy, setMavenBusy] = useState(false);
   const [mavenReady, setMavenReady] = useState(false);
   const [mavenSessionId, setMavenSessionId] = useState(null);
   const mavenClientRef = useRef(null);
   const moreRef = useRef(null);
+  const transcriptRef = useRef(null);
+  const composerInputRef = useRef(null);
 
   useEffect(() => {
     const client = createDesignAgentConversationClient();
@@ -154,6 +149,8 @@ export default function MavenHomeDashboard() {
     let cancelled = false;
 
     const bootstrap = async () => {
+      const chats = readDashboardChatList(window.localStorage);
+      if (!cancelled) setSavedChats(chats);
       const controlled = await client.fetchControlledExecutionFlag();
       if (cancelled) return;
       setMavenReady(controlled);
@@ -166,6 +163,8 @@ export default function MavenHomeDashboard() {
         if (cancelled) return;
         setMavenSessionId(stored);
         setMavenMessages(history);
+        const saved = saveDashboardChat(window.localStorage, { id: stored, title: history.find((message) => message.role === "user")?.content?.slice(0, 72) });
+        setSavedChats(saved);
       } catch {
         // The stored session is invalid, unowned, or unavailable. Recover
         // safely: drop it and create a fresh owned session on next send.
@@ -186,6 +185,7 @@ export default function MavenHomeDashboard() {
     if (!client || !text || mavenBusy || !mavenReady) return;
 
     setMavenMessage("");
+    setChatError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
     setMavenMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
@@ -197,6 +197,8 @@ export default function MavenHomeDashboard() {
         setMavenSessionId(sessionId);
         storeDashboardSessionId(window.localStorage, sessionId);
       }
+      const saved = saveDashboardChat(window.localStorage, { id: sessionId, title: mavenMessages.find((message) => message.role === "user")?.content?.slice(0, 72) || text.slice(0, 72) });
+      setSavedChats(saved);
 
       const result = await client.send({
         conversationId: sessionId,
@@ -237,159 +239,185 @@ export default function MavenHomeDashboard() {
     }
   };
 
-  useEffect(() => {
-    try { setCampaigns(CampaignStore.list()); } catch { setCampaigns([]); }
-    try { setAssets(localAssetManager.listAssets()); } catch { setAssets([]); }
-    try { setPublishingDrafts(readPublishingDrafts()); } catch { setPublishingDrafts([]); }
-  }, []);
-
-  const recentAssets = useMemo(() => [...assets].sort((a, b) => assetTimestamp(b) - assetTimestamp(a)).slice(0, 3), [assets]);
-  const needsApprovalCount = campaigns.filter((campaign) => (campaign.status || "") === "review").length;
-  const inProgressCount = campaigns.filter((campaign) => ["generating", "queued", "planning"].includes(campaign.status || "")).length;
   const hasMavenConversation = mavenMessages.length > 0;
+
+  useEffect(() => {
+    const textarea = composerInputRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+  }, [mavenMessage, hasMavenConversation]);
+
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (transcript) transcript.scrollTop = transcript.scrollHeight;
+  }, [mavenMessages, mavenBusy]);
+
+  const startNewChat = () => {
+    if (mavenBusy) return;
+    if (mavenSessionId) {
+      const title = mavenMessages.find((message) => message.role === "user")?.content?.slice(0, 72);
+      if (title) setSavedChats(saveDashboardChat(window.localStorage, { id: mavenSessionId, title }));
+    }
+    clearStoredDashboardSessionId(window.localStorage);
+    setMavenSessionId(null);
+    setMavenMessages([]);
+    setMavenMessage("");
+    setChatError(null);
+  };
+
+  const openSavedChat = async (chat) => {
+    if (mavenBusy || chat.id === mavenSessionId) {
+      focusCurrentChat();
+      return;
+    }
+    setMavenBusy(true);
+    setChatError(null);
+    try {
+      const messages = await mavenClientRef.current.loadMessages(chat.id);
+      setMavenSessionId(chat.id);
+      storeDashboardSessionId(window.localStorage, chat.id);
+      setMavenMessages(messages);
+    } catch (error) {
+      setChatError(error?.message || "Unable to reopen this conversation.");
+    } finally {
+      setMavenBusy(false);
+    }
+  };
+
+  const focusCurrentChat = () => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
+    composerInputRef.current?.focus();
+  };
+
   const mavenComposer = (
-    <form className={`${styles.composer} ${hasMavenConversation ? styles.composerCompact : ""}`} onSubmit={submitMavenMessage}>
-      <label htmlFor="maven-creation-prompt" className={styles.promptLabel}>{hasMavenConversation ? "Continue your conversation with Maven" : "What would you like Maven to create?"}</label>
-      <textarea
-        id="maven-creation-prompt"
-        value={mavenMessage}
-        onChange={(event) => setMavenMessage(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            event.currentTarget.form.requestSubmit();
-          }
-        }}
-        placeholder="Describe your idea, your audience, or the story you want to tell…"
-        aria-describedby="maven-composer-status"
-        disabled={!mavenReady || mavenBusy}
-        rows={hasMavenConversation ? 2 : 3}
-      />
-      <div className={styles.composerFooter}>
-        <span id="maven-composer-status" role="status">
-          {mavenBusy ? "Maven is creating a response…" : mavenReady ? "Create with Maven" : "Maven chat is unavailable right now. You can still open a studio above."}
-        </span>
-        <button
-          type="submit"
-          aria-label={mavenBusy ? "Maven is responding" : "Send message to MavenSync"}
-          disabled={!mavenReady || mavenBusy || !mavenMessage.trim()}
-          className={styles.send}
-        ><Icon type="arrow" size={18} /></button>
+    <form className={styles.composer} onSubmit={submitMavenMessage}>
+      <div className={styles.composerInputRow}>
+        <label htmlFor="maven-creation-prompt" className="sr-only">Message Maven</label>
+        <textarea
+          ref={composerInputRef}
+          id="maven-creation-prompt"
+          value={mavenMessage}
+          onChange={(event) => setMavenMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              event.currentTarget.form.requestSubmit();
+            }
+          }}
+          placeholder="Message Maven…"
+          aria-describedby="maven-composer-status"
+          disabled={!mavenReady || mavenBusy}
+          rows={1}
+        />
       </div>
+      <div className={styles.composerFooter}>
+        <div className={styles.composerTools}>
+          <button type="button" className={styles.attachButton} aria-label="Attach files (coming soon)" title="Attachments coming soon" disabled>
+            <Icon type="attach" size={17} />
+          </button>
+          <span className={styles.modelPill}><Icon type="sparkle" size={14} /> Maven Intelligence <Icon type="chevron" size={13} /></span>
+          <a className={styles.toolLink} href="/studio/knowledge-center">Skills</a>
+          <a className={styles.toolLink} href="/studio/mcp-cli">Connectors</a>
+        </div>
+        <div className={styles.composerSubmitGroup}>
+          <span id="maven-composer-status" role="status" className={styles.composerStatus}>
+            {mavenBusy ? "Maven is thinking…" : mavenReady ? "Enter to send · Shift + Enter for a new line" : "Maven chat is unavailable right now."}
+          </span>
+          <button
+            type="submit"
+            aria-label={mavenBusy ? "Maven is responding" : "Send message to Maven"}
+            disabled={!mavenReady || mavenBusy || !mavenMessage.trim()}
+            className={styles.send}
+          ><Icon type="arrow" size={18} /></button>
+        </div>
+      </div>
+      <div className={styles.attachmentSlot} aria-live="polite" />
     </form>
   );
 
   return (
     <ExperiencePage className={styles.page}>
-      <section aria-label="Maven Creator OS" className={styles.frontDoor}>
-        <h1 className={styles.identity}>MAVEN <span>CREATOR OS</span></h1>
-        <nav aria-label="Creation studios" className={styles.pillRow}>
-          {QUICK_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
-          <details ref={moreRef} className={styles.more} onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              moreRef.current.open = false;
-              moreRef.current.querySelector("summary")?.focus();
-            }
-          }}>
-            <summary className={styles.pill}>More <span aria-hidden="true">＋</span></summary>
-            <nav aria-label="More studios" className={styles.morePanel}>
-              {MORE_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
-            </nav>
-          </details>
-        </nav>
+      <div className={styles.workspace}>
+        <aside className={styles.sidebar} aria-label="Maven Workspace sidebar">
+          <a href="/studio" className={styles.brand} aria-label="Maven Workspace home">
+            <span className={styles.brandMark}>M</span>
+            <span><strong>Maven</strong><small>Workspace</small></span>
+          </a>
+          <button type="button" className={styles.newChat} aria-label="New Chat" onClick={startNewChat} disabled={mavenBusy}>
+            <Icon type="plus" size={18} /><span>New Chat</span>
+          </button>
+          <nav className={styles.sidebarNav} aria-label="Workspace navigation">
+            <p className={styles.navHeading}>Workspace</p>
+            <button type="button" className={`${styles.navItem} ${hasMavenConversation ? "" : styles.navItemActive}`} aria-label="Chats" onClick={focusCurrentChat}>
+              <Icon type="chat" size={17} /><span>Chats</span>
+              {hasMavenConversation ? <span className={styles.navCount}>1</span> : null}
+            </button>
+            <a className={styles.navItem} href="/studio/knowledge-center" aria-label="Skills" title="Skills"><Icon type="skills" size={17} /><span>Skills</span></a>
+            <a className={styles.navItem} href="/studio/mcp-cli" aria-label="Connectors" title="Connectors"><Icon type="connectors" size={17} /><span>Connectors</span></a>
+            <a className={styles.navItem} href="/studio/campaigns" aria-label="Projects" title="Projects"><Icon type="library" size={17} /><span>Projects</span></a>
+          </nav>
+          <div className={styles.chatList}>
+            <div className={styles.chatListHeading}><span>Recent chats</span><Icon type="chevron" size={14} /></div>
+            {savedChats.length ? savedChats.map((chat) => (
+              <button key={chat.id} type="button" className={`${styles.chatEntry} ${chat.id === mavenSessionId ? styles.chatEntryActive : ""}`} onClick={() => void openSavedChat(chat)} disabled={mavenBusy}>
+                <Icon type="chat" size={14} />
+                <span>{chat.title || "Maven conversation"}</span>
+              </button>
+            )) : <p className={styles.emptyChats}>Your conversations will show up here.</p>}
+          </div>
+          <div className={styles.sidebarFooter}>
+            <a href="/studio/overview"><Icon type="library" size={16} /><span>Workspace overview</span></a>
+            {onOpenSettings ? <button type="button" aria-label="Settings" onClick={onOpenSettings}><Icon type="connectors" size={16} /><span>Settings</span></button> : null}
+            <p>Creative work, connected.</p>
+          </div>
+        </aside>
 
-        {!hasMavenConversation && mavenComposer}
-
-        <nav aria-label="Creative context" className={styles.contextRow}>
-          <a href="/studio/knowledge-center"><Icon type="content" size={13} /> Open Knowledge Center</a>
-          <a href="/studio/campaigns"><Icon type="library" size={13} /> View campaigns{campaigns.length ? ` · ${campaigns.length}` : ""}</a>
-        </nav>
-        <nav aria-label="Manage your creative work" className={`${styles.pillRow} ${styles.secondaryRow}`}>
-          {SECONDARY_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
-        </nav>
-
-        {hasMavenConversation && (
-            <section aria-label="Maven conversation" className={styles.conversation}>
-              <h2>Your conversation with Maven</h2>
-              <div className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
+        <section className={styles.chatWorkspace} aria-label="Maven chat workspace">
+          <div className={styles.canvasHeader}>
+            <span className={styles.statusDot} aria-hidden="true" />
+            <span>{hasMavenConversation ? "Maven conversation" : "Maven Workspace"}</span>
+            <a href="/studio/overview" aria-label="Open workspace overview">···</a>
+          </div>
+          {chatError ? <p className={styles.chatError} role="alert">{chatError}</p> : null}
+          {!hasMavenConversation ? (
+            <div className={styles.welcome}>
+              <span className={styles.welcomeMark}><Icon type="maven" size={22} /></span>
+              <h1>What are we creating today?</h1>
+              <p>Bring an idea, a question, or a half-formed thought. We’ll shape it together.</p>
+            </div>
+          ) : (
+            <div ref={transcriptRef} className={styles.transcript} role="log" aria-live="polite" tabIndex={0} aria-label="Conversation history">
+              <div className={styles.transcriptInner}>
                 {mavenMessages.map((message, index) => (
                   <MavenBubble key={`${index}-${message.role}`} message={message}
                     streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"} />
                 ))}
               </div>
-              {mavenComposer}
-            </section>
-        )}
-      </section>
-
-      <div className={styles.operations}>
-        <section aria-label="Continue working" className="mt-6 pb-2">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold tracking-[-0.01em]">Continue Working</h2>
-              <p className="mt-1 text-xs text-[var(--ms-color-text-muted)]">Pick up where you left off.</p>
             </div>
-            {recentAssets.length > 0 && (
-              <a href="/studio/overview" className="text-[10px] font-medium text-[var(--ms-color-gold-primary)] hover:text-[var(--ms-color-text-primary)]">All recent work</a>
-            )}
-          </div>
-          {recentAssets.length ? (
-            <div className="mt-3 grid gap-2.5 md:grid-cols-3">
-              {recentAssets.map((asset, index) => (
-                <a
-                  key={asset.id || index}
-                  href={assetRoute(asset)}
-                  className="group flex items-center gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-2.5 transition-[border-color,transform] duration-[var(--ms-motion-card)] hover:-translate-y-px hover:border-[var(--ms-color-border-emphasized)]"
-                >
-                  <span className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--ms-color-background-elevated)] text-[var(--ms-color-gold-muted)]">
-                    {assetPreview(asset) ? <img src={assetPreview(asset)} alt="" className="h-full w-full object-cover transition-transform duration-[var(--ms-motion-card)] group-hover:scale-[1.03]" /> : <Icon type="library" size={16} />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-semibold">{assetLabel(asset)}</span>
-                    <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.13em] text-[var(--ms-color-text-muted)]">{titleCase(asset.kind || asset.metadata?.assetType || "Creative")} · {relativeTime(assetTimestamp(asset))}</span>
-                  </span>
-                </a>
-              ))}
-            </div>
-          ) : (
-            <WorkspaceCard className="mt-3 border-dashed">
-              <p className="text-xs font-medium">Nothing in progress yet</p>
-              <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">Start with a quick action above — your latest work will appear here.</p>
-            </WorkspaceCard>
           )}
-        </section>
-        {/* Operational information */}
-        <section aria-label="Needs your attention" className="mt-6">
-          <h2 className="text-sm font-semibold tracking-[-0.01em]">Needs Your Attention</h2>
-          <p className="mt-1 text-xs text-[var(--ms-color-text-muted)]">Production state across your work.</p>
-          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-            <AttentionTile
-              icon="approval"
-              label="Needs Approval"
-              value={needsApprovalCount}
-              zeroDetail="Nothing is waiting for your review."
-              actionHref="/studio/campaigns"
-              actionLabel="Review campaigns"
-            />
-            <AttentionTile
-              icon="publish"
-              label="Ready to Publish"
-              value={publishingDrafts.length}
-              zeroDetail="No drafts waiting in Publishing."
-              actionHref="/studio/publishing"
-              actionLabel="Open Publishing"
-            />
-            <AttentionTile
-              icon="progress"
-              label="In Progress"
-              value={inProgressCount}
-              zeroDetail="No active production right now."
-              actionHref="/studio/campaigns"
-              actionLabel="Open Campaigns"
-            />
+          {mavenBusy && !hasMavenConversation ? <p className={styles.statusLine} role="status">Maven is preparing a response…</p> : null}
+          <div className={styles.composerDock}>
+            {mavenComposer}
+            {!hasMavenConversation ? (
+              <nav className={styles.suggestions} aria-label="Start in a studio">
+                {QUICK_ACTIONS.slice(0, 4).map((item) => <QuickActionButton key={item.href} item={item} />)}
+                <details ref={moreRef} className={styles.more} onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    moreRef.current.open = false;
+                    moreRef.current.querySelector("summary")?.focus();
+                  }
+                }}>
+                  <summary className={styles.pill}>More <span aria-hidden="true">＋</span></summary>
+                  <nav aria-label="More studios" className={styles.morePanel}>
+                    {MORE_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
+                    {SECONDARY_ACTIONS.map((item) => <QuickActionButton key={item.href} item={item} />)}
+                  </nav>
+                </details>
+              </nav>
+            ) : null}
           </div>
         </section>
-
       </div>
     </ExperiencePage>
   );

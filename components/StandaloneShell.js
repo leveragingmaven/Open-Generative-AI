@@ -610,7 +610,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   let activeWorkspaceContent = null;
   if (isStudioHome) {
-    activeWorkspaceContent = <MavenHomeDashboard />;
+    activeWorkspaceContent = <MavenHomeDashboard onOpenSettings={openSettings} />;
   } else if (isOverviewWorkspace) {
     activeWorkspaceContent = <MavenSyncDashboard />;
   } else if (isCreateWorkspace) {
@@ -874,7 +874,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
       {/* Main column */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Informational workspace header */}
-        {isHeaderVisible && (
+        {isHeaderVisible && !isStudioHome && (
           <header className="relative z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-4 px-4 md:px-5">
             <div className="flex items-center gap-3 min-w-0">
               {!isStudioHome && (

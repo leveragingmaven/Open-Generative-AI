@@ -18,6 +18,10 @@ const canvasSource = readFileSync(
   new URL("../packages/Open-AI-Design-Agent/packages/design-agent/src/CreativeCanvas.jsx", import.meta.url),
   "utf8",
 );
+const dashboardStyles = readFileSync(
+  new URL("../packages/studio/src/components/experience/MavenHomeDashboard.module.css", import.meta.url),
+  "utf8",
+);
 
 function streamBody(chunks) {
   const encoder = new TextEncoder();
@@ -258,10 +262,36 @@ test("Dashboard recovers safely when the stored session is invalid/unowned", () 
   assert.match(dashboardSource, /setMavenReady\(controlled\);/);
 });
 
+test("Dashboard keeps its chat list persisted and can reopen an existing session", () => {
+  assert.match(dashboardSource, /DASHBOARD_CHAT_LIST_STORAGE_KEY = "mavensync_dashboard_chat_sessions"/);
+  assert.match(dashboardSource, /saveDashboardChat\(window\.localStorage, \{ id: sessionId/);
+  assert.match(dashboardSource, /loadMessages\(chat\.id\)/);
+  assert.match(dashboardSource, /storeDashboardSessionId\(window\.localStorage, chat\.id\)/);
+  assert.match(dashboardSource, /savedChats\.map\(\(chat\)/);
+});
+
 test("Dashboard degrades gracefully when controlled conversation is unavailable", () => {
   assert.match(dashboardSource, /Maven chat is unavailable/);
   assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy\}/);
   assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy \|\| !mavenMessage\.trim\(\)\}/);
+});
+
+test("Maven Workspace shell exposes New Chat, Chats, Skills, Connectors, and Projects", () => {
+  for (const label of ["New Chat", "Chats", "Skills", "Connectors", "Projects"]) {
+    assert.ok(dashboardSource.includes(label), `expected ${label} in Maven Workspace navigation`);
+  }
+  assert.match(dashboardSource, /clearStoredDashboardSessionId\(window\.localStorage\)/);
+});
+
+test("Maven composer autosizes, hides its scrollbar, and stays anchored below a readable transcript", () => {
+  assert.match(dashboardSource, /textarea\.style\.height = `\$\{Math\.min\(textarea\.scrollHeight, 192\)\}px`/);
+  assert.match(dashboardSource, /rows=\{1\}/);
+  assert.match(dashboardStyles, /\.composer textarea[\s\S]*?resize: none/);
+  assert.match(dashboardStyles, /\.composer textarea::-webkit-scrollbar \{ display: none/);
+  assert.match(dashboardStyles, /scrollbar-width: none/);
+  assert.match(dashboardStyles, /\.transcriptInner[\s\S]*?width: min\(100%, 760px\)/);
+  assert.match(dashboardStyles, /\.composerDock[\s\S]*?flex: 0 0 auto/);
+  assert.match(dashboardStyles, /\.transcript[\s\S]*?overflow: auto/);
 });
 
 test("CreativeCanvas delegates wire behavior to the shared conversation client", () => {
