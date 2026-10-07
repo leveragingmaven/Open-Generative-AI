@@ -21,6 +21,7 @@ test("AssetManager delegates canonical asset operations to local storage", () =>
 
   assert.equal(manager.getAsset(asset.id).prompt, "Original");
   assert.equal(manager.updateAsset(asset.id, { prompt: "Updated" }).prompt, "Updated");
+  assert.equal(manager.updateAsset(asset.id, { title: "Renamed asset" }).title, "Renamed asset");
   assert.equal(manager.cloneAsset(asset.id, { title: "Variant" }).parentAsset, asset.id);
   assert.equal(manager.listAssets().length, 2);
   assert.equal(manager.removeAsset(asset.id), true);

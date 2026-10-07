@@ -1,5 +1,31 @@
 import { createCreativeAsset } from "./CreativeAsset.js";
 
+export function isAssetReferencedByPublishingDrafts(assetId, drafts = []) {
+  return drafts.some((draft) => (draft.assetIds || []).some((id) => String(id) === String(assetId))
+    || (draft.assets || []).some((asset) => String(asset.assetId || asset.id || "") === String(assetId)));
+}
+
+export function withoutCreativeLibraryAsset(assets = [], assetId) {
+  return assets.filter((asset) => asset.id !== assetId);
+}
+
+export async function deleteCreativeLibraryAsset(assetId, { service, localAssetManager, localIds = new Set(), durableIds = new Set() } = {}) {
+  if (!assetId) throw new Error("An asset ID is required.");
+  const localAsset = localIds.has(assetId) ? localAssetManager?.getAsset(assetId) : null;
+  let removedLocal = false;
+  if (localIds.has(assetId)) {
+    removedLocal = Boolean(localAssetManager?.removeAsset(assetId));
+    if (!removedLocal) throw new Error("Asset was not removed from local storage.");
+  }
+  try {
+    if (durableIds.has(assetId)) await service.deleteDurable(assetId);
+  } catch (error) {
+    if (removedLocal && localAsset) localAssetManager.saveAsset(localAsset);
+    throw error;
+  }
+  return true;
+}
+
 export function normalizeCreativeLibraryAsset(asset = {}) {
   const generatedFiles = Array.isArray(asset.generatedFiles) && asset.generatedFiles.length
     ? asset.generatedFiles
@@ -97,9 +123,9 @@ export class AssetLibraryService {
     const local = this.list({ includeLegacy });
     try {
       const durable = await durableLoader({ campaignId });
-      return { assets: mergeCreativeLibraryAssets(local, durable), error: null };
+      return { assets: mergeCreativeLibraryAssets(local, durable), durableAssetIds: durable.map((asset) => asset.id), error: null };
     } catch (error) {
-      return { assets: local, error };
+      return { assets: local, durableAssetIds: [], error };
     }
   }
 
@@ -129,6 +155,13 @@ export class AssetLibraryService {
 
   get(assetId) { return this.list().find((asset) => asset.id === assetId) || null; }
   update(assetId, changes) { return this.repository?.update?.(assetId, changes) || null; }
+  async deleteDurable(assetId, { fetchImpl = globalThis?.fetch } = {}) {
+    if (typeof fetchImpl !== "function") throw new Error("durable_asset_delete_unavailable");
+    const response = await fetchImpl(`/api/creative-assets?assetId=${encodeURIComponent(assetId)}`, { method: "DELETE", credentials: "same-origin" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(payload.error || "Unable to remove this asset."), { code: payload.code || "durable_asset_delete_failed", status: response.status });
+    return payload;
+  }
   setFavorite(assetId, favorite = true) { return this.update(assetId, { favorite }); }
   setArchived(assetId, archived = true) { return this.update(assetId, { archived }); }
   lineage(assetId) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AssetLibraryService } from "../lib/intelligence/AssetLibraryService.js";
+import { AssetLibraryService, deleteCreativeLibraryAsset, isAssetReferencedByPublishingDrafts, withoutCreativeLibraryAsset } from "../lib/intelligence/AssetLibraryService.js";
 import { localAssetManager } from "../lib/intelligence/AssetManager.js";
 import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
@@ -190,6 +190,10 @@ export default function AssetLibraryStudio() {
   const [publishingSelectMode, setPublishingSelectMode] = useState(false);
   const [removingId, setRemovingId] = useState(null);
   const [localIds, setLocalIds] = useState(() => new Set());
+  const [durableIds, setDurableIds] = useState(() => new Set());
+  const [renameTitle, setRenameTitle] = useState("");
+  const [assetActionError, setAssetActionError] = useState(null);
+  const [assetActionBusy, setAssetActionBusy] = useState(false);
   const [publishingNotice, setPublishingNotice] = useState(null);
 
   const reload = async () => {
@@ -199,10 +203,11 @@ export default function AssetLibraryStudio() {
       if (archiveFilter === "current") filters.archived = false;
       if (archiveFilter === "archived") filters.archived = true;
       const loaded = await service.listWithDurableAssets({ campaignId: activeCampaign?.id });
-      // Only assets with a stored local record (canonical + legacy) can be
-      // removed through the existing local adapter. Durable-only cards merged
-      // in from /api/creative-assets get no Remove control.
-      setLocalIds(new Set(service.list({ includeLegacy: true }).map((asset) => asset.id)));
+      // Canonical local records and durable API records can be removed through
+      // their existing persistence paths. Legacy history-only entries have no
+      // supported delete operation and therefore get no Remove control.
+      setLocalIds(new Set(service.list({ includeLegacy: false }).map((asset) => asset.id)));
+      setDurableIds(new Set(loaded.durableAssetIds || []));
       setAllAssets(loaded.assets);
       setAssets(service.search({ ...filters, assets: loaded.assets }));
       setLoadError(null);
@@ -245,24 +250,66 @@ export default function AssetLibraryStudio() {
     if (selectedId && !scopedAssets.some((asset) => asset.id === selectedId)) setSelectedId(null);
   }, [scopedAssets, selectedId]);
 
+  useEffect(() => {
+    setRenameTitle(selected?.title || "");
+    setAssetActionError(null);
+  }, [selected?.id, selected?.title]);
+
   const toggleFavorite = () => {
     if (!selected) return;
     service.setFavorite(selected.id, !selected.favorite);
     reload();
   };
 
-  // Removes a single saved creation through the existing AssetManager storage
-  // layer (adapter.removeAsset); no new persistence mechanism.
-  const handleRemove = (asset) => {
+  // Removes a single unreferenced asset through its existing local or durable
+  // persistence path; no new metadata or persistence system is introduced.
+  const isReferencedByDraft = (assetId) => {
+    const center = new PublishingCenterMVP({ storage: window.localStorage });
+    return isAssetReferencedByPublishingDrafts(assetId, center.getDrafts());
+  };
+
+  const handleRemove = async (asset) => {
     if (!asset?.id || removingId) return;
-    if (!window.confirm("Remove this asset from your library?")) return;
+    if (!window.confirm("Remove this asset from your library? This cannot be undone.")) return;
+    if (isReferencedByDraft(asset.id)) {
+      setAssetActionError("This asset is used by a saved publishing draft. Remove it from that draft before deleting the asset.");
+      return;
+    }
     setRemovingId(asset.id);
+    setAssetActionError(null);
     try {
-      localAssetManager.removeAsset(asset.id);
-    } finally {
+      await deleteCreativeLibraryAsset(asset.id, { service, localAssetManager, localIds, durableIds });
+      setAllAssets((current) => withoutCreativeLibraryAsset(current, asset.id));
+      setAssets((current) => withoutCreativeLibraryAsset(current, asset.id));
+      setLocalIds((current) => { const next = new Set(current); next.delete(asset.id); return next; });
+      setDurableIds((current) => { const next = new Set(current); next.delete(asset.id); return next; });
       if (selectedId === asset.id) setSelectedId(null);
+    } catch (error) {
+      setAssetActionError(error.message || "Unable to remove this asset from your library.");
+    } finally {
       setRemovingId(null);
-      reload();
+    }
+  };
+
+  const handleRename = (asset) => {
+    const title = renameTitle.trim();
+    if (!asset?.id || !title || assetActionBusy) return;
+    if (durableIds.has(asset.id)) {
+      setAssetActionError("Title editing is unavailable for durable assets because the backend does not support asset updates.");
+      return;
+    }
+    setAssetActionBusy(true);
+    setAssetActionError(null);
+    try {
+      const updated = localAssetManager.updateAsset(asset.id, { title });
+      if (!updated) throw new Error("This asset cannot be updated in local storage.");
+      setAllAssets((current) => current.map((item) => item.id === asset.id ? { ...item, title: updated.title, updatedAt: updated.updatedAt } : item));
+      setAssets((current) => current.map((item) => item.id === asset.id ? { ...item, title: updated.title, updatedAt: updated.updatedAt } : item));
+      setRenameTitle(updated.title);
+    } catch (error) {
+      setAssetActionError(error.message || "Unable to update this asset title.");
+    } finally {
+      setAssetActionBusy(false);
     }
   };
 
@@ -320,6 +367,7 @@ export default function AssetLibraryStudio() {
       )}
 
       {publishingNotice ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{publishingNotice}</div> : null}
+      {assetActionError ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{assetActionError}</div> : null}
 
       {activeCampaign && (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3">
@@ -376,7 +424,7 @@ export default function AssetLibraryStudio() {
 
       <WorkspaceSection title="Asset Grid" description={publishingSelectMode ? `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} available for publishing selection.` : `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
         {serverWarning ? <p className="mb-3 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)]">{serverWarning}</p> : null}
-        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <div key={asset.id} className="relative"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />{localIds.has(asset.id) && <button type="button" onClick={() => handleRemove(asset)} disabled={removingId === asset.id} title="Remove from library" aria-label={`Remove ${assetTitle(asset)} from your library`} className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 transition-colors hover:border-[rgba(239,107,114,0.5)] hover:bg-[rgba(239,107,114,0.25)] hover:text-[var(--ms-color-error)] disabled:opacity-50"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}</div>)}</div>}
+        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <div key={asset.id} className="relative"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />{(localIds.has(asset.id) || durableIds.has(asset.id)) && <button type="button" onClick={() => void handleRemove(asset)} disabled={removingId === asset.id} title="Remove from library" aria-label={`Remove ${assetTitle(asset)} from your library`} className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 transition-colors hover:border-[rgba(239,107,114,0.5)] hover:bg-[rgba(239,107,114,0.25)] hover:text-[var(--ms-color-error)] disabled:opacity-50"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}</div>)}</div>}
       </WorkspaceSection>
 
       {selected && (
@@ -394,6 +442,7 @@ export default function AssetLibraryStudio() {
                   {selectedStatus ? <div><dt className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Status</dt><dd className="mt-1 text-xs font-medium capitalize">{selectedStatus}</dd></div> : null}
                   {selected.width || selected.height ? <div><dt className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Dimensions</dt><dd className="mt-1 text-xs font-medium">{selected.width || "?"} × {selected.height || "?"}</dd></div> : null}
                 </dl>
+                {!durableIds.has(selected.id) && localIds.has(selected.id) ? <div className="mt-5 flex flex-wrap items-end gap-2"><label className="min-w-[180px] flex-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title<input aria-label="Asset title" value={renameTitle || selected.title || ""} onChange={(event) => setRenameTitle(event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white" /></label><SecondaryButton type="button" disabled={!renameTitle.trim() || renameTitle.trim() === selected.title || assetActionBusy} onClick={() => handleRename(selected)} className="min-h-10 px-4 py-2 text-xs">{assetActionBusy ? "Saving…" : "Save Title"}</SecondaryButton></div> : null}
                 <div className="mt-7 flex flex-wrap gap-2">
                   {assetUrl(selected) ? <PrimaryButton type="button" onClick={downloadSelected} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</PrimaryButton> : null}
                   <SecondaryButton type="button" onClick={toggleFavorite} className="min-h-10 px-4 py-2 text-xs"><Icon type="favorite" size={14} /> {selected.favorite ? "Remove favorite" : "Add favorite"}</SecondaryButton>

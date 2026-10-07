@@ -5,22 +5,32 @@ import test from "node:test";
 const librarySource = readFileSync(new URL("../packages/studio/src/components/AssetLibraryStudio.jsx", import.meta.url), "utf8");
 const assetManagerSource = readFileSync(new URL("../packages/studio/src/lib/intelligence/AssetManager.js", import.meta.url), "utf8");
 const adapterSource = readFileSync(new URL("../packages/studio/src/lib/intelligence/LocalStorageAdapter.js", import.meta.url), "utf8");
+const serviceSource = readFileSync(new URL("../packages/studio/src/lib/intelligence/AssetLibraryService.js", import.meta.url), "utf8");
 
 test("Creative Library remove control uses the existing AssetManager storage layer", () => {
   // The existing persistence mechanism (no new architecture) supports removal.
   assert.match(assetManagerSource, /removeAsset\(assetId\) \{\s*\n\s*return this\.adapter\.removeAsset\(assetId\);/);
   assert.match(adapterSource, /removeAsset\(assetId\)/);
 
-  // The card grid wires a per-asset remove control through that mechanism,
-  // shown ONLY for assets that have a stored local record. Durable-only cards
-  // merged from /api/creative-assets must not display a misleading Remove.
-  assert.match(librarySource, /const handleRemove = \(asset\) => \{/);
-  assert.match(librarySource, /localAssetManager\.removeAsset\(asset\.id\);/);
-  assert.match(librarySource, /localIds\.has\(asset\.id\) && <button/);
-  assert.match(librarySource, /setLocalIds\(new Set\(service\.list\(\{ includeLegacy: true \}\)\.map\(\(asset\) => asset\.id\)\)\);/);
-  assert.match(librarySource, /Durable-only cards merged/);
+  // Local canonical records and durable API records are removable; legacy
+  // history entries without a supported persistence delete remain read-only.
+  assert.match(librarySource, /const handleRemove = async \(asset\) => \{/);
+  assert.match(librarySource, /deleteCreativeLibraryAsset\(asset\.id, \{ service, localAssetManager, localIds, durableIds \}\)/);
+  assert.match(serviceSource, /localAssetManager\?\.removeAsset\(assetId\)/);
+  assert.match(librarySource, /\(localIds\.has\(asset\.id\) \|\| durableIds\.has\(asset\.id\)\) && <button/);
+  assert.match(librarySource, /setLocalIds\(new Set\(service\.list\(\{ includeLegacy: false \}\)\.map\(\(asset\) => asset\.id\)\)\);/);
+  assert.match(librarySource, /Legacy history-only entries have no/);
   assert.match(librarySource, /Remove this asset from your library\?/);
   assert.match(librarySource, /Remove \$\{assetTitle\(asset\)\} from your library/);
+});
+
+test("Creative Library rename is local-only and removal refuses publishing-referenced assets", () => {
+  assert.match(librarySource, /isAssetReferencedByPublishingDrafts\(assetId, center\.getDrafts\(\)\)/);
+  assert.match(librarySource, /if \(isReferencedByDraft\(asset\.id\)\)/);
+  assert.match(librarySource, /durableIds\.has\(selected\.id\).*localIds\.has\(selected\.id\)/s);
+  assert.match(librarySource, /localAssetManager\.updateAsset\(asset\.id, \{ title \}\)/);
+  assert.match(librarySource, /if \(durableIds\.has\(asset\.id\)\)/);
+  assert.match(librarySource, /Asset title/);
 });
 
 test("Creative Library no longer tells customers to Open the create view from the empty grid", () => {
@@ -28,7 +38,15 @@ test("Creative Library no longer tells customers to Open the create view from th
   assert.match(librarySource, />Start creating</);
 });
 
+test("Asset preview and Use for Publishing handoff keep their existing paths", () => {
+  assert.match(librarySource, /<AssetMedia asset=\{asset\} \/>/);
+  assert.match(librarySource, /assetPreviewKind\(asset\)/);
+  assert.match(librarySource, /Use for Publishing/);
+  assert.match(librarySource, /center\.createDraftFromAsset\(asset/);
+  assert.match(librarySource, /router\.push\(`\/studio\/publishing\?draft=/);
+});
+
 test("Saved image cards fall back to the stored thumbnail reference and survive broken sources", () => {
-  assert.match(librarySource, /asset\?\.thumbnail \|\| assetUrl\(asset\)/);
-  assert.match(librarySource, /onError=\{\(\) => setImageFailed\(true\)\}/);
+  assert.match(librarySource, /const thumbnail = asset\?\.thumbnail \|\| asset\?\.thumbnails\?\.\[0\]/);
+  assert.match(librarySource, /onError=\{\(\) => setFailedSources\(\(sources\) => \[\.\.\.sources, imageUrl\]\)\}/);
 });

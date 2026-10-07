@@ -3,3 +3,7 @@ import { handleCreativeAssetsRoute } from '../../../src/lib/creativeAssetEndpoin
 export async function GET(request) {
   return handleCreativeAssetsRoute(request);
 }
+
+export async function DELETE(request) {
+  return handleCreativeAssetsRoute(request);
+}

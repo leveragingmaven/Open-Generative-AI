@@ -13,6 +13,11 @@ class FakeDb {
       return [this.rows.filter((row) => row.asset_id === params[0] && String(row.account_id) === String(params[1]))];
     }
     if (normalized.startsWith('SELECT * FROM creative_assets WHERE account_id')) return [this.rows.filter((row) => String(row.account_id) === String(params[0]))];
+    if (normalized.startsWith('DELETE FROM creative_assets')) {
+      const before = this.rows.length;
+      this.rows = this.rows.filter((row) => row.asset_id !== params[0] || String(row.account_id) !== String(params[1]));
+      return [{ affectedRows: before - this.rows.length }];
+    }
     if (normalized.startsWith('INSERT INTO creative_assets')) {
       const [assetId, accountId, creator, jobId, attemptId, requestId, authorizationId, agentId, conversationId, campaignId, assetType, modality, providerId, deploymentId, outputRef, storageRef, recipeId, planId, assetJson, metadataJson] = params;
       if (this.rows.some((row) => row.job_id === jobId && row.attempt_id === attemptId)) { const error = new Error('duplicate'); error.code = 'ER_DUP_ENTRY'; throw error; }
@@ -37,6 +42,10 @@ test('MySQL asset repository persists and scopes durable lineage', async () => {
   assert.equal((await repository.getByExecution({ jobId: 'job-1', attemptId: 'attempt-1', accountId: 'account-1' })).id, 'asset-1');
   assert.equal(await repository.getByExecution({ jobId: 'job-1', attemptId: 'attempt-1', accountId: 'other-account' }), null);
   assert.equal((await repository.list({ accountId: 'account-1', campaignId: 'campaign-1' })).length, 1);
+  assert.equal(await repository.delete('asset-1', { accountId: 'other-account' }), false);
+  assert.equal(await repository.get('asset-1', { accountId: 'account-1' }) !== null, true);
+  assert.equal(await repository.delete('asset-1', { accountId: 'account-1' }), true);
+  assert.equal(await repository.get('asset-1', { accountId: 'account-1' }), null);
 });
 
 test('duplicate job/attempt insertion returns the existing asset', async () => {

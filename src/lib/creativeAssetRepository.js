@@ -91,6 +91,11 @@ export class MySqlCreativeAssetRepository extends CreativeAssetRepository {
     return rowToAsset(rows[0]);
   }
 
+  async delete(assetId, { accountId } = {}) {
+    const [result] = await this.db.query('DELETE FROM creative_assets WHERE asset_id = ? AND account_id = ?', [assetId, accountId]);
+    return Boolean(result?.affectedRows);
+  }
+
   async list({ accountId, campaignId } = {}) {
     const clauses = ['account_id = ?'];
     const params = [accountId];
