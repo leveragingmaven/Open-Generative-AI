@@ -229,6 +229,7 @@ const SAFE_ERROR_CODES = new Set([
   'vision_intelligence_not_configured',
   'image_provider_credential_required', 'image_generation_failed', 'image_generation_unsupported',
   'image_generation_timeout', 'image_prompt_required',
+  'image_model_unavailable', 'image_aspect_ratio_unsupported',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
