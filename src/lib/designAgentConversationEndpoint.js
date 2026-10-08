@@ -16,8 +16,9 @@ import { DesignAgentConversationIntelligenceService, trustedImageUrl } from './d
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
 import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
 import { generateMavenVideo, buildGeneratedVideoReply } from './mavenVideoGeneration.js';
+import { generateMavenImageToVideo } from './mavenImageToVideoGeneration.js';
 import { isImageGenerationRequest, isImageEditRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
-import { isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
+import { isImageToVideoRequest, isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -140,6 +141,9 @@ export async function loadEndpointServices() {
     generateMavenVideo(identity, args = {}) {
       return generateMavenVideo({ identity, ...args });
     },
+    generateMavenImageToVideo(identity, args = {}) {
+      return generateMavenImageToVideo({ identity, ...args });
+    },
     async registerMavenImageReference(identity, { conversationId, url, kind = 'image' } = {}) {
       if (kind !== 'image' || typeof url !== 'string' || !/^https:\/\//i.test(url)) return null;
       if (typeof designAgentProvider.registerSessionAsset !== 'function') return null;
@@ -250,6 +254,7 @@ const SAFE_ERROR_CODES = new Set([
   'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable', 'image_reference_unavailable',
   'video_provider_credential_required', 'video_generation_failed', 'video_generation_timeout',
   'video_generation_unsupported', 'video_prompt_required', 'video_model_unavailable', 'video_option_unsupported',
+  'image_source_unavailable', 'video_model_unavailable', 'video_option_unsupported',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -514,12 +519,12 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // Natural-language refinements can refer to the last assistant image without
     // exposing URLs in the browser. Only session asset IDs from authorized history
     // are eligible; resolve them against this session's asset catalog.
-    if (!trustedAttachments.length && isImageEditRequest(message)) {
+    if (!trustedAttachments.length && (isImageEditRequest(message) || isImageToVideoRequest(message))) {
       const implicitReference = resolveLastTrustedImageReference(sessionReadResult, conversationId);
       if (implicitReference) trustedAttachments = [implicitReference];
       else {
         const unavailable = new Error('The previous image is no longer available as a trusted session asset. Please upload it again to continue refining.');
-        unavailable.code = 'image_reference_unavailable';
+        unavailable.code = isImageToVideoRequest(message) ? 'image_source_unavailable' : 'image_reference_unavailable';
         unavailable.status = 422;
         throw unavailable;
       }
@@ -531,6 +536,23 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
 
     // Text-to-video executes via the existing MuAPI adapter and its polling method.
     // Requests with any reference images are deliberately left on the trusted image path for now.
+    const videoIntent = isVideoGenerationRequest(message) || isImageToVideoRequest(message);
+    if (videoIntent && trustedAttachments.length > 1) {
+      const error = new Error('Animate one image at a time. Select one image reference and try again.');
+      error.code = 'image_source_unavailable';
+      error.status = 422;
+      throw error;
+    }
+    if (videoIntent && trustedAttachments.length === 1) {
+      const generateImageVideo = await getService('generateMavenImageToVideo');
+      const sourceUrl = trustedImageUrl(trustedAttachments[0]);
+      const video = await generateImageVideo(identity, { prompt: message, imageUrl: sourceUrl, signal: request?.signal });
+      const reply = buildGeneratedVideoReply(video);
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments) };
+    }
     if (!trustedAttachments.length && isVideoGenerationRequest(message)) {
       const generateVideo = await getService('generateMavenVideo');
       const video = await generateVideo(identity, { prompt: message, signal: request?.signal });

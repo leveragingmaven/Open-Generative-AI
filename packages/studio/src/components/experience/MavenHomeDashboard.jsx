@@ -5,7 +5,7 @@ import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
 import { extractGeneratedImageUrls, isImageEditRequest, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
-import { extractGeneratedVideoUrls, isVideoGenerationRequest } from "../../lib/mavenVideoIntent.js";
+import { extractGeneratedVideoUrls, isImageToVideoRequest, isVideoGenerationRequest } from "../../lib/mavenVideoIntent.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -355,7 +355,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    const pendingStatus = isVideoGenerationRequest(text) && attachments.length === 0 ? "Creating your video…" : (isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : ""));
+    const pendingStatus = (isVideoGenerationRequest(text) || isImageToVideoRequest(text)) ? "Creating your video…" : (isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : ""));
     const reference = explicitReference || selectedImageReference;
     const priorReferenceIds = reference?.attachmentId ? [reference.attachmentId] : [];
     setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: pendingStatus }]);
