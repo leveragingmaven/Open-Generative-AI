@@ -349,7 +349,7 @@ test('does not call execute or any media provider', async () => {
   });
 
   await handleDesignAgentConversationPost(
-    makeRequest({ conversationId: 'owned-session', message: 'make me an image' }),
+    makeRequest({ conversationId: 'owned-session', message: 'tell me about image ideas' }),
     deps
   );
 

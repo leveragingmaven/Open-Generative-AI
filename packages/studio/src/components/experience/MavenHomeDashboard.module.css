@@ -590,6 +590,10 @@
 .assistantRow:hover .messageActions, .assistantRow:focus-within .messageActions { opacity: 1; }
 .copyAction { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px; border: 0; border-radius: 5px; background: transparent; color: #aaa49b; font: inherit; font-size: 10px; cursor: pointer; }
 .copyAction:hover { background: rgba(255,255,255,.06); color: #e6e0d6; }
+.imageActions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.imageAction { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: rgba(255,255,255,.03); color: #cfc8bb; font: inherit; font-size: 11px; cursor: pointer; }
+.imageAction:hover { background: rgba(255,255,255,.07); color: #f4eee3; }
+.assistantMessage .markdown img { display: block; width: 100%; max-width: 520px; height: auto; margin: 8px 0; border-radius: 12px; border: 1px solid rgba(255,255,255,.08); }
 .userMessage { padding: 10px 15px; border: 1px solid rgba(212,168,88,.18); border-radius: 17px 17px 5px 17px; background: rgba(212,168,88,.095); color: #f4eee3; }
 .assistantMessage { color: #dedad4; }
 .composerDock {

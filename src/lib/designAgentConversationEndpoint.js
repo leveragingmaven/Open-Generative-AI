@@ -14,6 +14,8 @@ import { getMuApiBaseUrl, getServerMuApiKey } from './agencyMode.js';
 import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } from './serverTextIntelligence.js';
 import { DesignAgentConversationIntelligenceService } from './designAgentConversationIntelligence.js';
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
+import { generateMavenImage, buildGeneratedImageReply } from './mavenImageGeneration.js';
+import { isImageGenerationRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -122,6 +124,9 @@ export async function loadEndpointServices() {
     createVisionTextIntelligence(identity) {
       return createServerVisionTextIntelligence(identity);
     },
+    generateMavenImage(identity, args = {}) {
+      return generateMavenImage({ identity, ...args });
+    },
   };
 }
 
@@ -222,6 +227,8 @@ const SAFE_ERROR_CODES = new Set([
   'unsupported_design_attachment_kind', 'fabricated_design_asset_reference',
   'muapi_server_key_required', 'creative_intelligence_not_configured',
   'vision_intelligence_not_configured',
+  'image_provider_credential_required', 'image_generation_failed', 'image_generation_unsupported',
+  'image_generation_timeout', 'image_prompt_required',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -439,6 +446,24 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       ...sessionReadResult,
       attachments: requestedAttachmentIds.length ? trustedAttachments : (sessionReadResult?.attachments || []),
     };
+
+    // Image requests without attachments are executed through the existing fal.ai
+    // provider with the customer's BYOK credential. Requests with attachments keep
+    // the vision path, so reference-based generation is not attempted here.
+    if (!trustedAttachments.length && isImageGenerationRequest(message)) {
+      const generateImage = await getService('generateMavenImage');
+      const image = await generateImage(identity, { prompt: message, signal: request?.signal });
+      const reply = buildGeneratedImageReply(image);
+      if (wantsStream) {
+        return buildConversationStreamResponse({
+          service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
+          sessionReadResult: trustedSessionReadResult,
+          message,
+          attachments: [],
+        });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, []) };
+    }
 
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');

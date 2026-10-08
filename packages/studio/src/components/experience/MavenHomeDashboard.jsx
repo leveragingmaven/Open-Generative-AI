@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
+import { downloadAsset } from "../../lib/assets/assetManager.js";
+import { extractGeneratedImageUrls, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -60,6 +62,7 @@ function Icon({ type, size = 18 }) {
     plus: <><path d="M12 5v14M5 12h14" /></>,
     close: <><path d="m18 6-12 12M6 6l12 12" /></>,
     copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
+    download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5M12 15V3" /></>,
     check: <><path d="m5 12 4 4L19 6" /></>,
     attach: <><path d="m21.4 11.1-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></>,
     sparkle: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" /></>,
@@ -115,8 +118,9 @@ function QuickActionButton({ item }) {
   );
 }
 
-function MavenBubble({ message, streaming }) {
+function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onRefine }) {
   const isUser = message.role === "user";
+  const imageUrls = isUser ? [] : extractGeneratedImageUrls(message.content || "");
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef(null);
   const markdownComponents = {
@@ -171,6 +175,29 @@ function MavenBubble({ message, streaming }) {
               <Icon type={copied ? "check" : "copy"} size={13} />
               <span>{copied ? "Copied" : "Copy"}</span>
             </button>
+          </div>
+        ) : null}
+        {!isUser && !streaming && imageUrls.length ? (
+          <div className={styles.imageActions}>
+            {imageUrls.map((url, index) => (
+              <button key={url} type="button" className={styles.imageAction} aria-label={`Download image ${index + 1}`}
+                onClick={() => downloadAsset(url, { filename: `maven-image-${Date.now()}-${index + 1}.jpg`, kind: "image", prefix: "maven" })}>
+                <Icon type="download" size={13} />
+                <span>Download</span>
+              </button>
+            ))}
+            {previousPrompt && onVariation ? (
+              <button type="button" className={styles.imageAction} onClick={() => onVariation(previousPrompt)}>
+                <Icon type="sparkle" size={13} />
+                <span>Another variation</span>
+              </button>
+            ) : null}
+            {onRefine ? (
+              <button type="button" className={styles.imageAction} onClick={onRefine}>
+                <Icon type="design" size={13} />
+                <span>Refine</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -284,18 +311,20 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachments((current) => current.filter((item) => item.localId !== localId));
   };
 
-  const submitMavenMessage = async (event) => {
-    event.preventDefault();
+  const submitMavenMessage = async (event, overrideText) => {
+    event?.preventDefault?.();
     const client = mavenClientRef.current;
-    const text = mavenMessage.trim();
+    const isOverride = typeof overrideText === "string";
+    const text = (isOverride ? overrideText : mavenMessage).trim();
     if (!client || !text || mavenBusy || !mavenReady || attachments.some((attachment) => attachment.status !== "ready")) return;
 
-    setMavenMessage("");
+    if (!isOverride) setMavenMessage("");
     setChatError(null);
     setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: "" }]);
+    const pendingStatus = isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : "";
+    setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: pendingStatus }]);
 
     try {
       const sessionId = await ensureMavenSession();
@@ -362,7 +391,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       setAttachments([]);
     } catch (error) {
-      setMavenMessage(text);
+      if (!isOverride) setMavenMessage(text);
       setMavenMessages((prev) => {
         const arr = [...prev];
         if (arr[assistantIndex]) {
@@ -551,7 +580,10 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
               <div className={styles.transcriptInner}>
                 {mavenMessages.map((message, index) => (
                   <MavenBubble key={`${index}-${message.role}`} message={message}
-                    streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"} />
+                    streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"}
+                    previousPrompt={index > 0 && mavenMessages[index - 1].role === "user" ? mavenMessages[index - 1].content : ""}
+                    onVariation={(prompt) => void submitMavenMessage(null, `Create another variation of this image: ${prompt}`)}
+                    onRefine={() => { setMavenMessage("Refine this image: "); composerInputRef.current?.focus(); }} />
                 ))}
               </div>
             </div>
