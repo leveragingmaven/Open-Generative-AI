@@ -41,6 +41,23 @@ test("downloadAsset downloads generated image blobs with the requested filename"
   assert.equal(result, undefined);
 });
 
+test("downloadAsset refuses an HTML error body instead of saving it as an image", async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await withBrowserMocks(
+      async () => ({ ok: true, headers: { get: () => "text/html" }, async blob() { return new Blob(["<html>login</html>"], { type: "text/html" }); } }),
+      async (clicked) => {
+        const result = await downloadAsset("https://fal.media/expired-image", { filename: "generated.jpg", kind: "image" });
+        assert.deepEqual(result, { ok: false, reason: "asset_unavailable" });
+        assert.equal(clicked.length, 0);
+      },
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("downloadAsset uses a direct download fallback when remote fetch is unavailable", async () => {
   const originalWarn = console.warn;
   console.warn = () => {};
@@ -49,9 +66,8 @@ test("downloadAsset uses a direct download fallback when remote fetch is unavail
       async () => { throw new Error("cors"); },
       async (clicked) => {
         const result = await downloadAsset("https://fal.media/image", { filename: "generated.jpg", kind: "image" });
-        assert.equal(result.method, "direct");
-        assert.equal(clicked[0].download, "generated.jpg");
-        assert.equal(clicked[0].href, "https://fal.media/image");
+        assert.deepEqual(result, { ok: false, reason: "fetch_failed" });
+        assert.equal(clicked.length, 0, "a failed fetch must not trigger an unverified direct download");
       },
     );
   } finally {

@@ -85,6 +85,23 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
     return assets.map((asset) => normalizeDesignAgentAsset(asset, { ...context, designSessionId: sessionId }));
   }
 
+  async registerSessionAsset(sessionId, { url, kind = "image", sourceTool = "maven" } = {}, context = {}) {
+    if (!sessionId) throw new DesignAgentRequestError("Design session ID is required", { status: 400 });
+    if (typeof url !== "string" || !/^https:\/\//i.test(url) || kind !== "image") {
+      throw new DesignAgentRequestError("A valid generated image URL is required", { status: 422 });
+    }
+    const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/assets`, {
+      method: "POST",
+      body: { url, kind, source_tool: sourceTool },
+      signal: context.signal,
+    });
+    const label = String(data?.asset_label || data?.assetId || data?.id || "").trim();
+    if (!/^asset_[A-Za-z0-9_-]{1,190}$/.test(label)) {
+      throw new DesignAgentRequestError("The generated image could not be registered with this session", { status: 502 });
+    }
+    return { attachmentId: label, kind: "image" };
+  }
+
   async getDesignJob(sessionId, context = {}) {
     if (!sessionId) throw new DesignAgentRequestError("Design session ID is required", { status: 400 });
     const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/jobs`);

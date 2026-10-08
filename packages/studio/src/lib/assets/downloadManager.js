@@ -19,6 +19,13 @@ export async function downloadAsset(url, options = {}) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const blob = await response.blob();
+    const contentType = String(response.headers?.get?.("content-type") || blob?.type || "").toLowerCase();
+    const preview = typeof blob.slice === "function" ? (await blob.slice(0, 512).text()).trimStart().toLowerCase() : "";
+    if (contentType.includes("text/html") || contentType.includes("application/json") || blob.type?.includes("text/html")
+        || preview.startsWith("<!doctype html") || preview.startsWith("<html") || preview.startsWith("{\"error\"")) {
+      throw new Error("Remote asset endpoint returned a non-media response");
+    }
+    if (!blob.size) throw new Error("Remote asset was empty");
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = blobUrl;
@@ -30,14 +37,9 @@ export async function downloadAsset(url, options = {}) {
 
     return { ok: true, filename, method: "blob" };
   } catch (err) {
-    console.warn("[downloadManager] Blob download failed; using direct asset download.", err);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    return { ok: true, filename, method: "direct" };
+    console.warn("[downloadManager] Asset download failed.", err);
+    return { ok: false, reason: /HTTP 404|HTTP 410|HTTP 401|HTTP 403|non-media response|asset was empty/i.test(String(err?.message || ""))
+      ? "asset_unavailable"
+      : "fetch_failed" };
   }
 }

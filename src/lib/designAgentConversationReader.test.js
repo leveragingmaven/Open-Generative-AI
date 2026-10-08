@@ -129,6 +129,29 @@ test('bounds history with the existing recent contiguous turn policy', async () 
   ]);
 });
 
+test('maps generated assistant references only through server-loaded session assets', async () => {
+  const { conversationReader } = reader({
+    messages: [{ role: 'assistant', content: '![generated](https://cdn.test/asset_1.png)', attachments: [{ asset_label: 'asset_1' }] }],
+    assets: [asset('asset_1')],
+  });
+  const result = await read(conversationReader);
+  assert.deepEqual(result.imageReferences, [{
+    role: 'assistant',
+    content: '![generated](https://cdn.test/asset_1.png)',
+    attachments: [{ attachmentId: 'asset_1', kind: 'image' }],
+  }]);
+  assert.deepEqual(result.messages, [], 'assistant asset IDs do not enter ordinary model history');
+});
+
+test('ignores assistant asset references that do not resolve in the owned session asset list', async () => {
+  const { conversationReader } = reader({
+    messages: [{ role: 'assistant', content: '![generated](https://untrusted.test/foreign.png)', attachments: [{ asset_label: 'asset_foreign' }] }],
+    assets: [],
+  });
+  const result = await read(conversationReader);
+  assert.deepEqual(result.imageReferences, []);
+});
+
 test('normalizes image, video, and audio session assets with stable labels and trusted URLs', async () => {
   const assets = [asset('asset_1'), asset('asset_2', 'video'), asset('asset_3', 'audio')];
   const { conversationReader } = reader({ assets });

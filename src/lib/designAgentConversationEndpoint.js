@@ -26,7 +26,7 @@ export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
  * Allowed: role ('user' | 'assistant'), content (string), timestamp (string).
  * Rejected roles: 'system', 'tool', 'function', 'developer', and any unknown role.
  */
-export function sanitizeDesignAgentMessage(message, { trustedAttachments = [] } = {}) {
+export function sanitizeDesignAgentMessage(message, { trustedAttachments = [], generatedReferences = [] } = {}) {
   if (!message || typeof message !== 'object') return null;
 
   const { role, content, timestamp } = message;
@@ -57,6 +57,11 @@ export function sanitizeDesignAgentMessage(message, { trustedAttachments = [] } 
       kind: attachment.kind,
       ...(attachment.filename ? { filename: attachment.filename } : {}),
     }));
+  }
+  if (role === 'assistant' && Array.isArray(generatedReferences) && generatedReferences.length) {
+    sanitized.attachments = generatedReferences
+      .filter((attachment) => /^asset_[A-Za-z0-9_-]{1,190}$/.test(String(attachment?.attachmentId || '')) && attachment?.kind === 'image')
+      .map((attachment) => ({ attachmentId: attachment.attachmentId, kind: 'image' }));
   }
 
   return sanitized;
@@ -129,6 +134,11 @@ export async function loadEndpointServices() {
     },
     generateMavenImageEdit(identity, args = {}) {
       return generateMavenImageEdit({ identity, ...args });
+    },
+    async registerMavenImageReference(identity, { conversationId, url, kind = 'image' } = {}) {
+      if (kind !== 'image' || typeof url !== 'string' || !/^https:\/\//i.test(url)) return null;
+      if (typeof designAgentProvider.registerSessionAsset !== 'function') return null;
+      return designAgentProvider.registerSessionAsset(conversationId, { url, kind, sourceTool: 'maven' }, { identity });
     },
   };
 }
@@ -232,7 +242,7 @@ const SAFE_ERROR_CODES = new Set([
   'vision_intelligence_not_configured',
   'image_provider_credential_required', 'image_generation_failed', 'image_generation_unsupported',
   'image_generation_timeout', 'image_prompt_required',
-  'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable',
+  'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable', 'image_reference_unavailable',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -274,12 +284,55 @@ function conversationErrorResponse(error) {
  * streaming paths must build their final transcript through this helper so
  * only role/content/timestamp fields can ever reach persistence.
  */
-function buildSanitizedTranscript(message, reply, trustedAttachments = []) {
+function buildSanitizedTranscript(message, reply, trustedAttachments = [], generatedReferences = []) {
   const now = new Date().toISOString();
   return [
     sanitizeDesignAgentMessage({ role: 'user', content: message, timestamp: now }, { trustedAttachments }),
-    sanitizeDesignAgentMessage({ role: 'assistant', content: reply, timestamp: now }),
+    sanitizeDesignAgentMessage({ role: 'assistant', content: reply, timestamp: now }, { generatedReferences }),
   ].filter(Boolean);
+}
+
+async function registerGeneratedReference(getService, identity, conversationId, image, { allowDefault = true } = {}) {
+  if (!allowDefault) return [];
+  try {
+    const register = await getService('registerMavenImageReference');
+    const registered = await register(identity, { conversationId, url: image.url, kind: 'image' });
+    if (!/^asset_[A-Za-z0-9_-]{1,190}$/.test(String(registered?.attachmentId || ''))) return [];
+    return [{ attachmentId: registered.attachmentId, kind: 'image' }];
+  } catch {
+    // Preserve the generated result; the UI will explain that it cannot be refined from this session.
+    return [];
+  }
+}
+
+export function resolveLastTrustedImageReference(sessionReadResult, expectedConversationId) {
+  if (!sessionReadResult || sessionReadResult.conversationId !== expectedConversationId) return null;
+  const messages = Array.isArray(sessionReadResult.imageReferences) ? sessionReadResult.imageReferences : [];
+  const byId = new Map((Array.isArray(sessionReadResult.attachments) ? sessionReadResult.attachments : [])
+    .filter((item) => item?.kind === 'image' && item.attachmentId && item.temporaryUrl !== true)
+    .map((item) => [item.attachmentId, item]));
+  for (const message of [...messages].reverse()) {
+    if (message?.role !== 'assistant' || !/!\[[^\]]*\]\(https:\/\//.test(String(message.content || ''))) continue;
+    // The latest assistant-generated image is authoritative. If its reference
+    // expired or was not registered, don't silently edit an older image instead.
+    for (const attachment of [...(Array.isArray(message.attachments) ? message.attachments : [])].reverse()) {
+      const id = typeof attachment === 'string' ? attachment : attachment?.attachmentId;
+      const trusted = byId.get(id);
+      if (trusted) return trusted;
+    }
+    return null;
+  }
+  // For a first edit after upload (with no prior generated image), use the most
+  // recent user image attachment from this same session.
+  for (const message of [...messages].reverse()) {
+    if (message?.role !== 'user') continue;
+    for (const attachment of [...(Array.isArray(message.attachments) ? message.attachments : [])].reverse()) {
+      const id = typeof attachment === 'string' ? attachment : attachment?.attachmentId;
+      const trusted = byId.get(id);
+      if (trusted) return trusted;
+    }
+  }
+  return null;
 }
 
 function sseFrame(payload) {
@@ -295,7 +348,7 @@ function sseFrame(payload) {
  * Raw upstream provider frames never cross this boundary; the full assistant
  * response is accumulated server-side and sanitized before `done` is emitted.
  */
-export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [] }) {
+export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [], generatedReferences = [] }) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -331,7 +384,7 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
           }
           // Exactly one application-level done event is emitted per stream,
           // always after final sanitization, and always before close.
-          send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply, attachments) });
+          send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply, attachments, generatedReferences) });
           finish();
         })
         .catch((error) => {
@@ -445,28 +498,47 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       conversationId,
       identity,
     });
-    const trustedAttachments = resolveTrustedAttachments(requestedAttachmentIds, sessionReadResult?.attachments);
+    let trustedAttachments = resolveTrustedAttachments(requestedAttachmentIds, sessionReadResult?.attachments);
     const trustedSessionReadResult = {
       ...sessionReadResult,
       attachments: requestedAttachmentIds.length ? trustedAttachments : (sessionReadResult?.attachments || []),
     };
 
-    // Image requests without attachments are executed through the existing fal.ai
-    // provider with the customer's BYOK credential. Requests with attachments keep
-    // the vision path, so reference-based generation is not attempted here.
+    // Natural-language refinements can refer to the last assistant image without
+    // exposing URLs in the browser. Only session asset IDs from authorized history
+    // are eligible; resolve them against this session's asset catalog.
+    if (!trustedAttachments.length && isImageEditRequest(message)) {
+      const implicitReference = resolveLastTrustedImageReference(sessionReadResult, conversationId);
+      if (implicitReference) trustedAttachments = [implicitReference];
+      else {
+        const unavailable = new Error('The previous image is no longer available as a trusted session asset. Please upload it again to continue refining.');
+        unavailable.code = 'image_reference_unavailable';
+        unavailable.status = 422;
+        throw unavailable;
+      }
+    }
+    const trustedSessionReadResultWithRefs = {
+      ...sessionReadResult,
+      attachments: sessionReadResult?.attachments || [],
+    };
+
+    // Image requests without references use the existing text-to-image path.
     if (!trustedAttachments.length && isImageGenerationRequest(message)) {
       const generateImage = await getService('generateMavenImage');
       const image = await generateImage(identity, { prompt: message, signal: request?.signal });
-      const reply = buildGeneratedImageReply(image);
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImage === undefined });
+      const reply = buildGeneratedImageReply({ ...image, referenceUnavailable: !generatedReferences.length });
+      if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
         return buildConversationStreamResponse({
           service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
-          sessionReadResult: trustedSessionReadResult,
+          sessionReadResult: trustedSessionReadResultWithRefs,
           message,
           attachments: [],
+          generatedReferences,
         });
       }
-      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, []) };
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], generatedReferences) };
     }
 
     // Editing: exactly one session-verified reference image plus an explicit edit request.
@@ -478,16 +550,19 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
         imageUrl: trustedImageUrl(trustedAttachments[0]),
         signal: request?.signal,
       });
-      const reply = buildGeneratedImageReply({ ...image, edited: true });
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined });
+      const reply = buildGeneratedImageReply({ ...image, edited: true, referenceUnavailable: !generatedReferences.length });
+      if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
         return buildConversationStreamResponse({
           service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
-          sessionReadResult: trustedSessionReadResult,
+          sessionReadResult: trustedSessionReadResultWithRefs,
           message,
           attachments: trustedAttachments,
+          generatedReferences,
         });
       }
-      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments) };
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, generatedReferences) };
     }
 
     const textProviderFactory = await getService('createTextProvider');

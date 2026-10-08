@@ -45,6 +45,7 @@ function makeDeps(overrides = {}) {
       state.generateCalls.push({ who, args });
       return { url: IMAGE_URL, prompt: args.prompt, model: 'fal-ai/flux/schnell', aspectRatio: '1:1' };
     },
+    registerMavenImageReference: async (_who) => ({ attachmentId: 'asset_generated_1', kind: 'image' }),
     ...overrides,
   };
   return { deps, state };

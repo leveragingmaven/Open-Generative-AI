@@ -23,8 +23,11 @@ export function extractImagePrompt(message) {
 
 const EDIT_VERB = /\b(edit|change|transform|modify|remove|replace|retouch|restyle|recolou?r|swap|convert|enhance|brighten|darken|blur|sharpen|crop|extend|add|put|turn|make)\b/i;
 const EXISTING_IMAGE_REF = /\b((this|that|the|my|uploaded|attached|provided|original)\s+(image|photo|picture|pic|graphic|shot|logo|file|one)|it)\b/i;
+const PRIOR_SUBJECT_CONTINUITY = /\b(keep|preserve|same)\b.{0,48}\b(person|subject|face|identity|hair|hairstyle)\b/i;
+const IMAGE_ADJUSTMENT = /\b(background|backdrop|outfit|clothing|lighting|light|color|colour|sky|setting|scene|environment|wall|weather|shadow|tone|mood|person|subject|hair|hairstyle|glasses|accessories|pose)\b/i;
 const ANALYSIS_ASK = /\b(describe|analy[sz]e|inspect|explain|identify|summari[sz]e|what|who|where|how many|read|tell me)\b/i;
 const EXPLICIT_EDIT = /\b(edit|retouch)\b/i;
+const VARIATION_REQUEST = /\b(another variation|make a variation|new variation|different version|another version|refine this|refine that|refine it)\b/i;
 
 /**
  * True when the customer asks Maven to change an existing image (edit / transform).
@@ -36,8 +39,9 @@ export function isImageEditRequest(message) {
   if (!text || text.length > 2000) return false;
   if (ANALYSIS_ASK.test(text) || QUESTION_START.test(text)) return false;
   if (OTHER_MEDIA.test(text)) return false;
-  if (EXPLICIT_EDIT.test(text)) return true;
-  return EDIT_VERB.test(text) && EXISTING_IMAGE_REF.test(text);
+  if (EXPLICIT_EDIT.test(text) || VARIATION_REQUEST.test(text)) return true;
+  if (EDIT_VERB.test(text) && (EXISTING_IMAGE_REF.test(text) || (PRIOR_SUBJECT_CONTINUITY.test(text) && IMAGE_ADJUSTMENT.test(text)) || IMAGE_ADJUSTMENT.test(text))) return true;
+  return false;
 }
 
 // Only https image links produced by the generator are treated as results.

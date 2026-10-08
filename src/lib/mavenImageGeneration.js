@@ -152,6 +152,26 @@ export async function generateMavenImage({
   };
 }
 
+const LOCALIZED_CHANGE = /\b(background|backdrop|lighting|light|color|colour|sky|setting|scene|environment|wall|weather|shadows?|tone|mood)\b/i;
+const PRESERVATION_ATTRIBUTES = Object.freeze([
+  { name: 'identity and facial features', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\b(person|subject|face|identity|facial features)\b|\b(new|different)\s+(person|face)\b/i },
+  { name: 'hairstyle and hair color', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\b(hair|hairstyle|hair color)\b|\b(new|different)\s+(hairstyle|hair|hair color)\b/i },
+  { name: 'clothing or outfit', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\b(clothes|clothing|outfit)\b|\b(new|different)\s+(outfit|clothes|clothing)\b/i },
+  { name: 'glasses and accessories', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\b(glasses|accessor(?:y|ies))\b|\b(new|different)\s+(glasses|accessor(?:y|ies))\b/i },
+  { name: 'body proportions', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\b(body|proportions|figure)\b|\b(new|different)\s+(body|proportions|figure)\b/i },
+  { name: 'pose', changed: /\b(change|replace|swap|alter|rework)\b[^.?!]{0,80}\bpose\b|\b(new|different)\s+pose\b/i },
+  { name: 'original photographic or illustration style', changed: /\b(change|replace|swap|alter|rework|convert)\b[^.?!]{0,80}\b(style|medium|photographic|illustration)\b|\b(new|different)\s+(style|medium)\b/i },
+]);
+
+/** Deterministic preservation language; explicitly requested subject changes are omitted, not contradicted. */
+export function enhanceMavenImageEditPrompt(prompt) {
+  const text = String(prompt || '').replace(/\s+/g, ' ').trim();
+  if (!text || !LOCALIZED_CHANGE.test(text)) return text;
+  const preserve = PRESERVATION_ATTRIBUTES.filter((attribute) => !attribute.changed.test(text)).map((attribute) => attribute.name);
+  if (!preserve.length) return text;
+  return `${text} Preserve the original subject's ${preserve.join(', ')}. Do not change anything else.`;
+}
+
 /**
  * Edits one trusted reference image through the existing MuAPI image-to-image catalog
  * with the customer's BYOK key. `imageUrl` must come from a session-verified attachment.
@@ -188,7 +208,7 @@ export async function generateMavenImageEdit({
   }
   if (!apiKey) throw credentialRequiredError('muapi', route.model.name);
 
-  const brief = stripRoutingFromPrompt(safePrompt, route) || safePrompt;
+  const brief = enhanceMavenImageEditPrompt(stripRoutingFromPrompt(safePrompt, route) || safePrompt);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onCallerAbort = () => controller.abort();
@@ -227,7 +247,7 @@ export async function generateMavenImageEdit({
 }
 
 /** Assistant reply that carries the generated image as markdown, so it streams and persists like any message. */
-export function buildGeneratedImageReply({ url, prompt, modelName, edited = false }) {
+export function buildGeneratedImageReply({ url, prompt, modelName, edited = false, referenceUnavailable = false }) {
   const alt = String(prompt || 'Generated image').replace(/[[\]\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
   const credit = modelName ? ` made with ${modelName}` : '';
   return [
@@ -235,6 +255,8 @@ export function buildGeneratedImageReply({ url, prompt, modelName, edited = fals
     '',
     `![${alt}](${url})`,
     '',
-    "Ask for another variation, or tell me what to change and I'll refine it.",
+    referenceUnavailable
+      ? "This image could not be linked to the conversation's trusted assets, so I can't safely refine it later. Download it now or upload it again to continue."
+      : "Ask for another variation, or tell me what to change and I'll refine it.",
   ].join('\n');
 }

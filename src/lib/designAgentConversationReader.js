@@ -248,10 +248,34 @@ export class DesignAgentConversationReader {
       trustedConversationId,
     );
     verifyReferencedAssets(rawMessages, attachments);
+    const trustedMessages = boundMessages(rawMessages, this.maxHistoryCharacters);
+    const byId = new Map(attachments.map((attachment) => [attachment.attachmentId, attachment]));
+    const imageReferences = rawMessages.flatMap((rawMessage) => {
+      const role = identifier(rawMessage?.role).toLowerCase();
+      const content = String(rawMessage?.content || '');
+      if (role === 'assistant') {
+        if (!Array.isArray(rawMessage?.attachments)) return [];
+        const trustedAttachments = rawMessage.attachments.flatMap((attachment) => {
+          const attachmentId = typeof attachment === 'string' ? identifier(attachment) : assetLabel(attachment);
+          const trusted = byId.get(attachmentId);
+          return trusted?.kind === 'image' ? [{ attachmentId, kind: 'image' }] : [];
+        });
+        return trustedAttachments.length && /!\[[^\]]*\]\(https:\/\//.test(content)
+          ? [{ role, content, attachments: trustedAttachments }]
+          : [];
+      }
+      if (role === 'user') {
+        const userMessage = trustedMessages.find((message) => message.role === 'user' && message.content === content);
+        const trustedAttachments = (userMessage?.attachments || []).filter((attachment) => attachment.kind === 'image');
+        return trustedAttachments.length ? [{ role, content, attachments: trustedAttachments }] : [];
+      }
+      return [];
+    });
     return {
       agentId: DESIGN_AGENT_ID,
       conversationId: trustedConversationId,
-      messages: boundMessages(rawMessages, this.maxHistoryCharacters),
+      messages: trustedMessages,
+      imageReferences,
       attachments,
       agent: safeAgentMetadata(),
     };

@@ -17,7 +17,7 @@ test('dashboard exposes Download, Another variation, and Refine for generated im
   const source = read('packages/studio/src/components/experience/MavenHomeDashboard.jsx');
   assert.match(source, /extractGeneratedImageUrls\(message\.content/);
   assert.match(source, /<span>Download<\/span>/);
-  assert.match(source, /Create another variation of this image: /);
+  assert.match(source, /Make another variation of this image while preserving its subject and style/);
   assert.match(source, /<span>Refine<\/span>/);
   assert.match(source, /if \(!isOverride\) setMavenMessage\(""\)/);
 });

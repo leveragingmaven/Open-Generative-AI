@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
-import { extractGeneratedImageUrls, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
+import { extractGeneratedImageUrls, isImageEditRequest, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -121,12 +121,25 @@ function QuickActionButton({ item }) {
 function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onRefine }) {
   const isUser = message.role === "user";
   const imageUrls = isUser ? [] : extractGeneratedImageUrls(message.content || "");
+  const referenceIds = !isUser && Array.isArray(message.attachments)
+    ? message.attachments.map((attachment) => typeof attachment === "string" ? attachment : attachment?.attachmentId).filter((id) => typeof id === "string" && /^asset_[A-Za-z0-9_-]{1,190}$/.test(id))
+    : [];
   const [copied, setCopied] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   const copyResetRef = useRef(null);
   const markdownComponents = {
     a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
   };
   useEffect(() => () => window.clearTimeout(copyResetRef.current), []);
+  const handleDownload = async (url, index) => {
+    setDownloadError("");
+    try {
+      const result = await downloadAsset(url, { filename: `maven-image-${Date.now()}-${index + 1}.jpg`, kind: "image", prefix: "maven" });
+      if (!result?.ok) setDownloadError("This image is no longer available to download.");
+    } catch {
+      setDownloadError("This image could not be downloaded. Please try again later.");
+    }
+  };
   const handleCopy = async () => {
     try {
       await copyAssistantResponseText(message.content);
@@ -179,21 +192,22 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
         ) : null}
         {!isUser && !streaming && imageUrls.length ? (
           <div className={styles.imageActions}>
+            {downloadError ? <span className={styles.imageActionError} role="alert">{downloadError}</span> : null}
             {imageUrls.map((url, index) => (
               <button key={url} type="button" className={styles.imageAction} aria-label={`Download image ${index + 1}`}
-                onClick={() => downloadAsset(url, { filename: `maven-image-${Date.now()}-${index + 1}.jpg`, kind: "image", prefix: "maven" })}>
+                onClick={() => void handleDownload(url, index)}>
                 <Icon type="download" size={13} />
                 <span>Download</span>
               </button>
             ))}
-            {previousPrompt && onVariation ? (
-              <button type="button" className={styles.imageAction} onClick={() => onVariation(previousPrompt)}>
+            {onVariation ? (
+              <button type="button" className={styles.imageAction} onClick={() => onVariation(previousPrompt, referenceIds[0], imageUrls[0])}>
                 <Icon type="sparkle" size={13} />
                 <span>Another variation</span>
               </button>
             ) : null}
             {onRefine ? (
-              <button type="button" className={styles.imageAction} onClick={onRefine}>
+              <button type="button" className={styles.imageAction} onClick={() => onRefine(referenceIds[0], imageUrls[0])}>
                 <Icon type="design" size={13} />
                 <span>Refine</span>
               </button>
@@ -214,6 +228,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const [mavenReady, setMavenReady] = useState(false);
   const [mavenSessionId, setMavenSessionId] = useState(null);
   const [attachments, setAttachments] = useState([]);
+  const [selectedImageReference, setSelectedImageReference] = useState(null);
   const [attachmentError, setAttachmentError] = useState(null);
   const [draggingImage, setDraggingImage] = useState(false);
   const mavenClientRef = useRef(null);
@@ -280,6 +295,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       if (fileList?.length) setAttachmentError("Choose an image file to attach.");
       return;
     }
+    if (selectedImageReference) setSelectedImageReference(null);
     const capacity = Math.max(0, 8 - attachments.length);
     const imageFiles = selectedImages.slice(0, capacity);
     if (!capacity || imageFiles.length < selectedImages.length) setAttachmentError("You can attach up to 8 images per message.");
@@ -311,7 +327,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachments((current) => current.filter((item) => item.localId !== localId));
   };
 
-  const submitMavenMessage = async (event, overrideText) => {
+  const submitMavenMessage = async (event, overrideText, explicitReference = null) => {
     event?.preventDefault?.();
     const client = mavenClientRef.current;
     const isOverride = typeof overrideText === "string";
@@ -323,14 +339,16 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    const pendingStatus = isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : "";
+    const pendingStatus = isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : "");
+    const reference = explicitReference || selectedImageReference;
+    const priorReferenceIds = reference?.attachmentId ? [reference.attachmentId] : [];
     setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: pendingStatus }]);
 
     try {
       const sessionId = await ensureMavenSession();
       const headers = { "Content-Type": "application/json", ...(apiKey ? { "x-api-key": apiKey } : {}) };
-      const attachmentIds = [];
-      const resolvedAttachments = [];
+      const attachmentIds = [...priorReferenceIds];
+      const resolvedAttachments = priorReferenceIds.map((attachmentId) => ({ attachmentId, kind: "image", filename: "Previous Maven image" }));
       for (const attachment of attachments) {
         let attachmentId = attachment.attachmentId;
         if (!attachmentId) {
@@ -382,7 +400,11 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
         const arr = [...prev];
         if (arr[assistantIndex - 1] && result.persistedMessages?.[0]) arr[assistantIndex - 1] = result.persistedMessages[0];
         if (arr[assistantIndex]) {
-          arr[assistantIndex] = { ...arr[assistantIndex], content: result.reply || arr[assistantIndex].content };
+          arr[assistantIndex] = {
+            ...arr[assistantIndex],
+            ...(result.persistedMessages?.[1] || {}),
+            content: result.reply || arr[assistantIndex].content,
+          };
         }
         return arr;
       });
@@ -390,6 +412,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       client.persist(sessionId, result.persistedMessages).catch(() => {});
       attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       setAttachments([]);
+      if (reference) setSelectedImageReference(null);
     } catch (error) {
       if (!isOverride) setMavenMessage(text);
       setMavenMessages((prev) => {
@@ -433,6 +456,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setMavenMessage("");
     attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
     setAttachments([]);
+    setSelectedImageReference(null);
     setAttachmentError(null);
     setChatError(null);
   };
@@ -452,6 +476,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       const messages = await mavenClientRef.current.loadMessages(chat.id);
       setMavenSessionId(chat.id);
       storeDashboardSessionId(window.localStorage, chat.id);
+      setSelectedImageReference(null);
       setMavenMessages(messages);
     } catch (error) {
       setChatError(error?.message || "Unable to reopen this conversation.");
@@ -472,6 +497,13 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       onDragLeave={(event) => { event.stopPropagation(); if (!event.currentTarget.contains(event.relatedTarget)) setDraggingImage(false); }}
       onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingImage(false); void addImageFiles(event.dataTransfer.files); }}>
       <input ref={attachmentInputRef} type="file" accept="image/*" multiple className="sr-only" aria-label="Choose images to attach" onChange={(event) => { void addImageFiles(event.target.files); event.target.value = ""; }} />
+      {selectedImageReference ? <div className={styles.attachmentList} aria-label="Selected Maven image reference">
+        <div className={styles.attachmentPreview}>
+          {selectedImageReference.previewUrl ? <img src={selectedImageReference.previewUrl} alt="Selected image to refine" /> : <Icon type="image" size={13} />}
+          <span>Previous Maven image selected</span>
+          <button type="button" aria-label="Remove selected image reference" onClick={() => setSelectedImageReference(null)} disabled={mavenBusy}><Icon type="close" size={13} /></button>
+        </div>
+      </div> : null}
       {attachments.length ? <div className={styles.attachmentList} aria-label="Attached images">
         {attachments.map((attachment) => <div key={attachment.localId} className={styles.attachmentPreview}>
           <img src={attachment.previewUrl} alt={attachment.filename} />
@@ -582,8 +614,16 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
                   <MavenBubble key={`${index}-${message.role}`} message={message}
                     streaming={mavenBusy && index === mavenMessages.length - 1 && message.role === "assistant"}
                     previousPrompt={index > 0 && mavenMessages[index - 1].role === "user" ? mavenMessages[index - 1].content : ""}
-                    onVariation={(prompt) => void submitMavenMessage(null, `Create another variation of this image: ${prompt}`)}
-                    onRefine={() => { setMavenMessage("Refine this image: "); composerInputRef.current?.focus(); }} />
+                    onVariation={(prompt, attachmentId, previewUrl) => {
+                      if (!attachmentId) { setChatError("This image is no longer available as a trusted session asset. Upload it again to create a variation."); return; }
+                      void submitMavenMessage(null, "Make another variation of this image while preserving its subject and style.", { attachmentId, previewUrl });
+                    }}
+                    onRefine={(attachmentId, previewUrl) => {
+                      if (!attachmentId) { setChatError("This image is no longer available as a trusted session asset. Upload it again to refine it."); return; }
+                      setSelectedImageReference({ attachmentId, previewUrl });
+                      setMavenMessage("");
+                      composerInputRef.current?.focus();
+                    }} />
                 ))}
               </div>
             </div>

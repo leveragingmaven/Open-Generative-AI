@@ -62,8 +62,9 @@ test('an edit request without a session-verified attachment is not sent to the e
   const { deps, state } = makeDeps({
     conversationReader: { async read() { return { messages: [], attachments: [] }; } },
   });
-  // Without a reference image there is nothing to edit, so the editing service must not run.
+  // Without a reference image the service fails safely rather than falling through to text-only generation.
   const result = await handleDesignAgentConversationPost(jsonRequest({ conversationId: 'owned-session', message: EDIT_REQUEST }), deps);
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 422);
+  assert.equal(result.code, 'image_reference_unavailable');
   assert.equal(state.editCalls.length, 0);
 });
