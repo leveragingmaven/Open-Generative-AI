@@ -594,6 +594,9 @@
 .imageAction { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: rgba(255,255,255,.03); color: #cfc8bb; font: inherit; font-size: 11px; cursor: pointer; }
 .imageAction:hover { background: rgba(255,255,255,.07); color: #f4eee3; }
 .imageActionError { color: #ffb9b9; font-size: 11px; }
+.videoResultActions { display: grid; gap: 8px; margin-top: 8px; }
+.videoResult { display: grid; gap: 6px; max-width: min(100%, 520px); }
+.videoResult video { display: block; width: 100%; max-height: 420px; border-radius: 10px; background: #080808; }
 .assistantMessage .markdown img { display: block; width: 100%; max-width: 520px; height: auto; margin: 8px 0; border-radius: 12px; border: 1px solid rgba(255,255,255,.08); }
 .userMessage { padding: 10px 15px; border: 1px solid rgba(212,168,88,.18); border-radius: 17px 17px 5px 17px; background: rgba(212,168,88,.095); color: #f4eee3; }
 .assistantMessage { color: #dedad4; }

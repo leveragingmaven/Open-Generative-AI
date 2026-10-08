@@ -5,6 +5,7 @@ import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
 import { extractGeneratedImageUrls, isImageEditRequest, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
+import { extractGeneratedVideoUrls, isVideoGenerationRequest } from "../../lib/mavenVideoIntent.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -121,6 +122,7 @@ function QuickActionButton({ item }) {
 function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onRefine }) {
   const isUser = message.role === "user";
   const imageUrls = isUser ? [] : extractGeneratedImageUrls(message.content || "");
+  const videoUrls = isUser ? [] : extractGeneratedVideoUrls(message.content || "");
   const referenceIds = !isUser && Array.isArray(message.attachments)
     ? message.attachments.map((attachment) => typeof attachment === "string" ? attachment : attachment?.attachmentId).filter((id) => typeof id === "string" && /^asset_[A-Za-z0-9_-]{1,190}$/.test(id))
     : [];
@@ -131,13 +133,14 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
     a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
   };
   useEffect(() => () => window.clearTimeout(copyResetRef.current), []);
-  const handleDownload = async (url, index) => {
+  const handleDownload = async (url, index, kind = "image") => {
     setDownloadError("");
+    const extension = kind === "video" ? "mp4" : "jpg";
     try {
-      const result = await downloadAsset(url, { filename: `maven-image-${Date.now()}-${index + 1}.jpg`, kind: "image", prefix: "maven" });
-      if (!result?.ok) setDownloadError("This image is no longer available to download.");
+      const result = await downloadAsset(url, { filename: `maven-${kind}-${Date.now()}-${index + 1}.${extension}`, kind, prefix: "maven" });
+      if (!result?.ok) setDownloadError(`This ${kind} is no longer available to download.`);
     } catch {
-      setDownloadError("This image could not be downloaded. Please try again later.");
+      setDownloadError(`This ${kind} could not be downloaded. Please try again later.`);
     }
   };
   const handleCopy = async () => {
@@ -188,6 +191,19 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
               <Icon type={copied ? "check" : "copy"} size={13} />
               <span>{copied ? "Copied" : "Copy"}</span>
             </button>
+          </div>
+        ) : null}
+        {!isUser && !streaming && videoUrls.length ? (
+          <div className={styles.videoResultActions}>
+            {videoUrls.map((url, index) => (
+              <div key={url} className={styles.videoResult}>
+                <video controls playsInline preload="metadata" src={url} aria-label={`Generated video ${index + 1}`} />
+                <button type="button" className={styles.imageAction} onClick={() => void handleDownload(url, index, "video")}>
+                  <Icon type="download" size={13} /><span>Download video</span>
+                </button>
+              </div>
+            ))}
+            {downloadError ? <span className={styles.imageActionError} role="alert">{downloadError}</span> : null}
           </div>
         ) : null}
         {!isUser && !streaming && imageUrls.length ? (
@@ -339,7 +355,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    const pendingStatus = isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : "");
+    const pendingStatus = isVideoGenerationRequest(text) && attachments.length === 0 ? "Creating your video…" : (isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : ""));
     const reference = explicitReference || selectedImageReference;
     const priorReferenceIds = reference?.attachmentId ? [reference.attachmentId] : [];
     setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: pendingStatus }]);

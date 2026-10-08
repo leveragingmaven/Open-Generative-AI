@@ -5,6 +5,8 @@ const CREATE_VERB = /\b(create|make|generate|design|produce|render|draw|illustra
 const IMAGE_NOUN = /\b(images?|pictures?|photos?|graphics?|posters?|banners?|thumbnails?|flyers?|logos?|illustrations?|artwork|visuals?)\b/i;
 const OTHER_MEDIA = /\b(videos?|reels?|audio|voice ?over|songs?|music|lip ?sync|talking avatar)\b/i;
 const QUESTION_START = /^(what|which|how|why|should|could you explain|explain|tell me)\b/i;
+const VIDEO_CREATE = /\b(create|make|generate|produce|render|animate|turn|convert)\b/i;
+const VIDEO_NOUN = /\b(video|clip|footage|animation|reel)\b/i;
 
 export const MAVEN_IMAGE_PROMPT_MAX_LENGTH = 1000;
 
@@ -13,6 +15,7 @@ export function isImageGenerationRequest(message) {
   const text = message.trim();
   if (!text || text.length > 2000) return false;
   if (QUESTION_START.test(text)) return false;
+  if (VIDEO_CREATE.test(text) && VIDEO_NOUN.test(text)) return false;
   return CREATE_VERB.test(text) && IMAGE_NOUN.test(text) && !OTHER_MEDIA.test(text);
 }
 

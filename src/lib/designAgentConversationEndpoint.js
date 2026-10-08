@@ -15,7 +15,9 @@ import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } fr
 import { DesignAgentConversationIntelligenceService, trustedImageUrl } from './designAgentConversationIntelligence.js';
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
 import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
+import { generateMavenVideo, buildGeneratedVideoReply } from './mavenVideoGeneration.js';
 import { isImageGenerationRequest, isImageEditRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
+import { isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -135,6 +137,9 @@ export async function loadEndpointServices() {
     generateMavenImageEdit(identity, args = {}) {
       return generateMavenImageEdit({ identity, ...args });
     },
+    generateMavenVideo(identity, args = {}) {
+      return generateMavenVideo({ identity, ...args });
+    },
     async registerMavenImageReference(identity, { conversationId, url, kind = 'image' } = {}) {
       if (kind !== 'image' || typeof url !== 'string' || !/^https:\/\//i.test(url)) return null;
       if (typeof designAgentProvider.registerSessionAsset !== 'function') return null;
@@ -243,6 +248,8 @@ const SAFE_ERROR_CODES = new Set([
   'image_provider_credential_required', 'image_generation_failed', 'image_generation_unsupported',
   'image_generation_timeout', 'image_prompt_required',
   'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable', 'image_reference_unavailable',
+  'video_provider_credential_required', 'video_generation_failed', 'video_generation_timeout',
+  'video_generation_unsupported', 'video_prompt_required', 'video_model_unavailable', 'video_option_unsupported',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -521,6 +528,23 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       ...sessionReadResult,
       attachments: sessionReadResult?.attachments || [],
     };
+
+    // Text-to-video executes via the existing MuAPI adapter and its polling method.
+    // Requests with any reference images are deliberately left on the trusted image path for now.
+    if (!trustedAttachments.length && isVideoGenerationRequest(message)) {
+      const generateVideo = await getService('generateMavenVideo');
+      const video = await generateVideo(identity, { prompt: message, signal: request?.signal });
+      const reply = buildGeneratedVideoReply(video);
+      if (wantsStream) {
+        return buildConversationStreamResponse({
+          service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
+          sessionReadResult: trustedSessionReadResultWithRefs,
+          message,
+          attachments: [],
+        });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, []) };
+    }
 
     // Image requests without references use the existing text-to-image path.
     if (!trustedAttachments.length && isImageGenerationRequest(message)) {
