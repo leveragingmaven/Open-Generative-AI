@@ -31,7 +31,7 @@ function nameNeedle(model) {
 /**
  * Longest catalog-name match across all given catalogs wins, so "Nano Banana Pro"
  * is not read as "Nano Banana" and "Nano Banana Edit" is not read as "Nano Banana".
- * Returns { model, inTextToImage } or null.
+ * Returns { model, source } or null. `source` is the entry's tag ('generate', 'edit', 'other').
  */
 function findNamedModel(text, entries) {
   const haystack = normalizeForMatch(text);
@@ -39,10 +39,10 @@ function findNamedModel(text, entries) {
   for (const entry of entries) {
     const needle = nameNeedle(entry.model);
     if (needle && haystack.includes(` ${needle} `) && (!best || needle.length > best.length)) {
-      best = { model: entry.model, inTextToImage: entry.inTextToImage, length: needle.length };
+      best = { model: entry.model, source: entry.source, length: needle.length };
     }
   }
-  return best ? { model: best.model, inTextToImage: best.inTextToImage } : null;
+  return best ? { model: best.model, source: best.source } : null;
 }
 
 export function parseRequestedAspectRatio(text) {
@@ -80,10 +80,10 @@ export function selectMavenImageRoute(message, catalogs = {}) {
   }
 
   const named = findNamedModel(message, [
-    ...textToImage.map((model) => ({ model, inTextToImage: true })),
-    ...otherCatalogs.flat().map((model) => ({ model, inTextToImage: false })),
+    ...textToImage.map((model) => ({ model, source: 'generate' })),
+    ...otherCatalogs.flat().map((model) => ({ model, source: 'other' })),
   ]);
-  if (named && !named.inTextToImage) {
+  if (named && named.source !== 'generate') {
     throw imageRouteError('image_model_unavailable', `${named.model.name} cannot create images from a text request in Maven yet.`, 422);
   }
   const explicit = named?.model || null;
@@ -106,6 +106,42 @@ export function selectMavenImageRoute(message, catalogs = {}) {
     throw imageRouteError('image_aspect_ratio_unsupported', `No available image model supports ${aspectRatio} yet. Try 1:1 or name a model.`, 422);
   }
   return { mode: 'auto', aspectRatio, candidates, fallbackFal: aspectRatio === '1:1' };
+}
+
+export const MAVEN_AUTO_EDIT_MODEL_IDS = Object.freeze(['nano-banana-pro-edit', 'nano-banana-edit']);
+
+/**
+ * Resolves an image-editing request to a catalog editing model (MuAPI image-to-image).
+ *
+ * - Explicit editing model named in the request -> that exact model.
+ * - Explicit generation-only model (e.g. "Nano Banana Pro") -> error, never silently swapped.
+ * - Otherwise -> the first available editing candidate that supports any requested ratio.
+ */
+export function selectMavenImageEditRoute(message, catalogs = {}) {
+  const editing = catalogs.editing || i2iModels;
+  const textToImage = catalogs.textToImage || t2iModels;
+  const requestedRatio = parseRequestedAspectRatio(message);
+  const named = findNamedModel(message, [
+    ...editing.map((model) => ({ model, source: 'edit' })),
+    ...textToImage.map((model) => ({ model, source: 'generate' })),
+  ]);
+
+  if (named) {
+    if (named.source !== 'edit') {
+      throw imageRouteError('image_model_unavailable', `${named.model.name} cannot edit images. Name an editing model such as Nano Banana Pro Edit.`, 422);
+    }
+    if (requestedRatio && !supportedAspectRatios(named.model).includes(requestedRatio)) {
+      throw imageRouteError('image_aspect_ratio_unsupported', `${named.model.name} does not support ${requestedRatio}.`, 422);
+    }
+    return { mode: 'explicit', transport: 'muapi', model: named.model, aspectRatio: requestedRatio, resolution: named.model.inputs?.resolution?.default || null };
+  }
+
+  const candidates = MAVEN_AUTO_EDIT_MODEL_IDS
+    .map((id) => editing.find((model) => model.id === id))
+    .filter(Boolean);
+  const model = (requestedRatio && candidates.find((c) => supportedAspectRatios(c).includes(requestedRatio))) || candidates[0];
+  if (!model) throw imageRouteError('image_model_unavailable', 'No image editing model is available right now.', 422);
+  return { mode: 'auto', transport: 'muapi', model, aspectRatio: requestedRatio, resolution: model.inputs?.resolution?.default || null };
 }
 
 /** Removes the routing words (model name, ratio) so the provider receives only the visual brief. */

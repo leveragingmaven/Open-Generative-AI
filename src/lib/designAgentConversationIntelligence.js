@@ -58,7 +58,7 @@ function buildReferenceContext(attachments) {
   return `\n\nReferences available for discussion:\n${lines.join('\n')}`;
 }
 
-function trustedImageUrl(attachment) {
+export function trustedImageUrl(attachment) {
   if (!attachment || attachment.kind !== 'image' || typeof attachment.url !== 'string') return '';
   try {
     const url = new URL(attachment.url);

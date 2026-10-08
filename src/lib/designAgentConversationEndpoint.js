@@ -12,10 +12,10 @@ import { requireCreatorIdentity } from './creatorOsAuth.js';
 import { isDesignAgentControlledExecution } from './designAgentControlledMode.js';
 import { getMuApiBaseUrl, getServerMuApiKey } from './agencyMode.js';
 import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } from './serverTextIntelligence.js';
-import { DesignAgentConversationIntelligenceService } from './designAgentConversationIntelligence.js';
+import { DesignAgentConversationIntelligenceService, trustedImageUrl } from './designAgentConversationIntelligence.js';
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
-import { generateMavenImage, buildGeneratedImageReply } from './mavenImageGeneration.js';
-import { isImageGenerationRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
+import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
+import { isImageGenerationRequest, isImageEditRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -127,6 +127,9 @@ export async function loadEndpointServices() {
     generateMavenImage(identity, args = {}) {
       return generateMavenImage({ identity, ...args });
     },
+    generateMavenImageEdit(identity, args = {}) {
+      return generateMavenImageEdit({ identity, ...args });
+    },
   };
 }
 
@@ -229,7 +232,7 @@ const SAFE_ERROR_CODES = new Set([
   'vision_intelligence_not_configured',
   'image_provider_credential_required', 'image_generation_failed', 'image_generation_unsupported',
   'image_generation_timeout', 'image_prompt_required',
-  'image_model_unavailable', 'image_aspect_ratio_unsupported',
+  'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -464,6 +467,27 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
         });
       }
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, []) };
+    }
+
+    // Editing: exactly one session-verified reference image plus an explicit edit request.
+    // Image analysis and questions about the image stay on the vision path below.
+    if (trustedAttachments.length === 1 && isImageEditRequest(message)) {
+      const editImage = await getService('generateMavenImageEdit');
+      const image = await editImage(identity, {
+        prompt: message,
+        imageUrl: trustedImageUrl(trustedAttachments[0]),
+        signal: request?.signal,
+      });
+      const reply = buildGeneratedImageReply({ ...image, edited: true });
+      if (wantsStream) {
+        return buildConversationStreamResponse({
+          service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
+          sessionReadResult: trustedSessionReadResult,
+          message,
+          attachments: trustedAttachments,
+        });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments) };
     }
 
     const textProviderFactory = await getService('createTextProvider');

@@ -21,6 +21,25 @@ export function extractImagePrompt(message) {
   return message.replace(/\s+/g, " ").trim().slice(0, MAVEN_IMAGE_PROMPT_MAX_LENGTH);
 }
 
+const EDIT_VERB = /\b(edit|change|transform|modify|remove|replace|retouch|restyle|recolou?r|swap|convert|enhance|brighten|darken|blur|sharpen|crop|extend|add|put|turn|make)\b/i;
+const EXISTING_IMAGE_REF = /\b((this|that|the|my|uploaded|attached|provided|original)\s+(image|photo|picture|pic|graphic|shot|logo|file|one)|it)\b/i;
+const ANALYSIS_ASK = /\b(describe|analy[sz]e|inspect|explain|identify|summari[sz]e|what|who|where|how many|read|tell me)\b/i;
+const EXPLICIT_EDIT = /\b(edit|retouch)\b/i;
+
+/**
+ * True when the customer asks Maven to change an existing image (edit / transform).
+ * Questions and analysis requests (describe, what is in, analyze) stay on the vision path.
+ */
+export function isImageEditRequest(message) {
+  if (typeof message !== "string") return false;
+  const text = message.trim();
+  if (!text || text.length > 2000) return false;
+  if (ANALYSIS_ASK.test(text) || QUESTION_START.test(text)) return false;
+  if (OTHER_MEDIA.test(text)) return false;
+  if (EXPLICIT_EDIT.test(text)) return true;
+  return EDIT_VERB.test(text) && EXISTING_IMAGE_REF.test(text);
+}
+
 // Only https image links produced by the generator are treated as results.
 export function extractGeneratedImageUrls(content) {
   if (typeof content !== "string") return [];

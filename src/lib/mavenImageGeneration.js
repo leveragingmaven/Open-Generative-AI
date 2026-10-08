@@ -2,7 +2,7 @@ import { falProvider, FAL_MODEL_IDS } from '../../packages/studio/src/lib/provid
 import { muApiProvider } from '../../packages/studio/src/lib/providers/MuApiProvider.js';
 import { extractImagePrompt } from '../../packages/studio/src/lib/mavenImageIntent.js';
 import { resolveProviderCredential } from './providerCredentialResolver.js';
-import { selectMavenImageRoute, stripRoutingFromPrompt } from './mavenImageModelRouter.js';
+import { selectMavenImageRoute, selectMavenImageEditRoute, stripRoutingFromPrompt } from './mavenImageModelRouter.js';
 
 export const MAVEN_IMAGE_TIMEOUT_MS = 120000;
 
@@ -19,6 +19,15 @@ function credentialRequiredError(transport, modelName) {
     return imageError('image_provider_credential_required', `Connect your MuAPI API key in Settings to use ${subject}.`, 400);
   }
   return imageError('image_provider_credential_required', 'Connect a MuAPI or fal.ai API key in Settings to generate images.', 400);
+}
+
+function isHttpUrl(value) {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
 }
 
 function isHttpsUrl(value) {
@@ -143,12 +152,86 @@ export async function generateMavenImage({
   };
 }
 
+/**
+ * Edits one trusted reference image through the existing MuAPI image-to-image catalog
+ * with the customer's BYOK key. `imageUrl` must come from a session-verified attachment.
+ */
+export async function generateMavenImageEdit({
+  identity,
+  prompt,
+  imageUrl,
+  signal,
+  credentialResolver = resolveProviderCredential,
+  muapiProvider = muApiProvider,
+  timeoutMs = MAVEN_IMAGE_TIMEOUT_MS,
+} = {}) {
+  if (!identity) throw imageError('creator_os_auth_required', 'Creator OS authentication required.', 401);
+  const safePrompt = extractImagePrompt(prompt);
+  if (!safePrompt) throw imageError('image_prompt_required', 'Describe how you want the image changed.', 400);
+  if (!isHttpUrl(imageUrl)) {
+    throw imageError('image_source_unavailable', 'The attached image is not available for editing.', 422);
+  }
+
+  const route = selectMavenImageEditRoute(safePrompt);
+
+  let apiKey = null;
+  try {
+    apiKey = await credentialResolver({
+      accountId: identity.accountId,
+      creatorIdentityKey: identity.identityKey || identity.creatorId || identity.userId,
+      providerId: 'muapi',
+      operation: 'image_editing',
+    });
+  } catch (error) {
+    if (String(error?.code || '').startsWith('provider_credential')) apiKey = null;
+    else throw error;
+  }
+  if (!apiKey) throw credentialRequiredError('muapi', route.model.name);
+
+  const brief = stripRoutingFromPrompt(safePrompt, route) || safePrompt;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onCallerAbort = () => controller.abort();
+  signal?.addEventListener?.('abort', onCallerAbort, { once: true });
+
+  let url = null;
+  try {
+    const result = await muapiProvider.generateI2I(apiKey, {
+      model: route.model.id,
+      prompt: brief,
+      image_url: imageUrl,
+      ...(route.aspectRatio ? { aspect_ratio: route.aspectRatio } : {}),
+      ...(route.resolution ? { resolution: route.resolution } : {}),
+      signal: controller.signal,
+    });
+    url = result?.url;
+  } catch (error) {
+    const code = String(error?.code || '');
+    if (controller.signal.aborted && !signal?.aborted) {
+      throw imageError('image_generation_timeout', 'Image editing timed out. Please try again.', 504);
+    }
+    if (code.startsWith('provider_credential')) throw credentialRequiredError('muapi', route.model.name);
+    if (code === 'provider_model_unsupported' || code === 'provider_operation_unsupported') {
+      throw imageError('image_generation_unsupported', 'This editing model is not available.', 422);
+    }
+    throw imageError('image_generation_failed', 'Image editing failed. Please try again.', 502);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.('abort', onCallerAbort);
+  }
+
+  if (typeof url !== 'string' || !isHttpsUrl(url)) {
+    throw imageError('image_generation_failed', 'Image editing returned no usable image.', 502);
+  }
+  return { url, prompt: brief, model: route.model.id, modelName: route.model.name, transport: 'muapi', aspectRatio: route.aspectRatio, operation: 'image_editing' };
+}
+
 /** Assistant reply that carries the generated image as markdown, so it streams and persists like any message. */
-export function buildGeneratedImageReply({ url, prompt, modelName }) {
+export function buildGeneratedImageReply({ url, prompt, modelName, edited = false }) {
   const alt = String(prompt || 'Generated image').replace(/[[\]\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
   const credit = modelName ? ` made with ${modelName}` : '';
   return [
-    `Here's your image${credit}.`,
+    `Here's your ${edited ? 'edited ' : ''}image${credit}.`,
     '',
     `![${alt}](${url})`,
     '',
