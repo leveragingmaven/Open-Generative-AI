@@ -306,12 +306,10 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [], 
         {lastUploadProgress}%
       </span>
     </div>
+  ) : hasSelection && selectedEntries[0]?.url ? (
+    <img src={selectedEntries[0].url} alt="" className="w-full h-full object-cover" />
   ) : label === "Swap Face" ? (
-    hasSelection ? (
-      <img src={selectedEntries[0].url} alt="" className="w-full h-full object-cover" />
-    ) : (
-      <span className="text-[10px] font-bold text-white/50">Face</span>
-    )
+    <span className="text-[10px] font-bold text-white/50">Face</span>
   ) : (
     <svg
       width="16"
@@ -879,6 +877,8 @@ export default function ImageStudio({
   // ── UI state ────────────────────────────────────────────────────────────
   const [dropdownOpen, setDropdownOpen] = useState(null); // 'model' | 'ar' | 'quality' | null
   const [generating, setGenerating] = useState(false);
+  const [referenceUploading, setReferenceUploading] = useState(false);
+  const [referenceError, setReferenceError] = useState(null);
   const [generateError, setGenerateError] = useState(null);
   const [fullscreenUrl, setFullscreenUrl] = useState(null);
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
@@ -1010,13 +1010,12 @@ export default function ImageStudio({
     const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
     const tooLarge = files.filter((f) => f.size > MAX_IMAGE_SIZE);
     if (tooLarge.length > 0) {
-      alert(
-        `The following images are too large (max 10MB): ${tooLarge.map((f) => f.name).join(", ")}`
-      );
+      setReferenceError(`Too large (max 10MB): ${tooLarge.map((f) => f.name).join(", ")}`);
       return;
     }
 
-    setGenerating(true); // Show as generating/busy
+    setReferenceError(null);
+    setReferenceUploading(true);
     try {
       const toUpload =
         maxImages === 1 ? files.slice(0, 1) : files.slice(0, maxImages);
@@ -1037,9 +1036,9 @@ export default function ImageStudio({
 
       handleUploadSelect({ urls });
     } catch (err) {
-      alert(`Image upload failed: ${err.message}`);
+      setReferenceError(`Reference upload failed: ${err?.message || "please try again"}`);
     } finally {
-      setGenerating(false);
+      setReferenceUploading(false);
     }
   };
 
@@ -1422,6 +1421,8 @@ export default function ImageStudio({
           onHistoryChange={setUploadHistory}
           onOpenPickerReady={handleAttachmentPickerReady}
         />
+      {referenceUploading ? <span role="status" className="text-[11px] text-[#F3BA4A]">Uploading reference…</span> : null}
+      {referenceError ? <span role="alert" title={referenceError} className="text-[11px] text-red-400 max-w-[240px] truncate">{referenceError}</span> : null}
 
       {/* Model button */}
       <div className="relative">
