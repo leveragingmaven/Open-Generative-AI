@@ -6,6 +6,8 @@ import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
 import { extractGeneratedImageUrls, isImageEditRequest, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
 import { extractGeneratedVideoUrls, isImageToVideoRequest, isVideoGenerationRequest } from "../../lib/mavenVideoIntent.js";
+import { extractGeneratedAudioUrls, isAudioGenerationRequest } from "../../lib/mavenAudioIntent.js";
+import { isLipSyncRequest } from "../../lib/mavenLipSyncIntent.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -123,6 +125,7 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
   const isUser = message.role === "user";
   const imageUrls = isUser ? [] : extractGeneratedImageUrls(message.content || "");
   const videoUrls = isUser ? [] : extractGeneratedVideoUrls(message.content || "");
+  const audioUrls = isUser ? [] : extractGeneratedAudioUrls(message.content || "");
   const referenceIds = !isUser && Array.isArray(message.attachments)
     ? message.attachments.map((attachment) => typeof attachment === "string" ? attachment : attachment?.attachmentId).filter((id) => typeof id === "string" && /^asset_[A-Za-z0-9_-]{1,190}$/.test(id))
     : [];
@@ -135,10 +138,10 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
   useEffect(() => () => window.clearTimeout(copyResetRef.current), []);
   const handleDownload = async (url, index, kind = "image") => {
     setDownloadError("");
-    const extension = kind === "video" ? "mp4" : "jpg";
+    const extension = kind === "video" ? "mp4" : kind === "audio" ? "mp3" : "jpg";
     try {
       const result = await downloadAsset(url, { filename: `maven-${kind}-${Date.now()}-${index + 1}.${extension}`, kind, prefix: "maven" });
-      if (!result?.ok) setDownloadError(`This ${kind} is no longer available to download.`);
+      if (!result?.ok) setDownloadError(kind === "image" ? "This image could not be downloaded." : `This ${kind} is no longer available to download.`);
     } catch {
       setDownloadError(`This ${kind} could not be downloaded. Please try again later.`);
     }
@@ -164,9 +167,9 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
               {message.content || ""}
               {message.attachments?.length ? <div className={styles.messageAttachments}>
                 {message.attachments.map((attachment) => <span key={attachment.attachmentId || attachment.asset_label || attachment.assetId} className={styles.messageAttachment}>
-                  {attachment.previewUrl ? <img src={attachment.previewUrl} alt="" /> : <Icon type="image" size={13} />}
-                  {attachment.filename || attachment.attachmentId || attachment.asset_label || "Image reference"}
-                  {attachment.url ? <button type="button" className={styles.useReferenceAction} onClick={() => openImageInStudio(attachment.url)}>Use in Image Studio</button> : null}
+                  {attachment.previewUrl && attachment.kind === "image" ? <img src={attachment.previewUrl} alt="" /> : <Icon type={attachment.kind === "video" ? "video" : attachment.kind === "audio" ? "audio" : "image"} size={13} />}
+                  {attachment.filename || attachment.attachmentId || attachment.asset_label || "Media reference"}
+                  {attachment.url && attachment.kind === "image" ? <button type="button" className={styles.useReferenceAction} onClick={() => openImageInStudio(attachment.url)}>Use in Image Studio</button> : null}
                 </span>)}
               </div> : null}
             </>
@@ -191,6 +194,19 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
               <Icon type={copied ? "check" : "copy"} size={13} />
               <span>{copied ? "Copied" : "Copy"}</span>
             </button>
+          </div>
+        ) : null}
+        {!isUser && !streaming && audioUrls.length ? (
+          <div className={styles.videoResultActions}>
+            {audioUrls.map((url, index) => (
+              <div key={url} className={styles.audioResult}>
+                <audio controls preload="metadata" src={url} aria-label={`Generated audio ${index + 1}`} />
+                <button type="button" className={styles.imageAction} onClick={() => void handleDownload(url, index, "audio")}>
+                  <Icon type="download" size={13} /><span>Download audio</span>
+                </button>
+              </div>
+            ))}
+            {downloadError ? <span className={styles.imageActionError} role="alert">{downloadError}</span> : null}
           </div>
         ) : null}
         {!isUser && !streaming && videoUrls.length ? (
@@ -305,25 +321,25 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     return pending;
   };
 
-  const addImageFiles = async (fileList) => {
-    const selectedImages = Array.from(fileList || []).filter((file) => file.type?.startsWith("image/"));
-    if (!selectedImages.length) {
-      if (fileList?.length) setAttachmentError("Choose an image file to attach.");
+  const addMediaFiles = async (fileList) => {
+    const selectedMedia = Array.from(fileList || []).filter((file) => /^(image|audio|video)\//i.test(file.type || ""));
+    if (!selectedMedia.length) {
+      if (fileList?.length) setAttachmentError("Choose an image, audio, or video file to attach.");
       return;
     }
     if (selectedImageReference) setSelectedImageReference(null);
     const capacity = Math.max(0, 8 - attachments.length);
-    const imageFiles = selectedImages.slice(0, capacity);
-    if (!capacity || imageFiles.length < selectedImages.length) setAttachmentError("You can attach up to 8 images per message.");
+    const mediaFiles = selectedMedia.slice(0, capacity);
+    if (!capacity || mediaFiles.length < selectedMedia.length) setAttachmentError("You can attach up to 8 media files per message.");
     else setAttachmentError(null);
-    for (const file of imageFiles) {
-      if (file.size > 25 * 1024 * 1024) {
+    for (const file of mediaFiles) {
+      if (file.type.startsWith("image/") && file.size > 25 * 1024 * 1024) {
         setAttachmentError(`${file.name || "Image"} exceeds the 25 MB image limit.`);
         continue;
       }
       const localId = `${Date.now()}-${Math.random()}`;
       const previewUrl = URL.createObjectURL(file);
-      setAttachments((current) => [...current, { localId, filename: file.name || "Image", previewUrl, status: "uploading" }]);
+      setAttachments((current) => [...current, { localId, filename: file.name || "Media file", kind: file.type.split("/")[0], previewUrl, status: "uploading" }]);
       try {
         const url = await uploadFile(apiKey, file);
         setAttachments((current) => current.map((attachment) => attachment.localId === localId
@@ -355,7 +371,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    const pendingStatus = (isVideoGenerationRequest(text) || isImageToVideoRequest(text)) ? "Creating your video…" : (isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : ""));
+    const pendingStatus = isLipSyncRequest(text) ? "Creating your lip-synced video…" : isAudioGenerationRequest(text) ? "Creating your audio…" : (isVideoGenerationRequest(text) || isImageToVideoRequest(text)) ? "Creating your video…" : (isImageGenerationRequest(text) && attachments.length === 0 ? "Creating your image…" : ((explicitReference || selectedImageReference || (attachments.length === 0 && isImageEditRequest(text))) ? "Refining your image…" : ""));
     const reference = explicitReference || selectedImageReference;
     const priorReferenceIds = reference?.attachmentId ? [reference.attachmentId] : [];
     setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: pendingStatus }]);
@@ -372,7 +388,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
             method: "POST",
             credentials: "same-origin",
             headers,
-            body: JSON.stringify({ url: attachment.url, kind: "image", source_tool: "upload" }),
+            body: JSON.stringify({ url: attachment.url, kind: attachment.kind, source_tool: "upload" }),
           });
           const registered = await response.json().catch(() => null);
           if (!response.ok || !registered?.asset_label) {
@@ -384,7 +400,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
             : item));
         }
         attachmentIds.push(attachmentId);
-        resolvedAttachments.push({ attachmentId, filename: attachment.filename, url: attachment.url });
+        resolvedAttachments.push({ attachmentId, kind: attachment.kind, filename: attachment.filename, url: attachment.url });
       }
       const sentAttachments = resolvedAttachments;
       setMavenMessages((prev) => {
@@ -511,8 +527,8 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       onDragEnter={(event) => { event.preventDefault(); event.stopPropagation(); if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) setDraggingImage(true); }}
       onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) setDraggingImage(true); }}
       onDragLeave={(event) => { event.stopPropagation(); if (!event.currentTarget.contains(event.relatedTarget)) setDraggingImage(false); }}
-      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingImage(false); void addImageFiles(event.dataTransfer.files); }}>
-      <input ref={attachmentInputRef} type="file" accept="image/*" multiple className="sr-only" aria-label="Choose images to attach" onChange={(event) => { void addImageFiles(event.target.files); event.target.value = ""; }} />
+      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingImage(false); void addMediaFiles(event.dataTransfer.files); }}>
+      <input ref={attachmentInputRef} type="file" accept="image/*,audio/*,video/*" multiple className="sr-only" aria-label="Choose media to attach" onChange={(event) => { void addMediaFiles(event.target.files); event.target.value = ""; }} />
       {selectedImageReference ? <div className={styles.attachmentList} aria-label="Selected Maven image reference">
         <div className={styles.attachmentPreview}>
           {selectedImageReference.previewUrl ? <img src={selectedImageReference.previewUrl} alt="Selected image to refine" /> : <Icon type="image" size={13} />}
@@ -520,10 +536,10 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
           <button type="button" aria-label="Remove selected image reference" onClick={() => setSelectedImageReference(null)} disabled={mavenBusy}><Icon type="close" size={13} /></button>
         </div>
       </div> : null}
-      {attachments.length ? <div className={styles.attachmentList} aria-label="Attached images">
+      {attachments.length ? <div className={styles.attachmentList} aria-label="Attached media">
         {attachments.map((attachment) => <div key={attachment.localId} className={styles.attachmentPreview}>
-          <img src={attachment.previewUrl} alt={attachment.filename} />
-          <span title={attachment.filename}>{attachment.filename}</span>
+          {attachment.kind === "image" ? <img src={attachment.previewUrl} alt={attachment.filename} /> : <Icon type={attachment.kind === "video" ? "video" : "audio"} size={13} />}
+          <span title={attachment.filename}>{attachment.filename} ({attachment.kind})</span>
           {attachment.status === "uploading" ? <small>Uploading…</small> : null}
           <button type="button" aria-label={`Remove ${attachment.filename}`} onClick={() => removeAttachment(attachment.localId)} disabled={mavenBusy || attachment.status === "uploading"}><Icon type="close" size={13} /></button>
         </div>)}
@@ -550,7 +566,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       </div>
       <div className={styles.composerFooter}>
         <div className={styles.composerTools}>
-          <button type="button" className={styles.attachButton} aria-label="Attach images" title="Attach images" onClick={() => attachmentInputRef.current?.click()} disabled={!mavenReady || mavenBusy}>
+          <button type="button" className={styles.attachButton} aria-label="Attach media" title="Attach images, audio, or video" onClick={() => attachmentInputRef.current?.click()} disabled={!mavenReady || mavenBusy}>
             <Icon type="attach" size={17} />
           </button>
           <span className={styles.modelPill} title="Server-managed conversation intelligence"><Icon type="sparkle" size={14} /> Maven Intelligence</span>

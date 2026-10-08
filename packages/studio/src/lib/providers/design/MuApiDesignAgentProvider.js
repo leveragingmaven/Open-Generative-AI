@@ -87,8 +87,9 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
 
   async registerSessionAsset(sessionId, { url, kind = "image", sourceTool = "maven" } = {}, context = {}) {
     if (!sessionId) throw new DesignAgentRequestError("Design session ID is required", { status: 400 });
-    if (typeof url !== "string" || !/^https:\/\//i.test(url) || kind !== "image") {
-      throw new DesignAgentRequestError("A valid generated image URL is required", { status: 422 });
+    const supportedKinds = new Set(["image", "audio", "video"]);
+    if (typeof url !== "string" || !/^https:\/\//i.test(url) || !supportedKinds.has(kind)) {
+      throw new DesignAgentRequestError("A valid generated media URL and supported kind are required", { status: 422 });
     }
     const data = await this.request(`/sessions/${encodeURIComponent(sessionId)}/assets`, {
       method: "POST",
@@ -97,9 +98,9 @@ export class MuApiDesignAgentProvider extends DesignAgentProvider {
     });
     const label = String(data?.asset_label || data?.assetId || data?.id || "").trim();
     if (!/^asset_[A-Za-z0-9_-]{1,190}$/.test(label)) {
-      throw new DesignAgentRequestError("The generated image could not be registered with this session", { status: 502 });
+      throw new DesignAgentRequestError("The generated media could not be registered with this session", { status: 502 });
     }
-    return { attachmentId: label, kind: "image" };
+    return { attachmentId: label, kind };
   }
 
   async getDesignJob(sessionId, context = {}) {

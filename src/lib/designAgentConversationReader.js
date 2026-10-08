@@ -276,6 +276,18 @@ export class DesignAgentConversationReader {
       conversationId: trustedConversationId,
       messages: trustedMessages,
       imageReferences,
+      mediaReferences: rawMessages.flatMap((rawMessage) => {
+        const role = identifier(rawMessage?.role).toLowerCase();
+        if (!SEMANTIC_ROLES.has(role) || !Array.isArray(rawMessage?.attachments)) return [];
+        const references = role === 'assistant'
+          ? rawMessage.attachments.map((attachment) => ({ attachmentId: typeof attachment === 'string' ? identifier(attachment) : assetLabel(attachment) }))
+          : (trustedMessages.find((message) => message.role === 'user' && message.content === String(rawMessage?.content || '').trim())?.attachments || []);
+        const trustedMedia = references.flatMap((reference) => {
+          const trusted = byId.get(reference.attachmentId);
+          return trusted && ['audio', 'video'].includes(trusted.kind) ? [{ attachmentId: reference.attachmentId, kind: trusted.kind }] : [];
+        });
+        return trustedMedia.length ? [{ role, content: String(rawMessage?.content || ''), attachments: trustedMedia }] : [];
+      }),
       attachments,
       agent: safeAgentMetadata(),
     };

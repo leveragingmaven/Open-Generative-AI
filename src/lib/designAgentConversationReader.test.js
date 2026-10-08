@@ -143,6 +143,20 @@ test('maps generated assistant references only through server-loaded session ass
   assert.deepEqual(result.messages, [], 'assistant asset IDs do not enter ordinary model history');
 });
 
+test('maps assistant audio and video result IDs to separate trusted media references', async () => {
+  const messages = [
+    { role: 'assistant', content: '[Play or download the generated audio](https://cdn.test/asset_2.mp3)', attachments: [{ asset_label: 'asset_2' }] },
+    { role: 'assistant', content: '[Play or download the generated video](https://cdn.test/asset_3.mp4)', attachments: [{ asset_label: 'asset_3' }] },
+  ];
+  const { conversationReader } = reader({ messages, assets: [asset('asset_2', 'audio'), asset('asset_3', 'video')] });
+  const result = await read(conversationReader);
+  assert.deepEqual(result.mediaReferences.map((message) => message.attachments), [
+    [{ attachmentId: 'asset_2', kind: 'audio' }],
+    [{ attachmentId: 'asset_3', kind: 'video' }],
+  ]);
+  assert.deepEqual(result.imageReferences, []);
+});
+
 test('ignores assistant asset references that do not resolve in the owned session asset list', async () => {
   const { conversationReader } = reader({
     messages: [{ role: 'assistant', content: '![generated](https://untrusted.test/foreign.png)', attachments: [{ asset_label: 'asset_foreign' }] }],

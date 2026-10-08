@@ -240,11 +240,14 @@ test("Dashboard reuses the existing conversation endpoint and client", () => {
 });
 
 test("Workspace image attachment flow uses the existing uploader and registers a session asset", () => {
-  assert.match(dashboardSource, /type="file" accept="image\/\*" multiple/);
+  assert.match(dashboardSource, /type="file" accept="image\/\*,audio\/\*,video\/\*" multiple/);
   assert.match(dashboardSource, /attachmentInputRef\.current\?\.click\(\)/);
   assert.match(dashboardSource, /uploadFile\(apiKey, file\)/);
+  assert.match(dashboardSource, /kind: attachment\.kind/);
+  assert.match(dashboardSource, /<audio controls preload="metadata"/);
+  assert.match(dashboardSource, /Download audio/);
   assert.match(dashboardSource, /sessions\/\$\{encodeURIComponent\(sessionId\)\}\/assets/);
-  assert.match(dashboardSource, /onDrop=\{\(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); setDraggingImage\(false\); void addImageFiles\(event\.dataTransfer\.files\); \}\}/);
+  assert.match(dashboardSource, /onDrop=\{\(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); setDraggingImage\(false\); void addMediaFiles\(event\.dataTransfer\.files\); \}\}/);
   assert.match(dashboardSource, /Remove \$\{attachment\.filename\}/);
   assert.match(dashboardSource, /attachments: attachmentIds/);
   assert.match(dashboardSource, /message\.attachments\?\.length/);

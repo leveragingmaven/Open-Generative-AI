@@ -22,12 +22,20 @@ test('registerSessionAsset POSTs image URL to the authorized session asset endpo
   assert.deepEqual(result, { attachmentId: 'asset_generated_1', kind: 'image' });
 });
 
-test('registerSessionAsset rejects insecure or non-image references before making a request', async () => {
+test('registerSessionAsset rejects insecure URLs and unsupported kinds before making a request', async () => {
   let calls = 0;
   const provider = new MuApiDesignAgentProvider({ fetchFn: async () => { calls += 1; throw new Error('must not call'); } });
-  await assert.rejects(provider.registerSessionAsset('session-1', { url: 'javascript:alert(1)', kind: 'image' }), /valid generated image URL/);
-  await assert.rejects(provider.registerSessionAsset('session-1', { url: 'https://cdn.example.test/file.mp4', kind: 'video' }), /valid generated image URL/);
+  await assert.rejects(provider.registerSessionAsset('session-1', { url: 'javascript:alert(1)', kind: 'image' }), /valid generated media URL/);
+  await assert.rejects(provider.registerSessionAsset('session-1', { url: 'https://cdn.example.test/file.bin', kind: 'document' }), /supported kind/);
   assert.equal(calls, 0);
+});
+
+test('registerSessionAsset supports generated audio/video only through valid session labels', async () => {
+  const calls = [];
+  const provider = new MuApiDesignAgentProvider({ fetchFn: async (_url, options) => { calls.push(JSON.parse(options.body)); return new Response(JSON.stringify({ asset_label: 'asset_media_1' }), { status: 201 }); } });
+  assert.deepEqual(await provider.registerSessionAsset('session-1', { url: 'https://cdn.example.test/speech.mp3', kind: 'audio' }), { attachmentId: 'asset_media_1', kind: 'audio' });
+  assert.deepEqual(await provider.registerSessionAsset('session-1', { url: 'https://cdn.example.test/talk.mp4', kind: 'video' }), { attachmentId: 'asset_media_1', kind: 'video' });
+  assert.deepEqual(calls.map((call) => call.kind), ['audio', 'video']);
 });
 
 test('registerSessionAsset rejects an upstream response without a valid session asset label', async () => {

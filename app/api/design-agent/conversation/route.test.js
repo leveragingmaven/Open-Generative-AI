@@ -261,7 +261,11 @@ test('resolves selected session-owned image IDs for Maven and persists only trus
 });
 
 test('rejects unknown, non-image, or malformed selected attachment IDs', async () => {
-  for (const attachments of [['asset_missing'], ['asset_2'], ['https://evil.test/image.png'], 'asset_1']) {
+  // `asset_2` is a registered *video* attachment, which is now a supported input kind
+  // (lip sync accepts an authorized video source), so it is intentionally no longer
+  // rejected here. Unknown IDs still fail closed with 422 and browser-provided values
+  // with 400.
+  for (const attachments of [['asset_missing'], ['asset_3'], ['https://evil.test/image.png'], 'asset_1']) {
     const deps = makeDeps({
       conversationReader: { async read() { return { messages: [], attachments: [{ attachmentId: 'asset_2', kind: 'video', filename: 'clip.mp4', url: 'https://cdn.test/clip.mp4' }] }; } },
     });
@@ -269,7 +273,7 @@ test('rejects unknown, non-image, or malformed selected attachment IDs', async (
       makeRequest({ conversationId: 'owned-session', message: 'Use this.', attachments }),
       deps,
     );
-    assert.equal(result.status, ['asset_missing', 'asset_2'].includes(attachments[0]) ? 422 : 400);
+    assert.equal(result.status, ['asset_missing', 'asset_3'].includes(attachments[0]) ? 422 : 400);
   }
 });
 

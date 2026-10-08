@@ -17,8 +17,12 @@ import { createServerVisionTextIntelligence } from './serverVisionTextIntelligen
 import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
 import { generateMavenVideo, buildGeneratedVideoReply } from './mavenVideoGeneration.js';
 import { generateMavenImageToVideo } from './mavenImageToVideoGeneration.js';
+import { generateMavenAudio, buildGeneratedAudioReply } from './mavenAudioGeneration.js';
+import { generateMavenLipSync, buildGeneratedLipSyncReply } from './mavenLipSyncGeneration.js';
 import { isImageGenerationRequest, isImageEditRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
 import { isImageToVideoRequest, isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
+import { isAudioGenerationRequest, extractSpeechText } from '../../packages/studio/src/lib/mavenAudioIntent.js';
+import { isLipSyncRequest } from '../../packages/studio/src/lib/mavenLipSyncIntent.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -63,8 +67,8 @@ export function sanitizeDesignAgentMessage(message, { trustedAttachments = [], g
   }
   if (role === 'assistant' && Array.isArray(generatedReferences) && generatedReferences.length) {
     sanitized.attachments = generatedReferences
-      .filter((attachment) => /^asset_[A-Za-z0-9_-]{1,190}$/.test(String(attachment?.attachmentId || '')) && attachment?.kind === 'image')
-      .map((attachment) => ({ attachmentId: attachment.attachmentId, kind: 'image' }));
+      .filter((attachment) => /^asset_[A-Za-z0-9_-]{1,190}$/.test(String(attachment?.attachmentId || '')) && ['image', 'audio', 'video'].includes(attachment?.kind))
+      .map((attachment) => ({ attachmentId: attachment.attachmentId, kind: attachment.kind }));
   }
 
   return sanitized;
@@ -115,6 +119,12 @@ export async function loadEndpointServices() {
   });
   const conversationReader = new DesignAgentConversationReader({ designAgentProvider, ownershipService });
 
+  const registerMavenMediaReference = async (identity, { conversationId, url, kind } = {}) => {
+    if (!['image', 'audio', 'video'].includes(kind) || typeof url !== 'string' || !/^https:\/\//i.test(url)) return null;
+    if (typeof designAgentProvider.registerSessionAsset !== 'function') return null;
+    return designAgentProvider.registerSessionAsset(conversationId, { url, kind, sourceTool: 'maven' }, { identity });
+  };
+
   return {
     ownershipService,
     conversationReader,
@@ -144,11 +154,10 @@ export async function loadEndpointServices() {
     generateMavenImageToVideo(identity, args = {}) {
       return generateMavenImageToVideo({ identity, ...args });
     },
-    async registerMavenImageReference(identity, { conversationId, url, kind = 'image' } = {}) {
-      if (kind !== 'image' || typeof url !== 'string' || !/^https:\/\//i.test(url)) return null;
-      if (typeof designAgentProvider.registerSessionAsset !== 'function') return null;
-      return designAgentProvider.registerSessionAsset(conversationId, { url, kind, sourceTool: 'maven' }, { identity });
-    },
+    generateMavenAudio(identity, args = {}) { return generateMavenAudio({ identity, ...args }); },
+    generateMavenLipSync(identity, args = {}) { return generateMavenLipSync({ identity, ...args }); },
+    registerMavenMediaReference,
+    async registerMavenImageReference(identity, args = {}) { return registerMavenMediaReference(identity, { ...args, kind: 'image' }); },
   };
 }
 
@@ -227,8 +236,8 @@ function resolveTrustedAttachments(requestedIds, sessionAttachments) {
   const resolved = [];
   for (const attachmentId of requestedIds) {
     const attachment = byId.get(attachmentId);
-    if (!attachment || attachment.kind !== 'image') {
-      const error = new Error('The attached image is not available in this Design Agent session.');
+    if (!attachment || !['image', 'audio', 'video'].includes(attachment.kind)) {
+      const error = new Error('The attached media is not available in this Design Agent session.');
       error.code = 'fabricated_design_asset_reference';
       error.status = 422;
       throw error;
@@ -253,6 +262,8 @@ const SAFE_ERROR_CODES = new Set([
   'image_generation_timeout', 'image_prompt_required',
   'image_model_unavailable', 'image_aspect_ratio_unsupported', 'image_source_unavailable', 'image_reference_unavailable',
   'video_provider_credential_required', 'video_generation_failed', 'video_generation_timeout',
+  'audio_provider_credential_required', 'audio_generation_failed', 'audio_generation_unsupported', 'audio_script_required', 'audio_model_unavailable', 'audio_option_unsupported',
+  'lipsync_input_required', 'lipsync_audio_required', 'lipsync_model_unavailable', 'lipsync_option_unsupported', 'lipsync_provider_credential_required', 'lipsync_generation_failed', 'lipsync_generation_unsupported',
   'video_generation_unsupported', 'video_prompt_required', 'video_model_unavailable', 'video_option_unsupported',
   'image_source_unavailable', 'video_model_unavailable', 'video_option_unsupported',
 ]);
@@ -304,13 +315,13 @@ function buildSanitizedTranscript(message, reply, trustedAttachments = [], gener
   ].filter(Boolean);
 }
 
-async function registerGeneratedReference(getService, identity, conversationId, image, { allowDefault = true } = {}) {
+async function registerGeneratedReference(getService, identity, conversationId, media, { kind = 'image', allowDefault = true } = {}) {
   if (!allowDefault) return [];
   try {
-    const register = await getService('registerMavenImageReference');
-    const registered = await register(identity, { conversationId, url: image.url, kind: 'image' });
-    if (!/^asset_[A-Za-z0-9_-]{1,190}$/.test(String(registered?.attachmentId || ''))) return [];
-    return [{ attachmentId: registered.attachmentId, kind: 'image' }];
+    const register = await getService(kind === 'image' ? 'registerMavenImageReference' : 'registerMavenMediaReference');
+    const registered = await register(identity, { conversationId, url: media.url, kind });
+    if (!/^asset_[A-Za-z0-9_-]{1,190}$/.test(String(registered?.attachmentId || '')) || registered.kind !== kind) return [];
+    return [{ attachmentId: registered.attachmentId, kind }];
   } catch {
     // Preserve the generated result; the UI will explain that it cannot be refined from this session.
     return [];
@@ -345,6 +356,25 @@ export function resolveLastTrustedImageReference(sessionReadResult, expectedConv
     }
   }
   return null;
+}
+
+function resolveLastTrustedMediaReference(sessionReadResult, expectedConversationId, kind) {
+  if (!sessionReadResult || sessionReadResult.conversationId !== expectedConversationId) return null;
+  const assets = new Map((Array.isArray(sessionReadResult.attachments) ? sessionReadResult.attachments : []).filter((asset) => asset?.kind === kind && asset.temporaryUrl !== true).map((asset) => [asset.attachmentId, asset]));
+  const messages = Array.isArray(sessionReadResult.mediaReferences) ? sessionReadResult.mediaReferences : [];
+  for (const message of [...messages].reverse()) {
+    if (message?.role !== 'assistant') continue;
+    for (const reference of [...(message.attachments || [])].reverse()) {
+      const asset = assets.get(typeof reference === 'string' ? reference : reference?.attachmentId);
+      if (asset) return asset;
+    }
+  }
+  return null;
+}
+
+function trustedMediaUrl(attachment, kind) {
+  if (!attachment || attachment.kind !== kind || typeof attachment.url !== 'string') return '';
+  try { const url = new URL(attachment.url); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
 }
 
 function sseFrame(payload) {
@@ -519,7 +549,9 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // Natural-language refinements can refer to the last assistant image without
     // exposing URLs in the browser. Only session asset IDs from authorized history
     // are eligible; resolve them against this session's asset catalog.
-    if (!trustedAttachments.length && (isImageEditRequest(message) || isImageToVideoRequest(message))) {
+    // Speech and lip-sync are excluded from this gate: they have priority over image/video intents
+    // (see below) and may legitimately carry only an audio or video attachment.
+    if (!(isLipSyncRequest(message) || isAudioGenerationRequest(message)) && !trustedAttachments.some((item) => item.kind === 'image') && (isImageEditRequest(message) || isImageToVideoRequest(message))) {
       const implicitReference = resolveLastTrustedImageReference(sessionReadResult, conversationId);
       if (implicitReference) trustedAttachments = [implicitReference];
       else {
@@ -534,18 +566,60 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       attachments: sessionReadResult?.attachments || [],
     };
 
+    // Speech and lip-sync have priority over video and image intents to avoid accidental cross-modality execution.
+    if (isLipSyncRequest(message)) {
+      let character = trustedAttachments.find((item) => item.kind === 'image');
+      let sourceVideo = trustedAttachments.find((item) => item.kind === 'video');
+      let audio = trustedAttachments.find((item) => item.kind === 'audio');
+      if (!character && !sourceVideo) {
+        character = resolveLastTrustedImageReference(sessionReadResult, conversationId);
+        sourceVideo = resolveLastTrustedMediaReference(sessionReadResult, conversationId, 'video');
+      }
+      if (!audio) audio = resolveLastTrustedMediaReference(sessionReadResult, conversationId, 'audio');
+      const inlineScript = extractSpeechText(message);
+      if (!audio && inlineScript) {
+        const generateAudio = await getService('generateMavenAudio');
+        const narration = await generateAudio(identity, { prompt: message, signal: request?.signal });
+        const audioReferences = await registerGeneratedReference(getService, identity, conversationId, narration, { kind: 'audio', allowDefault: deps.registerMavenMediaReference !== undefined || deps.generateMavenAudio === undefined });
+        if (!audioReferences.length) throw Object.assign(new Error('Generated speech could not be registered as a trusted conversation asset, so it cannot be passed to lip sync. Please provide an authorized audio asset.'), { code: 'lipsync_audio_required', status: 422 });
+        audio = { ...audioReferences[0], url: narration.url };
+        trustedSessionReadResultWithRefs.attachments = [...trustedSessionReadResultWithRefs.attachments, audio];
+      }
+      if (!character && !sourceVideo) throw Object.assign(new Error('Attach a character image or source video from this conversation before requesting lip sync.'), { code: 'lipsync_input_required', status: 422 });
+      if (!audio) throw Object.assign(new Error('Attach a trusted audio track, or include a script in quotes to generate speech first.'), { code: 'lipsync_audio_required', status: 422 });
+      const runLipSync = await getService('generateMavenLipSync');
+      const output = await runLipSync(identity, { prompt: message, imageUrl: character ? trustedMediaUrl(character, 'image') : undefined, videoUrl: sourceVideo ? trustedMediaUrl(sourceVideo, 'video') : undefined, audioUrl: trustedMediaUrl(audio, 'audio'), signal: request?.signal });
+      const videoReferences = await registerGeneratedReference(getService, identity, conversationId, output, { kind: 'video' });
+      const reply = buildGeneratedLipSyncReply({ ...output, referenceUnavailable: !videoReferences.length });
+      if (videoReferences.length) trustedSessionReadResultWithRefs.attachments.push({ ...videoReferences[0], url: output.url });
+      if (wantsStream) return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: videoReferences });
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, videoReferences) };
+    }
+
+    if (isAudioGenerationRequest(message)) {
+      const generateAudio = await getService('generateMavenAudio');
+      const audio = await generateAudio(identity, { prompt: message, signal: request?.signal });
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, audio, { kind: 'audio' });
+      const reply = buildGeneratedAudioReply({ ...audio, referenceUnavailable: !generatedReferences.length });
+      if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments.push({ ...generatedReferences[0], url: audio.url });
+      if (wantsStream) return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences });
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, generatedReferences) };
+    }
+
     // Text-to-video executes via the existing MuAPI adapter and its polling method.
     // Requests with any reference images are deliberately left on the trusted image path for now.
+    const imageAttachment = trustedAttachments.find((item) => item.kind === 'image');
+    const videoAttachment = trustedAttachments.find((item) => item.kind === 'video');
     const videoIntent = isVideoGenerationRequest(message) || isImageToVideoRequest(message);
-    if (videoIntent && trustedAttachments.length > 1) {
+    if (videoIntent && (trustedAttachments.filter((item) => item.kind === 'image').length > 1 || videoAttachment)) {
       const error = new Error('Animate one image at a time. Select one image reference and try again.');
       error.code = 'image_source_unavailable';
       error.status = 422;
       throw error;
     }
-    if (videoIntent && trustedAttachments.length === 1) {
+    if (videoIntent && imageAttachment) {
       const generateImageVideo = await getService('generateMavenImageToVideo');
-      const sourceUrl = trustedImageUrl(trustedAttachments[0]);
+      const sourceUrl = trustedImageUrl(imageAttachment);
       const video = await generateImageVideo(identity, { prompt: message, imageUrl: sourceUrl, signal: request?.signal });
       const reply = buildGeneratedVideoReply(video);
       if (wantsStream) {
@@ -553,7 +627,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       }
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments) };
     }
-    if (!trustedAttachments.length && isVideoGenerationRequest(message)) {
+    if (!trustedAttachments.some((item) => item.kind === 'image') && isVideoGenerationRequest(message)) {
       const generateVideo = await getService('generateMavenVideo');
       const video = await generateVideo(identity, { prompt: message, signal: request?.signal });
       const reply = buildGeneratedVideoReply(video);
@@ -572,7 +646,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     if (!trustedAttachments.length && isImageGenerationRequest(message)) {
       const generateImage = await getService('generateMavenImage');
       const image = await generateImage(identity, { prompt: message, signal: request?.signal });
-      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImage === undefined });
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImage === undefined });
       const reply = buildGeneratedImageReply({ ...image, referenceUnavailable: !generatedReferences.length });
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
@@ -589,14 +663,14 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
 
     // Editing: exactly one session-verified reference image plus an explicit edit request.
     // Image analysis and questions about the image stay on the vision path below.
-    if (trustedAttachments.length === 1 && isImageEditRequest(message)) {
+    if (trustedAttachments.filter((item) => item.kind === 'image').length === 1 && isImageEditRequest(message)) {
       const editImage = await getService('generateMavenImageEdit');
       const image = await editImage(identity, {
         prompt: message,
-        imageUrl: trustedImageUrl(trustedAttachments[0]),
+        imageUrl: trustedImageUrl(trustedAttachments.find((item) => item.kind === 'image')),
         signal: request?.signal,
       });
-      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined });
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined });
       const reply = buildGeneratedImageReply({ ...image, edited: true, referenceUnavailable: !generatedReferences.length });
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
