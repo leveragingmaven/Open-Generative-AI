@@ -610,7 +610,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   let activeWorkspaceContent = null;
   if (isStudioHome) {
-    activeWorkspaceContent = <MavenHomeDashboard onOpenSettings={openSettings} />;
+    activeWorkspaceContent = <MavenHomeDashboard apiKey={studioApiKey} onOpenSettings={openSettings} />;
   } else if (isOverviewWorkspace) {
     activeWorkspaceContent = <MavenSyncDashboard />;
   } else if (isCreateWorkspace) {

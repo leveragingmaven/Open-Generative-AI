@@ -98,7 +98,7 @@ function assetSessionId(asset) {
 
 function assetLabel(asset) {
   const raw = rawAsset(asset);
-  return firstIdentifier([raw, asset], ['asset_label', 'providerAssetId', 'assetId', 'id']);
+  return firstIdentifier([raw, asset], ['asset_label', 'providerAssetId', 'assetId', 'attachmentId', 'id']);
 }
 
 function assetUrl(asset) {

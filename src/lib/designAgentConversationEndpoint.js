@@ -23,7 +23,7 @@ export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
  * Allowed: role ('user' | 'assistant'), content (string), timestamp (string).
  * Rejected roles: 'system', 'tool', 'function', 'developer', and any unknown role.
  */
-export function sanitizeDesignAgentMessage(message) {
+export function sanitizeDesignAgentMessage(message, { trustedAttachments = [] } = {}) {
   if (!message || typeof message !== 'object') return null;
 
   const { role, content, timestamp } = message;
@@ -46,6 +46,14 @@ export function sanitizeDesignAgentMessage(message) {
     sanitized.timestamp = timestamp;
   } else if (message.createdAt && typeof message.createdAt === 'string') {
     sanitized.timestamp = message.createdAt;
+  }
+
+  if (role === 'user' && Array.isArray(trustedAttachments) && trustedAttachments.length) {
+    sanitized.attachments = trustedAttachments.map((attachment) => ({
+      attachmentId: attachment.attachmentId,
+      kind: attachment.kind,
+      ...(attachment.filename ? { filename: attachment.filename } : {}),
+    }));
   }
 
   return sanitized;
@@ -164,12 +172,43 @@ const forbiddenFields = [
   'attachmentUrls', 'executionSettings', 'toolSettings',
 ];
 
+const ATTACHMENT_ID_PATTERN = /^asset_[A-Za-z0-9_-]{1,190}$/;
+const MAX_CONVERSATION_ATTACHMENTS = 8;
+
+function normalizeRequestedAttachmentIds(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_CONVERSATION_ATTACHMENTS) return null;
+  const ids = [];
+  for (const id of value) {
+    if (typeof id !== 'string' || !ATTACHMENT_ID_PATTERN.test(id)) return null;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function resolveTrustedAttachments(requestedIds, sessionAttachments) {
+  const byId = new Map((Array.isArray(sessionAttachments) ? sessionAttachments : [])
+    .map((attachment) => [attachment.attachmentId, attachment]));
+  const resolved = [];
+  for (const attachmentId of requestedIds) {
+    const attachment = byId.get(attachmentId);
+    if (!attachment || attachment.kind !== 'image') {
+      const error = new Error('The attached image is not available in this Design Agent session.');
+      error.code = 'fabricated_design_asset_reference';
+      error.status = 422;
+      throw error;
+    }
+    resolved.push(attachment);
+  }
+  return resolved;
+}
+
 // Error codes whose messages are safe to surface verbatim. Everything else is
 // replaced with a generic sanitized message; codes are always safe to expose.
 const SAFE_ERROR_CODES = new Set([
   'conversation_not_found', 'conversation_scope_mismatch',
   'agentId_required', 'conversationId_required',
-  'design_agent_scope_mismatch', 'design_session_scope_mismatch',
+  'invalid_attachments', 'design_agent_scope_mismatch', 'design_session_scope_mismatch',
   'design_session_ownership_unverified', 'design_session_ownership_schema_missing',
   'design_session_asset_invalid', 'design_session_assets_invalid',
   'unsupported_design_attachment_kind', 'fabricated_design_asset_reference',
@@ -215,10 +254,10 @@ function conversationErrorResponse(error) {
  * streaming paths must build their final transcript through this helper so
  * only role/content/timestamp fields can ever reach persistence.
  */
-function buildSanitizedTranscript(message, reply) {
+function buildSanitizedTranscript(message, reply, trustedAttachments = []) {
   const now = new Date().toISOString();
   return [
-    sanitizeDesignAgentMessage({ role: 'user', content: message, timestamp: now }),
+    sanitizeDesignAgentMessage({ role: 'user', content: message, timestamp: now }, { trustedAttachments }),
     sanitizeDesignAgentMessage({ role: 'assistant', content: reply, timestamp: now }),
   ].filter(Boolean);
 }
@@ -236,7 +275,7 @@ function sseFrame(payload) {
  * Raw upstream provider frames never cross this boundary; the full assistant
  * response is accumulated server-side and sanitized before `done` is emitted.
  */
-export function buildConversationStreamResponse({ service, sessionReadResult, message }) {
+export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [] }) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -255,6 +294,7 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
         .respondStreaming({
           sessionReadResult,
           newMessage: message,
+          attachments,
           onDelta: (text) => send({ type: 'delta', text }),
         })
         .then(({ reply }) => {
@@ -271,7 +311,7 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
           }
           // Exactly one application-level done event is emitted per stream,
           // always after final sanitization, and always before close.
-          send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply) });
+          send({ type: 'done', reply, persistedMessages: buildSanitizedTranscript(message, reply, attachments) });
           finish();
         })
         .catch((error) => {
@@ -309,6 +349,10 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
   }
 
   const { conversationId, message } = payload || {};
+  const requestedAttachmentIds = normalizeRequestedAttachmentIds(payload?.attachments);
+  if (requestedAttachmentIds === null) {
+    return { error: 'invalid_attachments', code: 'invalid_attachments', status: 400 };
+  }
   if (!conversationId || typeof conversationId !== 'string') {
     return { error: 'conversation_id_required', status: 400 };
   }
@@ -381,6 +425,11 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       conversationId,
       identity,
     });
+    const trustedAttachments = resolveTrustedAttachments(requestedAttachmentIds, sessionReadResult?.attachments);
+    const trustedSessionReadResult = {
+      ...sessionReadResult,
+      attachments: requestedAttachmentIds.length ? trustedAttachments : (sessionReadResult?.attachments || []),
+    };
 
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');
@@ -388,19 +437,20 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     const service = conversationServiceFactory(textProviderFactory());
 
     if (wantsStream) {
-      return buildConversationStreamResponse({ service, sessionReadResult, message });
+      return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments });
     }
 
     const { reply } = await service.respond({
-      sessionReadResult,
+      sessionReadResult: trustedSessionReadResult,
       newMessage: message,
+      attachments: trustedAttachments,
     });
 
     return {
       reply,
       role: 'assistant',
       status: 200,
-      persistedMessages: buildSanitizedTranscript(message, reply),
+      persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments),
     };
   } catch (error) {
     return conversationErrorResponse(error);

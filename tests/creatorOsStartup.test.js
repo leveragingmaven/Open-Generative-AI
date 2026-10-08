@@ -17,7 +17,7 @@ test("Studio home mounts the simple Dashboard and /studio/overview preserves the
   assert.match(shellSource, /import MavenHomeDashboard from '\.\.\/packages\/studio\/src\/components\/experience\/MavenHomeDashboard\.jsx'/);
   const mountBlock = shellSource.match(/let activeWorkspaceContent = null;[\s\S]*?} else if \(isCreateWorkspace\)/);
   assert.ok(mountBlock, "expected the workspace content mount block");
-  const homeIndex = mountBlock[0].indexOf("<MavenHomeDashboard onOpenSettings={openSettings} />");
+  const homeIndex = mountBlock[0].indexOf("<MavenHomeDashboard apiKey={studioApiKey} onOpenSettings={openSettings} />");
   const overviewIndex = mountBlock[0].indexOf("<MavenSyncDashboard />");
   assert.ok(homeIndex !== -1, "expected MavenHomeDashboard with shell settings on the slugless studio home");
   assert.ok(overviewIndex !== -1, "expected MavenSyncDashboard preserved for the overview workspace");
@@ -33,7 +33,7 @@ test("Studio home mounts the simple Dashboard and /studio/overview preserves the
 test("Dedicated workflow routes are not classified as Studio home", () => {
   assert.match(shellSource, /const isStudioHome = slug\.length === 0 && !idFromParams;/);
   const workflowPage = shellSource.match(/if \(isStudioHome\) \{[\s\S]*?case 'workflows':[\s\S]*?break;/)?.[0];
-  assert.ok(workflowPage?.includes("<MavenHomeDashboard onOpenSettings={openSettings} />"), "slugless /studio still mounts Maven Workspace");
+  assert.ok(workflowPage?.includes("<MavenHomeDashboard apiKey={studioApiKey} onOpenSettings={openSettings} />"), "slugless /studio still mounts Maven Workspace");
   assert.ok(workflowPage?.includes("<WorkflowStudio apiKey={studioApiKey}"), "dedicated workflow routes mount WorkflowStudio");
   assert.match(shellSource, /activeWorkspaceContent = <WorkflowStudio apiKey=\{studioApiKey\}/);
   assert.match(shellSource, /const getWorkflowInfo = useCallback\(\(\) => \{/);

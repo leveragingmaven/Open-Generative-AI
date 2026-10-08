@@ -82,7 +82,7 @@ test("send posts to the existing conversation endpoint with the correct body sha
   assert.equal(call.url, "/api/design-agent/conversation");
   assert.equal(call.options.method, "POST");
   assert.equal(call.options.headers.Accept, "text/event-stream");
-  assert.deepEqual(JSON.parse(call.options.body), { conversationId: "session-1", message: "hi maven" });
+  assert.deepEqual(JSON.parse(call.options.body), { conversationId: "session-1", message: "hi maven", attachments: [] });
   assert.equal(result.reply, "Hello");
 });
 
@@ -239,6 +239,26 @@ test("Dashboard reuses the existing conversation endpoint and client", () => {
   assert.match(dashboardSource, /conversationId: sessionId,\s*\n\s*message: text,/);
 });
 
+test("Workspace image attachment flow uses the existing uploader and registers a session asset", () => {
+  assert.match(dashboardSource, /type="file" accept="image\/\*" multiple/);
+  assert.match(dashboardSource, /attachmentInputRef\.current\?\.click\(\)/);
+  assert.match(dashboardSource, /uploadFile\(apiKey, file\)/);
+  assert.match(dashboardSource, /sessions\/\$\{encodeURIComponent\(sessionId\)\}\/assets/);
+  assert.match(dashboardSource, /onDrop=\{\(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); setDraggingImage\(false\); void addImageFiles\(event\.dataTransfer\.files\); \}\}/);
+  assert.match(dashboardSource, /Remove \$\{attachment\.filename\}/);
+  assert.match(dashboardSource, /attachments: attachmentIds/);
+  assert.match(dashboardSource, /message\.attachments\?\.length/);
+  assert.match(dashboardSource, /clearStoredDashboardSessionId\(window\.localStorage\)[\s\S]*?setAttachments\(\[\]\)/);
+});
+
+test("Workspace models only server-managed Maven Intelligence and existing MavenSync branding", () => {
+  assert.match(dashboardSource, /title="Server-managed conversation intelligence"/);
+  assert.doesNotMatch(dashboardSource, /modelPill[^\n]*chevron/);
+  assert.match(dashboardSource, /\/mavensync-logo\.png/);
+  assert.match(dashboardStyles, /\.navItemActive::before[\s\S]*?#e23884/);
+  assert.match(dashboardStyles, /\.send[\s\S]*?background: #e23884/);
+});
+
 test("Dashboard streams deltas and finalizes with the done reply", () => {
   assert.match(dashboardSource, /onDelta: \(delta\) => \{/);
   assert.match(dashboardSource, /arr\[assistantIndex\]\.content \|\| ""\) \+ delta/);
@@ -273,7 +293,7 @@ test("Dashboard keeps its chat list persisted and can reopen an existing session
 test("Dashboard degrades gracefully when controlled conversation is unavailable", () => {
   assert.match(dashboardSource, /Maven chat is unavailable/);
   assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy\}/);
-  assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy \|\| !mavenMessage\.trim\(\)\}/);
+  assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy \|\| !mavenMessage\.trim\(\) \|\| attachments\.some/);
 });
 
 test("Maven Workspace shell exposes New Chat, Chats, and existing studio actions", () => {

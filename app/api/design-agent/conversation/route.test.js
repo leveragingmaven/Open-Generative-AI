@@ -39,7 +39,7 @@ function makeDeps(overrides = {}) {
             { role: 'user', content: 'Hi', timestamp: new Date().toISOString() },
             { role: 'assistant', content: 'Hello', timestamp: new Date().toISOString() },
           ],
-          attachments: [{ attachmentId: 'asset-1', kind: 'image', filename: 'ref.png' }],
+          attachments: [{ attachmentId: 'asset_1', kind: 'image', filename: 'ref.png', url: 'https://cdn.test/ref.png' }],
         };
       },
     },
@@ -188,7 +188,42 @@ test('verifies session ownership before running intelligence', async () => {
   assert.equal(calls[2][0], 'intelligence');
 });
 
-test('rejects browser-supplied references or attachments as untrusted fields', async () => {
+test('resolves selected session-owned image IDs for Maven and persists only trusted attachment metadata', async () => {
+  let seenAttachments;
+  const deps = makeDeps({
+    createConversationIntelligence: () => ({
+      async respond({ sessionReadResult, attachments }) {
+        seenAttachments = { session: sessionReadResult.attachments, selected: attachments };
+        return { reply: 'I can use the reference image.' };
+      },
+    }),
+  });
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'Use this avatar for a video.', attachments: ['asset_1'] }),
+    deps,
+  );
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(seenAttachments.selected, [{ attachmentId: 'asset_1', kind: 'image', filename: 'ref.png', url: 'https://cdn.test/ref.png' }]);
+  assert.deepEqual(seenAttachments.session, seenAttachments.selected);
+  assert.deepEqual(result.persistedMessages[0].attachments, [{ attachmentId: 'asset_1', kind: 'image', filename: 'ref.png' }]);
+  assert.equal(JSON.stringify(result.persistedMessages).includes('https://cdn.test'), false);
+});
+
+test('rejects unknown, non-image, or malformed selected attachment IDs', async () => {
+  for (const attachments of [['asset_missing'], ['asset_2'], ['https://evil.test/image.png'], 'asset_1']) {
+    const deps = makeDeps({
+      conversationReader: { async read() { return { messages: [], attachments: [{ attachmentId: 'asset_2', kind: 'video', filename: 'clip.mp4', url: 'https://cdn.test/clip.mp4' }] }; } },
+    });
+    const result = await handleDesignAgentConversationPost(
+      makeRequest({ conversationId: 'owned-session', message: 'Use this.', attachments }),
+      deps,
+    );
+    assert.equal(result.status, ['asset_missing', 'asset_2'].includes(attachments[0]) ? 422 : 400);
+  }
+});
+
+test('rejects browser-supplied references or attachment URLs as untrusted fields', async () => {
   const result = await handleDesignAgentConversationPost(
     makeRequest({
       conversationId: 'owned-session',

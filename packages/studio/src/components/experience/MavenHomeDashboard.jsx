@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -48,6 +49,7 @@ function Icon({ type, size = 18 }) {
     skills: <><path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /><path d="m18 15 .7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7z" /></>,
     connectors: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M10 6.5h4a2 2 0 0 1 2 2v5.5M6.5 10v4a2 2 0 0 0 2 2H14" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
+    close: <><path d="m18 6-12 12M6 6l12 12" /></>,
     attach: <><path d="m21.4 11.1-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></>,
     sparkle: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" /></>,
     chevron: <><path d="m7 10 5 5 5-5" /></>,
@@ -114,7 +116,15 @@ function MavenBubble({ message, streaming }) {
         <p className={styles.messageIdentity}>{isUser ? "You" : "Maven"}</p>
         <div className={`${styles.messageBody} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
           {isUser ? (
-            message.content || ""
+            <>
+              {message.content || ""}
+              {message.attachments?.length ? <div className={styles.messageAttachments}>
+                {message.attachments.map((attachment) => <span key={attachment.attachmentId || attachment.asset_label || attachment.assetId} className={styles.messageAttachment}>
+                  {attachment.previewUrl ? <img src={attachment.previewUrl} alt="" /> : <Icon type="image" size={13} />}
+                  {attachment.filename || attachment.attachmentId || attachment.asset_label || "Image reference"}
+                </span>)}
+              </div> : null}
+            </>
           ) : (
             <div className={styles.markdown}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
@@ -135,7 +145,7 @@ function MavenBubble({ message, streaming }) {
   );
 }
 
-export default function MavenHomeDashboard({ onOpenSettings }) {
+export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const [mavenMessage, setMavenMessage] = useState("");
   const [mavenMessages, setMavenMessages] = useState([]);
   const [savedChats, setSavedChats] = useState([]);
@@ -143,7 +153,12 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
   const [mavenBusy, setMavenBusy] = useState(false);
   const [mavenReady, setMavenReady] = useState(false);
   const [mavenSessionId, setMavenSessionId] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState(null);
+  const [draggingImage, setDraggingImage] = useState(false);
   const mavenClientRef = useRef(null);
+  const attachmentInputRef = useRef(null);
+  const sessionCreationRef = useRef(null);
   const moreRef = useRef(null);
   const transcriptRef = useRef(null);
   const composerInputRef = useRef(null);
@@ -183,31 +198,113 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
     };
   }, []);
 
+  const ensureMavenSession = async () => {
+    if (mavenSessionId) return mavenSessionId;
+    if (sessionCreationRef.current) return sessionCreationRef.current;
+    const client = mavenClientRef.current;
+    if (!client) throw new Error("Maven chat is unavailable right now.");
+    const pending = client.createSession().then((sessionId) => {
+      setMavenSessionId(sessionId);
+      storeDashboardSessionId(window.localStorage, sessionId);
+      return sessionId;
+    }).finally(() => {
+      if (sessionCreationRef.current === pending) sessionCreationRef.current = null;
+    });
+    sessionCreationRef.current = pending;
+    return pending;
+  };
+
+  const addImageFiles = async (fileList) => {
+    const selectedImages = Array.from(fileList || []).filter((file) => file.type?.startsWith("image/"));
+    if (!selectedImages.length) {
+      if (fileList?.length) setAttachmentError("Choose an image file to attach.");
+      return;
+    }
+    const capacity = Math.max(0, 8 - attachments.length);
+    const imageFiles = selectedImages.slice(0, capacity);
+    if (!capacity || imageFiles.length < selectedImages.length) setAttachmentError("You can attach up to 8 images per message.");
+    else setAttachmentError(null);
+    for (const file of imageFiles) {
+      if (file.size > 25 * 1024 * 1024) {
+        setAttachmentError(`${file.name || "Image"} exceeds the 25 MB image limit.`);
+        continue;
+      }
+      const localId = `${Date.now()}-${Math.random()}`;
+      const previewUrl = URL.createObjectURL(file);
+      setAttachments((current) => [...current, { localId, filename: file.name || "Image", previewUrl, status: "uploading" }]);
+      try {
+        const url = await uploadFile(apiKey, file);
+        setAttachments((current) => current.map((attachment) => attachment.localId === localId
+          ? { ...attachment, url, status: "ready" }
+          : attachment));
+      } catch (error) {
+        URL.revokeObjectURL(previewUrl);
+        setAttachments((current) => current.filter((attachment) => attachment.localId !== localId));
+        setAttachmentError(error?.message || "Image upload failed. Please try again.");
+      }
+    }
+  };
+
+  const removeAttachment = (localId) => {
+    const attachment = attachments.find((item) => item.localId === localId);
+    if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    setAttachments((current) => current.filter((item) => item.localId !== localId));
+  };
+
   const submitMavenMessage = async (event) => {
     event.preventDefault();
     const client = mavenClientRef.current;
     const text = mavenMessage.trim();
-    if (!client || !text || mavenBusy || !mavenReady) return;
+    if (!client || !text || mavenBusy || !mavenReady || attachments.some((attachment) => attachment.status !== "ready")) return;
 
     setMavenMessage("");
     setChatError(null);
+    setAttachmentError(null);
     setMavenBusy(true);
     const assistantIndex = mavenMessages.length + 1;
-    setMavenMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    setMavenMessages((prev) => [...prev, { role: "user", content: text, attachments: [] }, { role: "assistant", content: "" }]);
 
     try {
-      let sessionId = mavenSessionId;
-      if (!sessionId) {
-        sessionId = await client.createSession();
-        setMavenSessionId(sessionId);
-        storeDashboardSessionId(window.localStorage, sessionId);
+      const sessionId = await ensureMavenSession();
+      const headers = { "Content-Type": "application/json", ...(apiKey ? { "x-api-key": apiKey } : {}) };
+      const attachmentIds = [];
+      const resolvedAttachments = [];
+      for (const attachment of attachments) {
+        let attachmentId = attachment.attachmentId;
+        if (!attachmentId) {
+          const response = await fetch(`/api/v1/creative-agent/sessions/${encodeURIComponent(sessionId)}/assets`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers,
+            body: JSON.stringify({ url: attachment.url, kind: "image", source_tool: "upload" }),
+          });
+          const registered = await response.json().catch(() => null);
+          if (!response.ok || !registered?.asset_label) {
+            throw new Error(registered?.error || "Unable to register this image with the conversation.");
+          }
+          attachmentId = registered.asset_label;
+          setAttachments((current) => current.map((item) => item.localId === attachment.localId
+            ? { ...item, attachmentId }
+            : item));
+        }
+        attachmentIds.push(attachmentId);
+        resolvedAttachments.push({ attachmentId, filename: attachment.filename });
       }
+      const sentAttachments = resolvedAttachments;
+      setMavenMessages((prev) => {
+        const userIndex = prev.length - 2;
+        if (userIndex < 0 || prev[userIndex]?.role !== "user") return prev;
+        const next = [...prev];
+        next[userIndex] = { ...next[userIndex], attachments: sentAttachments };
+        return next;
+      });
       const saved = saveDashboardChat(window.localStorage, { id: sessionId, title: mavenMessages.find((message) => message.role === "user")?.content?.slice(0, 72) || text.slice(0, 72) });
       setSavedChats(saved);
 
       const result = await client.send({
         conversationId: sessionId,
         message: text,
+        attachments: attachmentIds,
         onDelta: (delta) => {
           setMavenMessages((prev) => {
             const arr = [...prev];
@@ -221,6 +318,7 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
 
       setMavenMessages((prev) => {
         const arr = [...prev];
+        if (arr[assistantIndex - 1] && result.persistedMessages?.[0]) arr[assistantIndex - 1] = result.persistedMessages[0];
         if (arr[assistantIndex]) {
           arr[assistantIndex] = { ...arr[assistantIndex], content: result.reply || arr[assistantIndex].content };
         }
@@ -228,7 +326,10 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
       });
       // Persist ONLY the server-sanitized persistedMessages from the done event.
       client.persist(sessionId, result.persistedMessages).catch(() => {});
+      attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      setAttachments([]);
     } catch (error) {
+      setMavenMessage(text);
       setMavenMessages((prev) => {
         const arr = [...prev];
         if (arr[assistantIndex]) {
@@ -259,7 +360,7 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
   }, [mavenMessages, mavenBusy]);
 
   const startNewChat = () => {
-    if (mavenBusy) return;
+    if (mavenBusy || attachments.some((attachment) => attachment.status === "uploading")) return;
     if (mavenSessionId) {
       const title = mavenMessages.find((message) => message.role === "user")?.content?.slice(0, 72);
       if (title) setSavedChats(saveDashboardChat(window.localStorage, { id: mavenSessionId, title }));
@@ -268,10 +369,17 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
     setMavenSessionId(null);
     setMavenMessages([]);
     setMavenMessage("");
+    attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    setAttachments([]);
+    setAttachmentError(null);
     setChatError(null);
   };
 
   const openSavedChat = async (chat) => {
+    if (attachments.length) {
+      setAttachmentError("Send or remove the attached image before switching chats.");
+      return;
+    }
     if (mavenBusy || chat.id === mavenSessionId) {
       focusCurrentChat();
       return;
@@ -296,7 +404,21 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
   };
 
   const mavenComposer = (
-    <form className={styles.composer} onSubmit={submitMavenMessage}>
+    <form className={`${styles.composer} ${draggingImage ? styles.composerDragging : ""}`} onSubmit={submitMavenMessage}
+      onDragEnter={(event) => { event.preventDefault(); event.stopPropagation(); if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) setDraggingImage(true); }}
+      onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) setDraggingImage(true); }}
+      onDragLeave={(event) => { event.stopPropagation(); if (!event.currentTarget.contains(event.relatedTarget)) setDraggingImage(false); }}
+      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingImage(false); void addImageFiles(event.dataTransfer.files); }}>
+      <input ref={attachmentInputRef} type="file" accept="image/*" multiple className="sr-only" aria-label="Choose images to attach" onChange={(event) => { void addImageFiles(event.target.files); event.target.value = ""; }} />
+      {attachments.length ? <div className={styles.attachmentList} aria-label="Attached images">
+        {attachments.map((attachment) => <div key={attachment.localId} className={styles.attachmentPreview}>
+          <img src={attachment.previewUrl} alt={attachment.filename} />
+          <span title={attachment.filename}>{attachment.filename}</span>
+          {attachment.status === "uploading" ? <small>Uploading…</small> : null}
+          <button type="button" aria-label={`Remove ${attachment.filename}`} onClick={() => removeAttachment(attachment.localId)} disabled={mavenBusy || attachment.status === "uploading"}><Icon type="close" size={13} /></button>
+        </div>)}
+      </div> : null}
+      {attachmentError ? <p className={styles.attachmentError} role="alert">{attachmentError}</p> : null}
       <div className={styles.composerInputRow}>
         <label htmlFor="maven-creation-prompt" className="sr-only">Message Maven</label>
         <textarea
@@ -318,10 +440,10 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
       </div>
       <div className={styles.composerFooter}>
         <div className={styles.composerTools}>
-          <button type="button" className={styles.attachButton} aria-label="Attach files (coming soon)" title="Attachments coming soon" disabled>
+          <button type="button" className={styles.attachButton} aria-label="Attach images" title="Attach images" onClick={() => attachmentInputRef.current?.click()} disabled={!mavenReady || mavenBusy}>
             <Icon type="attach" size={17} />
           </button>
-          <span className={styles.modelPill}><Icon type="sparkle" size={14} /> Maven Intelligence <Icon type="chevron" size={13} /></span>
+          <span className={styles.modelPill} title="Server-managed conversation intelligence"><Icon type="sparkle" size={14} /> Maven Intelligence</span>
         </div>
         <div className={styles.composerSubmitGroup}>
           <span id="maven-composer-status" role="status" className={styles.composerStatus}>
@@ -330,7 +452,7 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
           <button
             type="submit"
             aria-label={mavenBusy ? "Maven is responding" : "Send message to Maven"}
-            disabled={!mavenReady || mavenBusy || !mavenMessage.trim()}
+            disabled={!mavenReady || mavenBusy || !mavenMessage.trim() || attachments.some((attachment) => attachment.status !== "ready")}
             className={styles.send}
           ><Icon type="arrow" size={18} /></button>
         </div>
@@ -345,7 +467,7 @@ export default function MavenHomeDashboard({ onOpenSettings }) {
         <aside className={styles.sidebar} aria-label="Maven Workspace sidebar">
           <a href="/studio" className={styles.brand} aria-label="Maven Workspace home">
             <span className={styles.brandMark}>M</span>
-            <span><strong>Maven</strong><small>Workspace</small></span>
+            <span><img className={styles.brandLogo} src="/mavensync-logo.png" alt="MavenSync" /><small>Workspace</small></span>
           </a>
           <button type="button" className={styles.newChat} aria-label="New Chat" onClick={startNewChat} disabled={mavenBusy}>
             <Icon type="plus" size={18} /><span>New Chat</span>
