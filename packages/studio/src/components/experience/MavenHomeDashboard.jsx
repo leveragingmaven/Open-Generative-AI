@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
+import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -14,6 +15,14 @@ import { ExperiencePage } from "./ExperienceComponents.jsx";
 import styles from "./MavenHomeDashboard.module.css";
 
 const DASHBOARD_CHAT_LIST_STORAGE_KEY = "mavensync_dashboard_chat_sessions";
+const IMAGE_REFERENCE_HANDOFF_KEY = "mavensync_image_reference_handoff";
+
+// Hands a Maven-uploaded image to Image Studio as its reference (read once on mount).
+function openImageInStudio(url) {
+  if (!url) return;
+  window.localStorage.setItem(IMAGE_REFERENCE_HANDOFF_KEY, JSON.stringify({ urls: [url] }));
+  window.location.assign("/studio/image");
+}
 
 function readDashboardChatList(storage = window.localStorage) {
   try {
@@ -50,6 +59,8 @@ function Icon({ type, size = 18 }) {
     connectors: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M10 6.5h4a2 2 0 0 1 2 2v5.5M6.5 10v4a2 2 0 0 0 2 2H14" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     close: <><path d="m18 6-12 12M6 6l12 12" /></>,
+    copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
+    check: <><path d="m5 12 4 4L19 6" /></>,
     attach: <><path d="m21.4 11.1-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></>,
     sparkle: <><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" /></>,
     chevron: <><path d="m7 10 5 5 5-5" /></>,
@@ -106,8 +117,21 @@ function QuickActionButton({ item }) {
 
 function MavenBubble({ message, streaming }) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+  const copyResetRef = useRef(null);
   const markdownComponents = {
     a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
+  };
+  useEffect(() => () => window.clearTimeout(copyResetRef.current), []);
+  const handleCopy = async () => {
+    try {
+      await copyAssistantResponseText(message.content);
+      setCopied(true);
+      window.clearTimeout(copyResetRef.current);
+      copyResetRef.current = window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
   };
   return (
     <article className={`${styles.messageRow} ${isUser ? styles.userRow : styles.assistantRow}`}>
@@ -122,6 +146,7 @@ function MavenBubble({ message, streaming }) {
                 {message.attachments.map((attachment) => <span key={attachment.attachmentId || attachment.asset_label || attachment.assetId} className={styles.messageAttachment}>
                   {attachment.previewUrl ? <img src={attachment.previewUrl} alt="" /> : <Icon type="image" size={13} />}
                   {attachment.filename || attachment.attachmentId || attachment.asset_label || "Image reference"}
+                  {attachment.url ? <button type="button" className={styles.useReferenceAction} onClick={() => openImageInStudio(attachment.url)}>Use in Image Studio</button> : null}
                 </span>)}
               </div> : null}
             </>
@@ -140,6 +165,14 @@ function MavenBubble({ message, streaming }) {
             </span>
           )}
         </div>
+        {!isUser && !streaming && message.content?.trim() ? (
+          <div className={styles.messageActions}>
+            <button type="button" className={styles.copyAction} onClick={handleCopy} aria-live="polite" aria-label={copied ? "Copied Maven response" : "Copy Maven response"}>
+              <Icon type={copied ? "check" : "copy"} size={13} />
+              <span>{copied ? "Copied" : "Copy"}</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -288,7 +321,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
             : item));
         }
         attachmentIds.push(attachmentId);
-        resolvedAttachments.push({ attachmentId, filename: attachment.filename });
+        resolvedAttachments.push({ attachmentId, filename: attachment.filename, url: attachment.url });
       }
       const sentAttachments = resolvedAttachments;
       setMavenMessages((prev) => {

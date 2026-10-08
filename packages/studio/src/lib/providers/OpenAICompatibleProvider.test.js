@@ -54,6 +54,29 @@ test("modelRequest takes precedence and produces deterministic OpenAI messages",
   assert.equal(calls[0].body.max_tokens, 120);
 });
 
+test("modelRequest preserves multimodal image content while matching prompt text for final user turn", async () => {
+  const { provider, calls } = providerWithCapture();
+  const imageMessage = {
+    role: "user",
+    content: [
+      { type: "text", text: "Describe this image.\\n\\nReferences available for discussion:\\n- asset_1 (image) filename: reference.png" },
+      { type: "image_url", image_url: { url: "https://cdn.test/trusted.png" } },
+      { type: "image_url", image_url: { url: "https://cdn.test/second.png" } },
+    ],
+  };
+  await provider.execute({
+    operation: "text_generation",
+    context: { modelRequest: {
+      instructions: "Inspect images.",
+      conversation: [imageMessage],
+      input: { prompt: "Describe this image.\\n\\nReferences available for discussion:\\n- asset_1 (image) filename: reference.png" },
+      generation: { output: {} },
+    } },
+  });
+  assert.deepEqual(calls[0].body.messages[1], imageMessage);
+  assert.equal(calls[0].body.messages.filter((message) => message.role === "user").length, 1);
+});
+
 test("empty model context layers are omitted and current request appears once", async () => {
   const { provider, calls } = providerWithCapture();
   await provider.execute({

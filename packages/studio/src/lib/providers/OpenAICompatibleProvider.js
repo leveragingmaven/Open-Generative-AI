@@ -35,7 +35,16 @@ function projectedConversation(modelRequest) {
   if (!Array.isArray(modelRequest.conversation)) return [];
   return modelRequest.conversation
     .filter((message) => message?.role === "user" || message?.role === "assistant")
-    .map((message) => ({ role: message.role, content: typeof message.content === "string" ? message.content : "" }));
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === "string" || Array.isArray(message.content) ? message.content : "",
+    }));
+}
+
+function textContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((part) => part?.type === "text").map((part) => part.text || "").join("");
 }
 
 function untrustedSourceMessage(modelRequest) {
@@ -61,7 +70,7 @@ function modelRequestMessages(modelRequest) {
 
   const prompt = typeof modelRequest.input?.prompt === "string" ? modelRequest.input.prompt : "";
   const lastMessage = conversation.at(-1);
-  const currentAlreadyProjected = lastMessage?.role === "user" && lastMessage.content === prompt;
+  const currentAlreadyProjected = lastMessage?.role === "user" && textContent(lastMessage.content) === prompt;
   if (!currentAlreadyProjected) messages.push({ role: "user", content: prompt });
   return messages;
 }

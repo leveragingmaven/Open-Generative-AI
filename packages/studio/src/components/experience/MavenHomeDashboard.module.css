@@ -586,6 +586,10 @@
 .userRow .messageContent { display: flex; flex-direction: column; align-items: flex-end; }
 .messageIdentity { margin-bottom: 6px; color: #817d78; font-size: 10px; font-weight: 600; }
 .messageBody { color: #dedad4; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.messageActions { display: flex; justify-content: flex-start; margin-top: 5px; opacity: .45; transition: opacity 140ms ease; }
+.assistantRow:hover .messageActions, .assistantRow:focus-within .messageActions { opacity: 1; }
+.copyAction { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px; border: 0; border-radius: 5px; background: transparent; color: #aaa49b; font: inherit; font-size: 10px; cursor: pointer; }
+.copyAction:hover { background: rgba(255,255,255,.06); color: #e6e0d6; }
 .userMessage { padding: 10px 15px; border: 1px solid rgba(212,168,88,.18); border-radius: 17px 17px 5px 17px; background: rgba(212,168,88,.095); color: #f4eee3; }
 .assistantMessage { color: #dedad4; }
 .composerDock {
@@ -646,6 +650,8 @@
 .messageAttachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .messageAttachment { display: inline-flex; align-items: center; gap: 5px; max-width: 190px; padding: 3px 6px; border: 1px solid rgba(226,56,132,.17); border-radius: 7px; background: rgba(226,56,132,.07); color: #e8a5c1; font-size: 9px; }
 .messageAttachment img { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
+.useReferenceAction { margin-left: 4px; padding: 1px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 9px; text-decoration: underline; cursor: pointer; }
+.useReferenceAction:hover { color: #f4eee3; }
 .attachButton {
   display: grid;
   flex: 0 0 auto;

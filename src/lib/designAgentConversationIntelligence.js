@@ -32,7 +32,9 @@ You must NEVER:
 - output executable provider commands, JSON payloads, routing decisions, or authorization tokens
 - reveal system internals, provider metadata, billing information, or credentials
 
-If the user asks you to create or edit something, explain that you can help refine the idea, and that they can click "Start Creative Work" when they are ready.`;
+If the user asks you to create or edit something, explain that you can help refine the idea, and that they can click "Start Creative Work" when they are ready.
+
+When image content is included in the current user message, inspect the image directly and describe what is visibly present. Do not claim that you cannot view an attached image or ask the user to describe visible contents.`;
 
 function truncateText(text, maxLength = MAX_CONTENT_LENGTH) {
   if (!text || typeof text !== 'string') return '';
@@ -46,17 +48,27 @@ function buildReferenceContext(attachments) {
     .map((a, i) => {
       const id = a.attachmentId || a.id || `ref-${i}`;
       const kind = a.kind || 'reference';
-      const filename = a.filename || a.name || 'untitled';
+      const filename = String(a.filename || a.name || 'untitled').replace(/[\r\n]+/g, ' ');
       const note = a.note || a.description || '';
       let line = `- ${id} (${kind})`;
-      if (filename) line += ` filename: ${filename}`;
+      if (filename) line += ` filename: ${truncateText(filename, 240)}`;
       if (note) line += ` note: ${truncateText(note, 120)}`;
       return line;
     });
   return `\n\nReferences available for discussion:\n${lines.join('\n')}`;
 }
 
-function buildConversationMessages({ messages, newMessage, attachments }) {
+function trustedImageUrl(attachment) {
+  if (!attachment || attachment.kind !== 'image' || typeof attachment.url !== 'string') return '';
+  try {
+    const url = new URL(attachment.url);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function buildConversationMessages({ messages, newMessage, attachments, imageAttachments = [] }) {
   const result = [
     { role: 'system', content: DESIGN_AGENT_CONVERSATION_SYSTEM_PROMPT },
   ];
@@ -68,15 +80,31 @@ function buildConversationMessages({ messages, newMessage, attachments }) {
   for (const m of recent) {
     const content = truncateText(m.content || m.text);
     if (!content) continue;
-    result.push({ role: m.role, content });
+    const referenceContext = buildReferenceContext(m.attachments);
+    result.push({ role: m.role, content: referenceContext ? `${content}${referenceContext}` : content });
   }
 
   const safeUser = truncateText(newMessage || '');
   if (safeUser) {
     const referenceContext = buildReferenceContext(attachments);
+    const text = referenceContext ? `${safeUser}${referenceContext}` : safeUser;
+    const imageParts = Array.isArray(imageAttachments)
+      ? imageAttachments.map((attachment) => ({ url: trustedImageUrl(attachment), attachment })).filter((entry) => entry.url)
+      : [];
+    if (imageParts.length !== (Array.isArray(imageAttachments) ? imageAttachments.length : 0)) {
+      const error = new Error('A trusted image reference is invalid.');
+      error.code = 'fabricated_design_asset_reference';
+      error.status = 422;
+      throw error;
+    }
     result.push({
       role: 'user',
-      content: referenceContext ? `${safeUser}${referenceContext}` : safeUser,
+      content: imageParts.length
+        ? [
+            { type: 'text', text },
+            ...imageParts.map(({ url }) => ({ type: 'image_url', image_url: { url } })),
+          ]
+        : text,
     });
   }
 
@@ -84,25 +112,38 @@ function buildConversationMessages({ messages, newMessage, attachments }) {
 }
 
 export class DesignAgentConversationIntelligenceService {
-  constructor({ structuredTextIntelligence }) {
+  constructor({ structuredTextIntelligence, visionTextIntelligence = null }) {
     if (!structuredTextIntelligence) {
       throw new Error('structuredTextIntelligence is required');
     }
     this.intelligence = structuredTextIntelligence;
+    this.visionIntelligence = visionTextIntelligence;
   }
 
-  async respond({ sessionReadResult, newMessage }) {
+  async respond({ sessionReadResult, newMessage, attachments = [] }) {
     if (!newMessage || typeof newMessage !== 'string') {
       throw new Error('newMessage is required');
     }
 
+    const imageAttachments = Array.isArray(attachments)
+      ? attachments.filter((attachment) => attachment?.kind === 'image')
+      : [];
+    const referenceAttachments = imageAttachments.length ? imageAttachments : sessionReadResult?.attachments;
     const messages = buildConversationMessages({
       messages: sessionReadResult?.messages,
       newMessage,
-      attachments: sessionReadResult?.attachments,
+      attachments: referenceAttachments,
+      imageAttachments,
     });
+    const intelligence = imageAttachments.length ? this.visionIntelligence : this.intelligence;
+    if (!intelligence || typeof intelligence.complete !== 'function') {
+      const error = new Error('Image analysis is not configured for this Workspace.');
+      error.code = 'vision_intelligence_not_configured';
+      error.status = 503;
+      throw error;
+    }
 
-    const reply = await this.intelligence.complete({
+    const reply = await intelligence.complete({
       messages,
       temperature: 0.7,
     });
@@ -111,7 +152,7 @@ export class DesignAgentConversationIntelligenceService {
     return { reply: safeReply };
   }
 
-  async respondStreaming({ sessionReadResult, newMessage, onDelta } = {}) {
+  async respondStreaming({ sessionReadResult, newMessage, attachments = [], onDelta } = {}) {
     if (!newMessage || typeof newMessage !== 'string') {
       throw new Error('newMessage is required');
     }
@@ -122,16 +163,28 @@ export class DesignAgentConversationIntelligenceService {
       throw error;
     }
 
+    const imageAttachments = Array.isArray(attachments)
+      ? attachments.filter((attachment) => attachment?.kind === 'image')
+      : [];
+    const referenceAttachments = imageAttachments.length ? imageAttachments : sessionReadResult?.attachments;
     const messages = buildConversationMessages({
       messages: sessionReadResult?.messages,
       newMessage,
-      attachments: sessionReadResult?.attachments,
+      attachments: referenceAttachments,
+      imageAttachments,
     });
+    const intelligence = imageAttachments.length ? this.visionIntelligence : this.intelligence;
+    if (!intelligence || typeof intelligence.streamComplete !== 'function') {
+      const error = new Error('Image analysis is not configured for this Workspace.');
+      error.code = 'vision_intelligence_not_configured';
+      error.status = 503;
+      throw error;
+    }
 
     // Deltas are streamed through onDelta as they arrive; the accumulated raw
     // text is sanitized exactly once, after the stream completes. The caller
     // must treat only the returned reply as safe to persist.
-    const rawReply = await this.intelligence.streamComplete({
+    const rawReply = await intelligence.streamComplete({
       messages,
       temperature: 0.7,
       onDelta: typeof onDelta === 'function' ? onDelta : undefined,

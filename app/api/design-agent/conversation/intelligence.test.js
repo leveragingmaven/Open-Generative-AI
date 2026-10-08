@@ -24,6 +24,72 @@ test('uses text-only structured intelligence and returns reply', async () => {
   assert.equal(result.reply, 'Have you considered a darker palette?');
 });
 
+test('text-only turns keep the existing text path and prompt content type', async () => {
+  let capturedMessages;
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: { async complete({ messages }) { capturedMessages = messages; return 'ok'; } },
+    visionTextIntelligence: { async complete() { assert.fail('vision must not be called for a text-only turn'); } },
+  });
+  await service.respond({ sessionReadResult: { messages: [], attachments: [] }, newMessage: 'plain question' });
+  assert.deepEqual(capturedMessages.at(-1), { role: 'user', content: 'plain question' });
+});
+
+test('selected trusted image attachments become multimodal content in the same user turn', async () => {
+  let capturedMessages;
+  let textPathCalled = false;
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: { async complete() { textPathCalled = true; return 'text path'; } },
+    visionTextIntelligence: { async complete({ messages }) { capturedMessages = messages; return 'I see a cat.'; } },
+  });
+  const imageAttachments = [
+    { attachmentId: 'asset_1', kind: 'image', filename: 'first.png', url: 'https://cdn.test/first.png' },
+    { attachmentId: 'asset_2', kind: 'image', filename: 'second.png', url: 'https://cdn.test/second.png' },
+  ];
+  const result = await service.respond({
+    sessionReadResult: { messages: [], attachments: imageAttachments },
+    newMessage: 'Describe exactly what you see in this image.',
+    attachments: imageAttachments,
+  });
+  const userMessage = capturedMessages.at(-1);
+  assert.equal(textPathCalled, false);
+  assert.equal(result.reply, 'I see a cat.');
+  assert.equal(userMessage.role, 'user');
+  assert.deepEqual(userMessage.content, [
+    { type: 'text', text: 'Describe exactly what you see in this image.\n\nReferences available for discussion:\n- asset_1 (image) filename: first.png\n- asset_2 (image) filename: second.png' },
+    { type: 'image_url', image_url: { url: 'https://cdn.test/first.png' } },
+    { type: 'image_url', image_url: { url: 'https://cdn.test/second.png' } },
+  ]);
+});
+
+test('multimodal construction rejects malformed trusted image URLs', async () => {
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: { async complete() { return 'text'; } },
+    visionTextIntelligence: { async complete() { return 'vision'; } },
+  });
+  await assert.rejects(() => service.respond({
+    sessionReadResult: { messages: [], attachments: [] },
+    newMessage: 'describe it',
+    attachments: [{ attachmentId: 'asset_1', kind: 'image', url: 'javascript:alert(1)' }],
+  }), { code: 'fabricated_design_asset_reference' });
+});
+
+test('historical trusted attachment labels remain available to later turns without URLs', async () => {
+  let capturedMessages;
+  const service = new DesignAgentConversationIntelligenceService({
+    structuredTextIntelligence: { async complete({ messages }) { capturedMessages = messages; return 'ok'; } },
+  });
+  await service.respond({
+    sessionReadResult: {
+      messages: [{ role: 'user', content: 'Review this.', attachments: [{ attachmentId: 'asset_1', kind: 'image', filename: 'reference.png' }] }],
+      attachments: [],
+    },
+    newMessage: 'What about the referenced image?',
+  });
+  assert.match(capturedMessages[1].content, /asset_1/);
+  assert.match(capturedMessages[1].content, /reference\.png/);
+  assert.doesNotMatch(JSON.stringify(capturedMessages), /https?:\/\//);
+});
+
 test('includes compact reference metadata but not URLs in the prompt', async () => {
   let capturedMessages;
   const service = new DesignAgentConversationIntelligenceService({

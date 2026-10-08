@@ -13,6 +13,7 @@ import { isDesignAgentControlledExecution } from './designAgentControlledMode.js
 import { getMuApiBaseUrl, getServerMuApiKey } from './agencyMode.js';
 import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } from './serverTextIntelligence.js';
 import { DesignAgentConversationIntelligenceService } from './designAgentConversationIntelligence.js';
+import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -115,8 +116,11 @@ export async function loadEndpointServices() {
       if (!provider) throw notConfiguredTextIntelligenceError();
       return provider;
     },
-    createConversationIntelligence(textProvider) {
-      return createControlledConversationIntelligence(textProvider);
+    createConversationIntelligence(textProvider, visionTextIntelligence) {
+      return createControlledConversationIntelligence(textProvider, visionTextIntelligence);
+    },
+    createVisionTextIntelligence(identity) {
+      return createServerVisionTextIntelligence(identity);
     },
   };
 }
@@ -129,18 +133,21 @@ export async function loadEndpointServices() {
  * Neither adapter ever exposes provider identity, model metadata, usage,
  * finish reasons, or raw upstream SSE frames.
  */
-export function createControlledConversationIntelligence(textProvider) {
+export function createControlledConversationIntelligence(textProvider, visionTextIntelligence = null) {
   function toModelRequest(messages) {
     const instructions = messages.find((m) => m.role === 'system')?.content;
     const conversation = messages.filter((m) => m.role !== 'system');
     const lastUser = [...conversation].reverse().find((m) => m.role === 'user');
+    const prompt = Array.isArray(lastUser?.content)
+      ? lastUser.content.filter((part) => part?.type === 'text').map((part) => part.text || '').join('')
+      : lastUser?.content || '';
     return {
       operation: 'text_generation',
       context: {
         modelRequest: {
           instructions,
           conversation,
-          input: { prompt: lastUser?.content || '' },
+          input: { prompt },
           generation: { output: {} },
         },
       },
@@ -148,6 +155,7 @@ export function createControlledConversationIntelligence(textProvider) {
   }
 
   return new DesignAgentConversationIntelligenceService({
+    visionTextIntelligence,
     structuredTextIntelligence: {
       async complete({ messages }) {
         const result = await textProvider.execute(toModelRequest(messages));
@@ -213,6 +221,7 @@ const SAFE_ERROR_CODES = new Set([
   'design_session_asset_invalid', 'design_session_assets_invalid',
   'unsupported_design_attachment_kind', 'fabricated_design_asset_reference',
   'muapi_server_key_required', 'creative_intelligence_not_configured',
+  'vision_intelligence_not_configured',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -433,8 +442,10 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
 
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');
-
-    const service = conversationServiceFactory(textProviderFactory());
+    const visionTextIntelligence = trustedAttachments.length
+      ? await (await getService('createVisionTextIntelligence'))(identity)
+      : null;
+    const service = conversationServiceFactory(textProviderFactory(), visionTextIntelligence);
 
     if (wantsStream) {
       return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments });

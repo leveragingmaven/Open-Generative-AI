@@ -940,6 +940,32 @@ export default function ImageStudio({
     }
   }, []);
 
+  // ── Maven Workspace handoff: one-time reference image ─────────────────────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("mavensync_image_reference_handoff");
+      if (!raw) return;
+      localStorage.removeItem("mavensync_image_reference_handoff");
+      const { urls } = JSON.parse(raw);
+      const validUrls = Array.isArray(urls)
+        ? urls.filter((u) => typeof u === "string" && /^https?:\/\//.test(u))
+        : [];
+      if (!validUrls.length) return;
+      const target = i2iModels[0];
+      const effects = getEffectsForI2IModel(target.id);
+      setImageMode(true);
+      setSelectedModelId(target.id);
+      setSelectedModelName(target.name);
+      setSelectedAr(getAspectRatiosForI2IModel(target.id)[0] || "1:1");
+      setSelectedQuality(getResolutionsForI2IModel(target.id)[0] || null);
+      setSelectedEffect(effects.length > 0 ? (getDefaultEffectForI2IModel(target.id) || effects[0]) : "");
+      setMaxImages(getMaxImagesForI2IModel(target.id));
+      setUploadedImageUrls(validUrls);
+    } catch (err) {
+      console.warn("Failed to read Maven image handoff:", err);
+    }
+  }, []);
+
   // ── Adjust height on load ────────────────────────────────────────────────
   // ── Persistence: Save ────────────────────────────────────────────────────
   useEffect(() => {

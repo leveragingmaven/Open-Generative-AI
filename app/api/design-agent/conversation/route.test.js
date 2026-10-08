@@ -188,9 +188,59 @@ test('verifies session ownership before running intelligence', async () => {
   assert.equal(calls[2][0], 'intelligence');
 });
 
+test('uses trusted selected images for vision and persists only sanitized attachment metadata', async () => {
+  let seen;
+  const attachments = [
+    { attachmentId: 'asset_1', kind: 'image', filename: 'first.png', url: 'https://cdn.test/first.png' },
+    { attachmentId: 'asset_3', kind: 'image', filename: 'second.png', url: 'https://cdn.test/second.png' },
+  ];
+  const deps = makeDeps({
+    conversationReader: { async read() { return { messages: [], attachments }; } },
+    createTextProvider: () => ({ async execute() { assert.fail('the text-only provider must not receive image turns'); } }),
+    createVisionTextIntelligence: (identity) => {
+      assert.equal(identity.creatorId, 'creator-123');
+      return { async complete({ messages }) { seen = messages; return 'Two images show a storefront.'; } };
+    },
+    createConversationIntelligence: (provider, vision) => createControlledConversationIntelligence(provider, vision),
+  });
+  const result = await handleDesignAgentConversationPost(
+    makeRequest({ conversationId: 'owned-session', message: 'Describe exactly what you see in this image.', attachments: ['asset_1', 'asset_3'] }),
+    deps,
+  );
+  assert.equal(result.status, 200);
+  assert.equal(result.reply, 'Two images show a storefront.');
+  assert.deepEqual(seen.at(-1).content.slice(1), [
+    { type: 'image_url', image_url: { url: 'https://cdn.test/first.png' } },
+    { type: 'image_url', image_url: { url: 'https://cdn.test/second.png' } },
+  ]);
+  assert.deepEqual(result.persistedMessages[0].attachments, [
+    { attachmentId: 'asset_1', kind: 'image', filename: 'first.png' },
+    { attachmentId: 'asset_3', kind: 'image', filename: 'second.png' },
+  ]);
+  assert.doesNotMatch(JSON.stringify(result.persistedMessages), /https?:\/\//);
+});
+
+test('selected non-session URLs and unknown/foreign image IDs never reach the vision provider', async () => {
+  for (const ids of [['asset_unknown'], ['asset_foreign']]) {
+    let visionCreated = false;
+    const deps = makeDeps({
+      conversationReader: { async read() { return { messages: [], attachments: [{ attachmentId: 'asset_own', kind: 'image', filename: 'own.png', url: 'https://cdn.test/own.png' }] }; } },
+      createVisionTextIntelligence: () => { visionCreated = true; return { async complete() { return 'bad'; } }; },
+      createConversationIntelligence: (provider, vision) => createControlledConversationIntelligence(provider, vision),
+    });
+    const result = await handleDesignAgentConversationPost(
+      makeRequest({ conversationId: 'owned-session', message: 'describe', attachments: ids }),
+      deps,
+    );
+    assert.equal(result.status, 422);
+    assert.equal(visionCreated, false);
+  }
+});
+
 test('resolves selected session-owned image IDs for Maven and persists only trusted attachment metadata', async () => {
   let seenAttachments;
   const deps = makeDeps({
+    createVisionTextIntelligence: () => ({ async complete() { return 'vision reply'; } }),
     createConversationIntelligence: () => ({
       async respond({ sessionReadResult, attachments }) {
         seenAttachments = { session: sessionReadResult.attachments, selected: attachments };
@@ -221,6 +271,35 @@ test('rejects unknown, non-image, or malformed selected attachment IDs', async (
     );
     assert.equal(result.status, ['asset_missing', 'asset_2'].includes(attachments[0]) ? 422 : 400);
   }
+});
+
+test('createControlledConversationIntelligence retains image content through the configured provider request', async () => {
+  let request;
+  const provider = {
+    async execute(value) { request = value; return { outputs: ['Vision response'] }; },
+  };
+  const vision = { async complete({ messages }) {
+    await provider.execute({
+      operation: 'text_generation',
+      context: { modelRequest: {
+        instructions: messages.find((message) => message.role === 'system').content,
+        conversation: messages.filter((message) => message.role !== 'system'),
+        input: { prompt: 'What is here?\\n\\nReferences available for discussion:\\n- asset_1 (image) filename: cup.png' },
+        generation: { output: {} },
+      } },
+    });
+    return 'A cup.';
+  } };
+  const service = createControlledConversationIntelligence({ execute() { assert.fail('text provider not used'); } }, vision);
+  await service.respond({
+    sessionReadResult: { messages: [], attachments: [] },
+    newMessage: 'What is here?',
+    attachments: [{ attachmentId: 'asset_1', kind: 'image', filename: 'cup.png', url: 'https://cdn.test/cup.png' }],
+  });
+  assert.deepEqual(request.context.modelRequest.conversation.at(-1).content[1], {
+    type: 'image_url', image_url: { url: 'https://cdn.test/cup.png' },
+  });
+  assert.equal(request.context.modelRequest.input.prompt.includes('https://'), false);
 });
 
 test('rejects browser-supplied references or attachment URLs as untrusted fields', async () => {

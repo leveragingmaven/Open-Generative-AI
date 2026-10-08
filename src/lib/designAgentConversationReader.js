@@ -69,10 +69,20 @@ function normalizeSemanticMessage(message) {
   const role = identifier(message?.role).toLowerCase();
   const content = typeof message?.content === 'string' ? message.content.trim() : '';
   if (!SEMANTIC_ROLES.has(role) || !content) return null;
+  const attachments = Array.isArray(message?.attachments)
+    ? message.attachments.flatMap((attachment) => {
+        const attachmentId = typeof attachment === 'string' ? identifier(attachment) : assetLabel(attachment);
+        if (!attachmentId.startsWith('asset_')) return [];
+        const kind = typeof attachment === 'object' ? assetKind(attachment) : '';
+        const filename = typeof attachment === 'object' ? assetFilename(attachment) : '';
+        return [{ attachmentId, ...(kind ? { kind } : {}), ...(filename ? { filename } : {}) }];
+      })
+    : [];
   return {
     ...(identifier(message?.id) ? { id: identifier(message.id) } : {}),
     role,
     content,
+    ...(attachments.length ? { attachments } : {}),
     ...(message?.timestamp != null ? { timestamp: message.timestamp } : {}),
   };
 }
