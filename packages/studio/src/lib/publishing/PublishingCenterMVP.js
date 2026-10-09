@@ -4,7 +4,7 @@ import { assetCampaignInfo } from "../campaigns/campaignAssetMetadata.js";
 import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
 import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
 import { localAssetManager } from "../intelligence/AssetManager.js";
-import { PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
+import { PublishingError, PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
 import { isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
 
 function freshDraftId() {
@@ -184,10 +184,20 @@ export class PublishingCenterMVP {
         .filter(([, platformResult]) => platformResult?.providerRequestId)
         .map(([platform, platformResult]) => [platform, platformResult.providerRequestId])),
     };
+    // Only a provider-issued id may be persisted as providerJobId. Falling back to the local draft id
+    // (result.id) would make a malformed provider response look like a successful schedule and would
+    // send a draft id to the provider on the next reschedule or cancel.
+    const providerJobId = result?.providerJobId || result?.providerPostId || scheduledDraft.providerJobId || null;
+    if (!providerJobId && provider.id === PUBLISHING_PROVIDER_IDS.ZERNIO) {
+      throw new PublishingError('Maven Social did not confirm a provider post id, so this post is not scheduled.', {
+        code: 'zernio_post_id_missing',
+        status: 502,
+      });
+    }
     savePublishingDraft({
       ...scheduledDraft,
       status: scheduledStatus,
-      providerJobId: result?.providerJobId || result?.id || scheduledDraft.providerJobId,
+      providerJobId,
       providerPostIds,
       providerRequestIds,
     }, this.storage);

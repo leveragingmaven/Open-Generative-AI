@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MuApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { PublishingCenterMVP } from "./PublishingCenterMVP.js";
-import { publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "./publishingComposer.js";
+import { captionWithHashtags, publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "./publishingComposer.js";
 
 function memoryStorage() {
   const values = new Map();
@@ -123,4 +123,17 @@ test("Queue reflects the edited values after Save Draft", () => {
   assert.equal(queue[0].firstComment, "Queue comment");
   assert.deepEqual(queue[0].accountIds, original.accountIds);
   assert.deepEqual(queue[0].assets, original.assets);
+});
+
+test("composer hashtags are folded into the published caption", () => {
+  assert.equal(captionWithHashtags("Launch day", ["launch", "product"]), "Launch day\n\n#launch #product");
+  assert.equal(captionWithHashtags("Launch day", "#launch, product"), "Launch day\n\n#launch #product");
+  assert.equal(captionWithHashtags("", ["launch"]), "#launch");
+});
+
+test("hashtags already written in the caption are not duplicated", () => {
+  assert.equal(captionWithHashtags("Launch day #launch", ["launch", "product"]), "Launch day #launch\n\n#product");
+  assert.equal(captionWithHashtags("Launch day #Launch #product", ["launch", "PRODUCT"]), "Launch day #Launch #product");
+  assert.equal(captionWithHashtags("No tags here", []), "No tags here");
+  assert.equal(captionWithHashtags("No tags here"), "No tags here");
 });

@@ -447,3 +447,72 @@ test("duplicateDraft creates a fresh editable draft without provider submission 
   assert.deepEqual(duplicate.providerRequestIds, {});
   assert.equal(duplicate.publishedAt, null);
 });
+
+test("a provider response without a provider-issued id cannot produce scheduled success", async () => {
+  const storage = createMemoryStorage();
+  const provider = {
+    id: "zernio",
+    supportsCapability: (methodName) => ["updateDraft", "schedulePost", "reschedulePost", "cancelScheduledPost"].includes(methodName),
+    createDraft: (input = {}) => ({ ...input, provider: "zernio" }),
+    updateDraft: (input = {}) => ({ ...input, provider: "zernio" }),
+    schedulePost: async (draft) => ({
+      id: draft.id,
+      draftId: draft.id,
+      provider: "zernio",
+      status: PUBLISHING_STATUS.SCHEDULED,
+      providerJobId: null,
+      providerPostId: null,
+    }),
+  };
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({ caption: "No provider id", platforms: ["instagram"], accountIds: { instagram: "account-1" } });
+  const scheduledAt = "2035-01-01T10:00:00.000Z";
+
+  await assert.rejects(
+    () => center.scheduleDraft(draft.id, scheduledAt, "UTC"),
+    { code: "zernio_post_id_missing" },
+  );
+  const stored = center.getDrafts()[0];
+  assert.equal(stored.status, PUBLISHING_STATUS.DRAFT);
+  assert.equal(stored.scheduledAt, null);
+  assert.equal(stored.providerJobId, null);
+});
+
+test("the Zernio provider refuses a scheduled response that carries no post id", async () => {
+  const provider = new ZernioPublishingProvider({
+    fetchFn: async () => ({ ok: true, json: async () => ({ status: "scheduled", scheduledFor: "2035-01-01T10:00:00.000Z", timezone: "UTC" }) }),
+  });
+
+  await assert.rejects(
+    () => provider.schedulePost({ id: "draft-1", caption: "Hello", platforms: ["instagram"], accountIds: { instagram: "account-1" }, timezone: "UTC", scheduledAt: "2035-01-01T10:00:00.000Z" }),
+    { code: "zernio_post_id_missing" },
+  );
+});
+
+test("Zernio receives composer hashtags in the caption without duplicating the ones already written", async () => {
+  const bodies = [];
+  const provider = new ZernioPublishingProvider({
+    fetchFn: async (_url, options = {}) => {
+      bodies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ status: "scheduled", postId: "zernio-post-tags", providerJobId: "zernio-post-tags", scheduledFor: "2035-01-01T10:00:00.000Z", timezone: "UTC", platformResults: [] }) };
+    },
+  });
+  const storage = createMemoryStorage();
+  const center = new PublishingCenterMVP({ storage, publishingProvider: provider });
+  const draft = center.createDraft({
+    caption: "Launch week #launch",
+    hashtags: ["launch", "product"],
+    firstComment: "Say hello",
+    platforms: ["instagram"],
+    accountIds: { instagram: "account-1" },
+  });
+  await center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
+
+  assert.equal(bodies[0].content, "Launch week #launch\n\n#product");
+  assert.equal((bodies[0].content.match(/#launch\b/g) || []).length, 1);
+  assert.equal(bodies[0].firstComment, "Say hello");
+  assert.deepEqual(bodies[0].platforms, ["instagram"]);
+  assert.deepEqual(bodies[0].accountIds, { instagram: "account-1" });
+  assert.equal(center.getDrafts()[0].providerJobId, "zernio-post-tags");
+  assert.equal(center.getDrafts()[0].status, PUBLISHING_STATUS.SCHEDULED);
+});

@@ -1,4 +1,5 @@
 import { PublishingProvider } from './PublishingProvider.js';
+import { captionWithHashtags } from './publishingComposer.js';
 import { PublishingError } from './publishingErrors.js';
 import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, normalizePublishingDraft, normalizePublishingJob } from './publishingTypes.js';
 
@@ -126,7 +127,7 @@ export class ZernioPublishingProvider extends PublishingProvider {
       method: 'POST',
       body: {
         draftId: draft.id,
-        content: draft.caption || draft.description || draft.title || '',
+        content: captionWithHashtags(draft.caption || draft.description || draft.title || '', draft.hashtags),
         assetIds,
         platforms: Array.isArray(draft.platforms) ? draft.platforms : [],
         accountIds: draft.accountIds || draft.platformAccountIds || {},
@@ -152,6 +153,14 @@ export class ZernioPublishingProvider extends PublishingProvider {
       error: result.error || null,
     }]));
     const providerPostId = response.postId || response.providerPostId || null;
+    // A scheduled result without a provider post id is not a real schedule: refusing here keeps a
+    // local draft id from ever being reported (or persisted) as the provider job id.
+    if (!providerPostId && (status === PUBLISHING_STATUS.SCHEDULED || status === PUBLISHING_STATUS.QUEUED)) {
+      throw new PublishingError('Maven Social accepted this post but did not return a post id.', {
+        code: 'zernio_post_id_missing',
+        status: 502,
+      });
+    }
     return normalizePublishingJob({
       id: providerPostId || draft.id,
       draftId: draft.id,
