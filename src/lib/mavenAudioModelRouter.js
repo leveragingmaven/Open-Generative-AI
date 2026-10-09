@@ -1,5 +1,6 @@
 import { audioModels } from '../../packages/studio/src/models.js';
 import { extractSpeechText } from '../../packages/studio/src/lib/mavenAudioIntent.js';
+import { customVoiceIdError, isTypedEnumField, isValidCustomVoiceId } from '../../packages/studio/src/lib/audio/customVoiceId.js';
 
 function audioError(code, message, status = 422) { return Object.assign(new Error(message), { code, status }); }
 function normalize(value) { return ` ${String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ' ').trim()} `; }
@@ -12,6 +13,16 @@ function findRequestedModel(message, catalog) {
 }
 function schemaValues(field) {
   return Array.isArray(field?.enum) ? field.enum.map((item) => typeof item === 'object' ? item.value : item) : [];
+}
+
+// An explicitly named voice: a system voice ("voice id Calm_Woman") or one the
+// creator cloned ("voice id sf02174c-…", "custom voice: MyClone01"). The mention
+// is captured loosely so a malformed ID is reported rather than silently
+// replaced by the catalog default.
+const CUSTOM_VOICE_MENTION = /\b(?:(?:custom|cloned)\s+voice(?:\s*id)?|voice\s*id)\s*[:=]?\s*[`"']?([^\s`"',.;:]+)/i;
+function requestedVoiceMention(message) {
+  const match = CUSTOM_VOICE_MENTION.exec(String(message || ''));
+  return match?.[1] || null;
 }
 function requestedVoice(message, model) {
   const values = schemaValues(model.inputs?.voice_id);
@@ -39,8 +50,29 @@ export function selectMavenAudioRoute(message, { catalog = audioModels } = {}) {
   if (!model || !SPEECH_MODEL_IDS.has(model.id)) throw audioError('audio_model_unavailable', 'No supported speech model is available.', 422);
 
   const inputs = model.inputs || {};
-  const voice = requestedVoice(message, model);
-  if (!schemaValues(inputs.voice_id).includes(voice)) throw audioError('audio_option_unsupported', `${model.name} does not support the requested voice.`, 422);
+  const voiceField = inputs.voice_id;
+  const mention = requestedVoiceMention(message);
+  let voice;
+  let customVoice = false;
+  if (mention && schemaValues(voiceField).includes(mention)) {
+    // An explicitly named system voice keeps the catalog's strict validation.
+    voice = mention;
+  } else if (mention) {
+    // A custom voice ID is only accepted where the catalog advertises typed
+    // values for that field (its own `typing: true` affordance).
+    if (!isTypedEnumField(voiceField)) {
+      throw audioError('audio_option_unsupported', `${model.name} does not accept a custom voice ID.`, 422);
+    }
+    if (!isValidCustomVoiceId(mention)) {
+      throw audioError('audio_option_unsupported', `"${mention}" is not a valid cloned voice ID. ${customVoiceIdError(mention)}`, 422);
+    }
+    // Used exactly as given — never replaced by a system default.
+    voice = mention;
+    customVoice = true;
+  } else {
+    voice = requestedVoice(message, model);
+  }
+  if (!customVoice && !schemaValues(voiceField).includes(voice)) throw audioError('audio_option_unsupported', `${model.name} does not support the requested voice.`, 422);
 
   const result = { prompt: script, voice_id: voice };
   const speedMatch = /\b(?:speed|pace)\s*(?:of\s*)?(0?\.\d+|\d+(?:\.\d+)?)\s*x?\b/i.exec(message);
@@ -61,7 +93,8 @@ export function selectMavenAudioRoute(message, { catalog = audioModels } = {}) {
   if (language) result.language_boost = language;
   else if (/\b(?:in|language)\s+([A-Za-z][A-Za-z -]{1,25})/i.test(message)) {
     const match = /\b(?:in|language)\s+([A-Za-z][A-Za-z -]{1,25})/i.exec(message);
-    if (match && !/voice|script|a warm|a professional/i.test(match[1])) {
+    // A custom voice ID in the request must not be mistaken for an unnamed language.
+    if (match && !customVoice && !/voice|script|a warm|a professional/i.test(match[1])) {
       throw audioError('audio_option_unsupported', `${model.name} does not list ${match[1].trim()} as a supported language.`, 422);
     }
   }

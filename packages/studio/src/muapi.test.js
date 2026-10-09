@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateI2I, generateI2V, generateImage, generateVideo, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
+import { generateAudio, generateI2I, generateI2V, generateImage, generateVideo, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -103,6 +103,48 @@ async function generateI2IAndCaptureBody(params) {
   await generateI2I('test-key', params);
   return { submissionUrl, submissionBody };
 }
+
+async function generateAudioAndCaptureBody(params) {
+  let submissionUrl;
+  let submissionBody;
+  globalThis.fetch = mockSubmissionAndPolling({
+    polls: [response({ status: 'completed' })],
+    onFetch: (url, options) => {
+      if (options?.method === 'POST') {
+        submissionUrl = url;
+        submissionBody = JSON.parse(options.body);
+      }
+    },
+  });
+  await generateAudio('test-key', params);
+  return { submissionUrl, submissionBody };
+}
+
+// A cloned voice is identified by the ID the creator chose. Nothing on the way to
+// the provider may substitute a system default for it.
+test('generateAudio forwards a cloned voice ID and clone parameters unchanged', async () => {
+  const cloneId = 'sf02174c-5f5d-46e6-8758-7544128c27b2';
+  const speech = await generateAudioAndCaptureBody({
+    _modelId: 'minimax-speech-2.6-hd',
+    prompt: 'Hello there.',
+    voice_id: cloneId,
+  });
+
+  assert.equal(speech.submissionUrl, 'https://api.muapi.ai/api/v1/minimax-speech-2.6-hd');
+  assert.equal(speech.submissionBody.voice_id, cloneId);
+  assert.notEqual(speech.submissionBody.voice_id, 'Friendly_Person');
+
+  const clone = await generateAudioAndCaptureBody({
+    _modelId: 'minimax-voice-clone',
+    audio_url: 'https://cdn.example.test/reference.wav',
+    custom_voice_id: 'MyClone01',
+    prompt: 'A clone preview.',
+  });
+
+  assert.equal(clone.submissionUrl, 'https://api.muapi.ai/api/v1/minimax-voice-clone');
+  assert.equal(clone.submissionBody.custom_voice_id, 'MyClone01');
+  assert.equal(clone.submissionBody.audio_url, 'https://cdn.example.test/reference.wav');
+});
 
 async function rejectsWith(fetchImpl, expected, params = imageParams()) {
   globalThis.fetch = fetchImpl;

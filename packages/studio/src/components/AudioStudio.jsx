@@ -9,6 +9,14 @@ import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { audioModels, getAudioModelById } from "../models.js";
 import {
+  customVoiceIdError,
+  enumValues,
+  invalidCustomVoiceField,
+  isCustomVoiceSelection,
+  isTypedEnumField,
+} from "../lib/audio/customVoiceId.js";
+import { copyAssistantResponseText } from "../lib/copyAssistantResponse.js";
+import {
   defaultItemFor,
   isStructuredInputSchema,
   normalizePayloadForModel,
@@ -583,6 +591,62 @@ function PremiumAudioPlayer({ url, title }) {
 }
 
 // ---------------------------------------------------------------------------
+// Cloned voice ID card
+//
+// A clone request is identified by the voice ID the operator chose. Surfacing
+// it here (with a copy action and reuse instructions) is what makes a cloned
+// voice reusable in the speech models — previously the ID existed only inside
+// the form that created it.
+// ---------------------------------------------------------------------------
+function ClonedVoiceCard({ voiceId }) {
+  const [copyState, setCopyState] = useState("idle"); // idle | copied | failed
+
+  const copyVoiceId = async () => {
+    try {
+      await copyAssistantResponseText(voiceId);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  };
+
+  return (
+    <div className="w-full bg-[#161616] border border-[#D4A858]/30 rounded-2xl p-5 space-y-3 text-left">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+          Cloned Voice ID
+        </span>
+        <button
+          type="button"
+          onClick={copyVoiceId}
+          className="px-3 py-1.5 bg-[#1E1E1E] hover:bg-[#2C2C2C] border border-[#2C2C2C] rounded-lg text-[11px] font-semibold text-[#FAFAFA] hover:border-[#E82070]/45 transition-all"
+        >
+          {copyState === "copied" ? "Copied" : "Copy Voice ID"}
+        </button>
+      </div>
+
+      <code className="block w-full truncate bg-[#0B0B0B] border border-[#2C2C2C] rounded-lg px-3 py-2 text-xs font-mono text-[#D4A858]">
+        {voiceId}
+      </code>
+
+      <p className="text-[11px] text-[#A3A3A3] leading-relaxed">
+        Reuse this voice by selecting <span className="text-[#FAFAFA] font-semibold">Minimax Speech HD</span> (or Turbo) and pasting the ID into its <span className="text-[#FAFAFA] font-semibold">Voice ID</span> field — or ask Maven to <span className="text-[#FAFAFA] font-semibold">narrate with voice id {voiceId}</span>.
+      </p>
+
+      <p className="text-[11px] text-[#8C8C8C] leading-relaxed">
+        The preview below comes from the clone request itself. Reusing the ID with a speech model is what confirms the voice is stored on the provider.
+      </p>
+
+      {copyState === "failed" && (
+        <p className="text-[11px] font-semibold text-[#F87171]">
+          Could not copy automatically — select the ID above and copy it manually.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Audio Studio Component
 // ---------------------------------------------------------------------------
 export default function AudioStudio({
@@ -620,6 +684,9 @@ export default function AudioStudio({
   const [generateError, setGenerateError] = useState(null);
   const [activeResultUrl, setActiveResultUrl] = useState(null);
   const [activeResultTitle, setActiveResultTitle] = useState("");
+  // Set only when the generated audio belongs to a cloned voice, so the result
+  // view can hand the reusable ID back to the operator.
+  const [activeResultVoiceId, setActiveResultVoiceId] = useState(null);
   const [view, setView] = useState("input"); // 'input' | 'result'
 
   // ── History state ────────────────────────────────────────────────────
@@ -660,6 +727,7 @@ export default function AudioStudio({
         if (data.internalHistory) setInternalHistory(data.internalHistory);
         if (data.activeResultUrl) setActiveResultUrl(data.activeResultUrl);
         if (data.activeResultTitle) setActiveResultTitle(data.activeResultTitle);
+        if (data.activeResultVoiceId) setActiveResultVoiceId(data.activeResultVoiceId);
         if (data.view) setView(data.view);
       }
     } catch (err) {
@@ -677,6 +745,7 @@ export default function AudioStudio({
           internalHistory,
           activeResultUrl,
           activeResultTitle,
+          activeResultVoiceId,
           view,
         };
         localStorage.setItem(PERSIST_KEY, JSON.stringify(state));
@@ -685,7 +754,7 @@ export default function AudioStudio({
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, view]);
+  }, [selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, activeResultVoiceId, view]);
 
   // ── Handle Dropped Files ────────────────────────────────────────────────
   useEffect(() => {
@@ -733,6 +802,7 @@ export default function AudioStudio({
   const handleSelectHistory = (entry, index) => {
     setActiveResultUrl(entry.url);
     setActiveResultTitle(entry.title || entry.prompt || "Generated Track");
+    setActiveResultVoiceId(entry.voiceId ?? null);
     setActiveHistoryIdx(index);
     setView("result");
   };
@@ -754,6 +824,14 @@ export default function AudioStudio({
     const structuredCheck = validateModelStructuredInputs(selectedModel, params);
     if (structuredCheck.error) {
       alert(structuredCheck.error);
+      return;
+    }
+
+    // A cloned voice ID must be well formed before we spend a provider call
+    // (the provider rejects a malformed or rule-breaking ID).
+    const voiceCheck = invalidCustomVoiceField(selectedModel, params);
+    if (voiceCheck) {
+      alert(`${voiceCheck.title}: ${voiceCheck.error}`);
       return;
     }
 
@@ -788,6 +866,16 @@ export default function AudioStudio({
       }
 
       const title = params.title || params.prompt || `Generated ${selectedModel.name}`;
+
+      // The ID that identifies the voice. A clone request names it
+      // (`custom_voice_id`); a speech request may reuse one (`voice_id`). Prefer
+      // an ID the provider echoes back, otherwise keep exactly what was
+      // submitted — an ID is never swapped for a system default.
+      const clonedVoiceId = String(
+        res.voice_id || res.custom_voice_id || params.custom_voice_id
+          || (isCustomVoiceSelection(selectedModel.inputs?.voice_id, params.voice_id) ? params.voice_id : "")
+      ).trim();
+
       const entry = withCampaignMetadata({
         id: res.id || Date.now().toString(),
         url: res.url,
@@ -795,12 +883,14 @@ export default function AudioStudio({
         prompt: params.prompt || "",
         model: selectedModelId,
         timestamp: new Date().toISOString(),
+        ...(clonedVoiceId ? { voiceId: clonedVoiceId } : {}),
       }, activeCampaign, "audio");
 
       if (!historyItems) addToInternalHistory(entry);
 
       setActiveResultUrl(res.url);
       setActiveResultTitle(title);
+      setActiveResultVoiceId(clonedVoiceId || null);
       setView("result");
       setActiveHistoryIdx(0);
 
@@ -825,6 +915,7 @@ export default function AudioStudio({
     setView("input");
     setActiveResultUrl(null);
     setActiveResultTitle("");
+    setActiveResultVoiceId(null);
     // Keep parameters to avoid having to reupload files if they wish to adjust details
   };
 
@@ -970,9 +1061,17 @@ export default function AudioStudio({
                   </div>
                 );
               }
-              // Enum Dropdowns
+              // Enum Dropdowns — an enum that declares `typing: true` invites an
+              // ID the operator supplies (a voice cloned outside the catalog)
+              // alongside the provider's listed system voices.
               if (schema.enum) {
                 const isOpen = openParamDropdown === key;
+                const typedField = isTypedEnumField(schema);
+                const selection = typeof params[key] === "string" ? params[key] : "";
+                const usingCustomVoice = isCustomVoiceSelection(schema, selection);
+                const selectionHint = usingCustomVoice
+                  ? customVoiceIdError(selection) || null
+                  : null;
                 return (
                   <div key={key} className="space-y-2 relative">
                     <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
@@ -986,7 +1085,7 @@ export default function AudioStudio({
                       }}
                       className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#FAFAFA] flex items-center justify-between transition-all cursor-pointer"
                     >
-                      <span>{params[key] || "Select option"}</span>
+                      <span className="truncate" title={selection || undefined}>{selection || "Select option"}</span>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
@@ -1017,6 +1116,29 @@ export default function AudioStudio({
                       <span className="block text-[11px] text-[#8C8C8C] leading-normal">
                         {schema.description}
                       </span>
+                    )}
+
+                    {/* A typed enum also accepts a voice ID the operator supplies
+                        (cloned outside the catalog), not just a listed system voice. */}
+                    {typedField && (
+                      <div className="space-y-1.5 pt-1">
+                        <input
+                          type="text"
+                          value={selection}
+                          onChange={(e) => setParams(prev => ({ ...prev, [key]: e.target.value }))}
+                          placeholder="Or paste a cloned voice ID…"
+                          spellCheck={false}
+                          autoComplete="off"
+                          className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] focus:border-[#E82070]/70 rounded-lg px-4 py-3 text-xs font-mono text-[#FAFAFA] placeholder:text-[#8C8C8C] placeholder:font-sans focus:outline-none transition-all shadow-inner"
+                        />
+                        <span className={`block text-[11px] leading-normal ${selectionHint ? "text-[#F87171] font-semibold" : usingCustomVoice ? "text-[#D4A858] font-semibold" : "text-[#8C8C8C]"}`}>
+                          {selectionHint
+                            ? selectionHint
+                            : usingCustomVoice
+                              ? "Using a cloned voice. Pick a system voice above to switch back."
+                              : "Paste the ID of a voice you cloned to speak with it here."}
+                        </span>
+                      </div>
                     )}
                   </div>
                 );
@@ -1222,6 +1344,7 @@ export default function AudioStudio({
                     Success
                   </MavenBadge>
                 </div>
+                {activeResultVoiceId && <ClonedVoiceCard voiceId={activeResultVoiceId} />}
                 <PremiumAudioPlayer url={activeResultUrl} title={activeResultTitle} />
               </div>
             )}
