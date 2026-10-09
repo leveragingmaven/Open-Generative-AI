@@ -19,7 +19,7 @@ import { generateMavenVideo, buildGeneratedVideoReply } from './mavenVideoGenera
 import { generateMavenImageToVideo } from './mavenImageToVideoGeneration.js';
 import { generateMavenAudio, buildGeneratedAudioReply } from './mavenAudioGeneration.js';
 import { generateMavenLipSync, buildGeneratedLipSyncReply } from './mavenLipSyncGeneration.js';
-import { isImageGenerationRequest, isImageEditRequest } from '../../packages/studio/src/lib/mavenImageIntent.js';
+import { isImageGenerationRequest, isImageEditRequest, referencesAttachedImage } from '../../packages/studio/src/lib/mavenImageIntent.js';
 import { isImageToVideoRequest, isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 import { isAudioGenerationRequest, extractSpeechText } from '../../packages/studio/src/lib/mavenAudioIntent.js';
 import { isLipSyncRequest } from '../../packages/studio/src/lib/mavenLipSyncIntent.js';
@@ -285,6 +285,15 @@ function conversationErrorResponse(error) {
   if (code === 'muapi_server_key_required') {
     return { error: 'Design Agent history is unavailable.', code, status: 503 };
   }
+  if (code === 'vision_image_unavailable') {
+    // The image could not be handed to the model (unusable or unreachable
+    // reference). Say so plainly without echoing the reference itself.
+    return {
+      error: 'That image is not available for analysis. Please attach it again and Maven will take a look.',
+      code,
+      status: 422,
+    };
+  }
   const status = Number.isInteger(error?.status) ? error.status : undefined;
   if (PROVIDER_FAILURE_CODES.has(code)) {
     return {
@@ -390,7 +399,7 @@ function sseFrame(payload) {
  * Raw upstream provider frames never cross this boundary; the full assistant
  * response is accumulated server-side and sanitized before `done` is emitted.
  */
-export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [], generatedReferences = [] }) {
+export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [], visionAttachments = [], generatedReferences = [] }) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -410,6 +419,7 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
           sessionReadResult,
           newMessage: message,
           attachments,
+          visionAttachments,
           onDelta: (text) => send({ type: 'delta', text }),
         })
         .then(({ reply }) => {
@@ -685,21 +695,38 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, generatedReferences) };
     }
 
+    // Multimodal handoff. The images this turn must be able to SEE are the
+    // authorized images selected for it. When the browser selects none but the
+    // customer is still referring to an image already trusted in this session
+    // ("what is in this image?" after the upload), the ownership-verified
+    // session image is inspected directly instead of being answered from a
+    // text-only reference list — which is what made Maven report that it could
+    // not view an image that was in fact attached. Only session-owned assets
+    // are eligible, and the browser never receives the URL.
+    const selectedImageAttachments = trustedAttachments.filter((item) => item.kind === 'image');
+    const sessionImageAttachment = selectedImageAttachments.length || !referencesAttachedImage(message)
+      ? null
+      : resolveLastTrustedImageReference(sessionReadResult, conversationId);
+    const visionAttachments = selectedImageAttachments.length
+      ? selectedImageAttachments
+      : (sessionImageAttachment ? [sessionImageAttachment] : []);
+
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');
-    const visionTextIntelligence = trustedAttachments.length
+    const visionTextIntelligence = visionAttachments.length
       ? await (await getService('createVisionTextIntelligence'))(identity)
       : null;
     const service = conversationServiceFactory(textProviderFactory(), visionTextIntelligence);
 
     if (wantsStream) {
-      return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments });
+      return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments, visionAttachments });
     }
 
     const { reply } = await service.respond({
       sessionReadResult: trustedSessionReadResult,
       newMessage: message,
       attachments: trustedAttachments,
+      visionAttachments,
     });
 
     return {

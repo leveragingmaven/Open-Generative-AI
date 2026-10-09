@@ -120,22 +120,38 @@ export class DesignAgentConversationIntelligenceService {
     this.visionIntelligence = visionTextIntelligence;
   }
 
-  async respond({ sessionReadResult, newMessage, attachments = [] }) {
+  /**
+   * Images this turn must be able to SEE, as opposed to images that are only
+   * listed as conversation references.
+   *
+   * `attachments` are the attachments the caller is recording for this turn;
+   * `visionAttachments` is the authorized subset that must become model-visible
+   * image content. It defaults to the image attachments, and the caller passes
+   * it explicitly when the turn refers to an image already trusted in the
+   * session but carries no new attachment of its own.
+   */
+  resolveInspectedImages({ attachments = [], visionAttachments } = {}) {
+    const imageAttachments = Array.isArray(attachments)
+      ? attachments.filter((attachment) => attachment?.kind === 'image')
+      : [];
+    if (!Array.isArray(visionAttachments)) return imageAttachments;
+    return visionAttachments.filter((attachment) => attachment?.kind === 'image');
+  }
+
+  async respond({ sessionReadResult, newMessage, attachments = [], visionAttachments } = {}) {
     if (!newMessage || typeof newMessage !== 'string') {
       throw new Error('newMessage is required');
     }
 
-    const imageAttachments = Array.isArray(attachments)
-      ? attachments.filter((attachment) => attachment?.kind === 'image')
-      : [];
-    const referenceAttachments = imageAttachments.length ? imageAttachments : sessionReadResult?.attachments;
+    const inspectedImages = this.resolveInspectedImages({ attachments, visionAttachments });
+    const referenceAttachments = inspectedImages.length ? inspectedImages : sessionReadResult?.attachments;
     const messages = buildConversationMessages({
       messages: sessionReadResult?.messages,
       newMessage,
       attachments: referenceAttachments,
-      imageAttachments,
+      imageAttachments: inspectedImages,
     });
-    const intelligence = imageAttachments.length ? this.visionIntelligence : this.intelligence;
+    const intelligence = inspectedImages.length ? this.visionIntelligence : this.intelligence;
     if (!intelligence || typeof intelligence.complete !== 'function') {
       const error = new Error('Image analysis is not configured for this Workspace.');
       error.code = 'vision_intelligence_not_configured';
@@ -152,7 +168,7 @@ export class DesignAgentConversationIntelligenceService {
     return { reply: safeReply };
   }
 
-  async respondStreaming({ sessionReadResult, newMessage, attachments = [], onDelta } = {}) {
+  async respondStreaming({ sessionReadResult, newMessage, attachments = [], visionAttachments, onDelta } = {}) {
     if (!newMessage || typeof newMessage !== 'string') {
       throw new Error('newMessage is required');
     }
@@ -163,17 +179,15 @@ export class DesignAgentConversationIntelligenceService {
       throw error;
     }
 
-    const imageAttachments = Array.isArray(attachments)
-      ? attachments.filter((attachment) => attachment?.kind === 'image')
-      : [];
-    const referenceAttachments = imageAttachments.length ? imageAttachments : sessionReadResult?.attachments;
+    const inspectedImages = this.resolveInspectedImages({ attachments, visionAttachments });
+    const referenceAttachments = inspectedImages.length ? inspectedImages : sessionReadResult?.attachments;
     const messages = buildConversationMessages({
       messages: sessionReadResult?.messages,
       newMessage,
       attachments: referenceAttachments,
-      imageAttachments,
+      imageAttachments: inspectedImages,
     });
-    const intelligence = imageAttachments.length ? this.visionIntelligence : this.intelligence;
+    const intelligence = inspectedImages.length ? this.visionIntelligence : this.intelligence;
     if (!intelligence || typeof intelligence.streamComplete !== 'function') {
       const error = new Error('Image analysis is not configured for this Workspace.');
       error.code = 'vision_intelligence_not_configured';

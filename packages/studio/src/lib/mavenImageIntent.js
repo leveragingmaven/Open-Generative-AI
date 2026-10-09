@@ -47,6 +47,26 @@ export function isImageEditRequest(message) {
   return false;
 }
 
+// A message that refers to media already attached to this conversation: either
+// by trusted asset label ("@asset_1") or by pointing at an attachment
+// ("what is in this image?", "the photo I sent earlier"). Used server-side to
+// hand an already-authorized session image to the vision model instead of
+// answering from a text-only reference list — which is what made Maven claim
+// it could not see an image that was in fact attached.
+const EXPLICIT_ASSET_REF = /@?asset_[A-Za-z0-9_-]{1,190}\b/;
+const ATTACHMENT_MENTION = /\b(attachments?|attached|uploads?|uploaded|uploading)\b/i;
+const ATTACHED_MEDIA_REF = /\b(this|that|these|those|the|my|our|your|previous|prior|last|recent|above|attached|uploaded|provided|original|same)\s+(images?|photos?|pictures?|pics?|screenshots?|graphics?|artwork|visuals?|files?|designs?|logos?|uploads?|attachments?)\b/i;
+
+export function referencesAttachedImage(message) {
+  if (typeof message !== "string") return false;
+  const text = message.trim();
+  if (!text || text.length > 2000) return false;
+  if (EXPLICIT_ASSET_REF.test(text)) return true;
+  // Other media requests stay on their own lane.
+  if (OTHER_MEDIA.test(text)) return false;
+  return ATTACHMENT_MENTION.test(text) || ATTACHED_MEDIA_REF.test(text);
+}
+
 // Only https image links produced by the generator are treated as results.
 export function extractGeneratedImageUrls(content) {
   if (typeof content !== "string") return [];

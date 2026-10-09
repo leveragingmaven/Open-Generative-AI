@@ -38,17 +38,26 @@ function issueModelBrokerToken(identity, env = process.env) {
   return `${header}.${payload}.${signature}`;
 }
 
+/**
+ * Rejected vision input is a caller/attachment condition, not a provider
+ * fault: it is reported as a typed, sanitized 422 so the Workspace can explain
+ * that the image is unavailable instead of claiming analysis is broken.
+ */
+function visionInputError(message) {
+  return Object.assign(new Error(message), { code: 'vision_image_unavailable', status: 422 });
+}
+
 function validateMessages(messages) {
   if (!Array.isArray(messages) || !messages.length) {
-    throw new Error('Vision request messages are unavailable.');
+    throw visionInputError('Vision request messages are unavailable.');
   }
   return messages.map((message) => {
     if (!message || (message.role !== 'system' && message.role !== 'user' && message.role !== 'assistant')) {
-      throw new Error('Vision request message is invalid.');
+      throw visionInputError('Vision request message is invalid.');
     }
     if (typeof message.content === 'string') return { role: message.role, content: message.content.slice(0, 12000) };
     if (message.role !== 'user' || !Array.isArray(message.content) || message.content.length > MAX_CONTENT_PARTS) {
-      throw new Error('Vision request content is invalid.');
+      throw visionInputError('Vision request content is invalid.');
     }
     const content = message.content.map((part) => {
       if (part?.type === 'text' && typeof part.text === 'string') {
@@ -59,14 +68,14 @@ function validateMessages(messages) {
         try {
           imageUrl = new URL(part.image_url.url);
         } catch {
-          throw new Error('Vision image URL is invalid.');
+          throw visionInputError('Vision image URL is invalid.');
         }
         if (!['http:', 'https:'].includes(imageUrl.protocol) || imageUrl.href.length > MAX_IMAGE_URL_LENGTH) {
-          throw new Error('Vision image URL is invalid.');
+          throw visionInputError('Vision image URL is invalid.');
         }
         return { type: 'image_url', image_url: { url: imageUrl.href } };
       }
-      throw new Error('Vision request content is invalid.');
+      throw visionInputError('Vision request content is invalid.');
     });
     return { role: 'user', content };
   });
