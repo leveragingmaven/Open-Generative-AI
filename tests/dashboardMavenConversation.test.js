@@ -293,6 +293,29 @@ test("Dashboard keeps its chat list persisted and can reopen an existing session
   assert.match(dashboardSource, /savedChats\.map\(\(chat\)/);
 });
 
+test("Dashboard chat entries expose Rename and Delete through the ownership-checked client", () => {
+  assert.match(dashboardSource, /client\.renameSession\(chat\.id, title\)/);
+  assert.match(dashboardSource, /client\.deleteSession\(chat\.id\)/);
+  assert.match(dashboardSource, /renameDashboardChat\(window\.localStorage, chat\.id, saved\)/);
+  assert.match(dashboardSource, /removeDashboardChat\(window\.localStorage, chat\.id\)/);
+  assert.match(dashboardSource, /beginRenameChat\(chat\)\}>Rename</);
+  assert.match(dashboardSource, /styles\.chatMenuDanger\} onClick=\{\(\) => void deleteSavedChat\(chat\)\}>Delete</);
+  assert.match(dashboardSource, /aria-haspopup="menu"/);
+  assert.match(dashboardSource, /aria-expanded=\{chatMenuId === chat\.id\}/);
+  // The menu dismisses on an outside press or Escape, and presses inside the
+  // row are excluded so the toggle and the menu items keep their own clicks.
+  assert.match(dashboardSource, /data-chat-row/);
+  assert.match(dashboardSource, /if \(!event\.target\?\.closest\?\.\("\[data-chat-row\]"\)\) setChatMenuId\(null\);/);
+  assert.match(dashboardSource, /if \(event\.key === "Escape"\) setChatMenuId\(null\);/);
+  // Deleting the open conversation clears its local pointer instead of leaving
+  // the dashboard pointed at a session that no longer exists.
+  assert.match(dashboardSource, /const wasOpen = chat\.id === mavenSessionId;/);
+  assert.match(dashboardSource, /if \(wasOpen\) \{[\s\S]*?clearStoredDashboardSessionId\(window\.localStorage\);/);
+  // Chat management must not delete session or project assets directly.
+  assert.doesNotMatch(dashboardSource, /method: "DELETE"/);
+  assert.match(dashboardSource, /window\.confirm\(/);
+});
+
 test("Dashboard degrades gracefully when controlled conversation is unavailable", () => {
   assert.match(dashboardSource, /Maven chat is unavailable/);
   assert.match(dashboardSource, /disabled=\{!mavenReady \|\| mavenBusy\}/);

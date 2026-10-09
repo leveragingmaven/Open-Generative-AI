@@ -45,6 +45,25 @@ function saveDashboardChat(storage, chat) {
   return next;
 }
 
+// Renames an existing entry in place. Only the stored title changes; the
+// session id, list order and every other field are preserved.
+function renameDashboardChat(storage, chatId, title) {
+  const next = readDashboardChatList(storage).map((chat) => (chat.id === chatId
+    ? { ...chat, title: title?.trim() || chat.title, updatedAt: new Date().toISOString() }
+    : chat));
+  storage.setItem(DASHBOARD_CHAT_LIST_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
+// Removes only the local list entry. The upstream session is deleted by the
+// caller through the ownership-checked conversation client; nothing here touches
+// project or session assets.
+function removeDashboardChat(storage, chatId) {
+  const next = readDashboardChatList(storage).filter((chat) => chat.id !== chatId);
+  storage.setItem(DASHBOARD_CHAT_LIST_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
 function Icon({ type, size = 18 }) {
   const paths = {
     audio: <><path d="M9 18V5l12-2v13M9 8l12-2" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>,
@@ -263,6 +282,10 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const [selectedImageReference, setSelectedImageReference] = useState(null);
   const [attachmentError, setAttachmentError] = useState(null);
   const [draggingImage, setDraggingImage] = useState(false);
+  const [chatMenuId, setChatMenuId] = useState(null);
+  const [renamingChatId, setRenamingChatId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [chatActionBusy, setChatActionBusy] = useState(false);
   const mavenClientRef = useRef(null);
   const attachmentInputRef = useRef(null);
   const sessionCreationRef = useRef(null);
@@ -522,6 +545,85 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     composerInputRef.current?.focus();
   };
 
+  const beginRenameChat = (chat) => {
+    setChatMenuId(null);
+    setChatError(null);
+    setRenamingChatId(chat.id);
+    setRenameValue(chat.title || "Maven conversation");
+  };
+
+  const cancelRenameChat = () => {
+    setRenamingChatId(null);
+    setRenameValue("");
+  };
+
+  // Rename writes the name to the upstream session first, then mirrors it into
+  // the local list, so a failed rename never leaves the two out of step.
+  const submitRenameChat = async (event, chat) => {
+    event?.preventDefault?.();
+    const client = mavenClientRef.current;
+    const title = renameValue.trim();
+    if (!client || !title || title === chat.title || chatActionBusy) {
+      cancelRenameChat();
+      return;
+    }
+    setChatActionBusy(true);
+    setChatError(null);
+    try {
+      const saved = await client.renameSession(chat.id, title);
+      setSavedChats(renameDashboardChat(window.localStorage, chat.id, saved));
+      cancelRenameChat();
+    } catch (error) {
+      setChatError(error?.message || "Unable to rename this conversation.");
+    } finally {
+      setChatActionBusy(false);
+    }
+  };
+
+  // Delete removes the conversation, never its project assets: this issues one
+  // session DELETE through the ownership-checked client and nothing else.
+  const deleteSavedChat = async (chat) => {
+    const client = mavenClientRef.current;
+    if (!client || chatActionBusy) return;
+    if (!window.confirm(`Delete “${chat.title || "this conversation"}”? This cannot be undone.`)) return;
+    setChatMenuId(null);
+    setChatActionBusy(true);
+    setChatError(null);
+    const wasOpen = chat.id === mavenSessionId;
+    try {
+      await client.deleteSession(chat.id);
+      setSavedChats(removeDashboardChat(window.localStorage, chat.id));
+      if (wasOpen) {
+        clearStoredDashboardSessionId(window.localStorage);
+        setMavenSessionId(null);
+        setMavenMessages([]);
+        setSelectedImageReference(null);
+      }
+    } catch (error) {
+      setChatError(error?.message || "Unable to delete this conversation.");
+    } finally {
+      setChatActionBusy(false);
+    }
+  };
+
+  // The row menu dismisses on an outside press or Escape. Presses inside the row
+  // are ignored so the toggle button and the menu items keep their own clicks.
+  useEffect(() => {
+    if (!chatMenuId) return undefined;
+    const dismissOnPointerDown = (event) => {
+      if (!event.target?.closest?.("[data-chat-row]")) setChatMenuId(null);
+    };
+    const dismissOnKeyDown = (event) => {
+      if (event.key === "Escape") setChatMenuId(null);
+    };
+    document.addEventListener("pointerdown", dismissOnPointerDown);
+    document.addEventListener("keydown", dismissOnKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown);
+      document.removeEventListener("keydown", dismissOnKeyDown);
+    };
+  }, [chatMenuId]);
+
   const mavenComposer = (
     <form className={`${styles.composer} ${draggingImage ? styles.composerDragging : ""}`} onSubmit={submitMavenMessage}
       onDragEnter={(event) => { event.preventDefault(); event.stopPropagation(); if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) setDraggingImage(true); }}
@@ -613,10 +715,48 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
           <div className={styles.chatList}>
             <div className={styles.chatListHeading}><span>Recent chats</span><Icon type="chevron" size={14} /></div>
             {savedChats.length ? savedChats.map((chat) => (
-              <button key={chat.id} type="button" className={`${styles.chatEntry} ${chat.id === mavenSessionId ? styles.chatEntryActive : ""}`} onClick={() => void openSavedChat(chat)} disabled={mavenBusy}>
-                <Icon type="chat" size={14} />
-                <span>{chat.title || "Maven conversation"}</span>
-              </button>
+              <div key={chat.id} data-chat-row className={`${styles.chatEntryRow} ${chat.id === mavenSessionId ? styles.chatEntryActive : ""}`}>
+                {renamingChatId === chat.id ? (
+                  <form className={styles.chatRenameForm} onSubmit={(event) => void submitRenameChat(event, chat)}>
+                    <label htmlFor={`rename-${chat.id}`} className="sr-only">Rename conversation</label>
+                    <input
+                      id={`rename-${chat.id}`}
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelRenameChat(); } }}
+                      maxLength={120}
+                      autoFocus
+                      disabled={chatActionBusy}
+                    />
+                    <button type="submit" aria-label="Save conversation name" disabled={chatActionBusy || !renameValue.trim()}><Icon type="check" size={13} /></button>
+                    <button type="button" aria-label="Cancel rename" onClick={cancelRenameChat} disabled={chatActionBusy}><Icon type="close" size={13} /></button>
+                  </form>
+                ) : (
+                  <>
+                    <button type="button" className={styles.chatEntry} onClick={() => void openSavedChat(chat)} disabled={mavenBusy}>
+                      <Icon type="chat" size={14} />
+                      <span>{chat.title || "Maven conversation"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.chatMenuButton}
+                      aria-label={`Actions for ${chat.title || "conversation"}`}
+                      aria-haspopup="menu"
+                      aria-expanded={chatMenuId === chat.id}
+                      onClick={() => setChatMenuId((current) => (current === chat.id ? null : chat.id))}
+                      disabled={mavenBusy || chatActionBusy}
+                    >
+                      <span aria-hidden="true">⋯</span>
+                    </button>
+                    {chatMenuId === chat.id ? (
+                      <div role="menu" className={styles.chatMenu}>
+                        <button type="button" role="menuitem" onClick={() => beginRenameChat(chat)}>Rename</button>
+                        <button type="button" role="menuitem" className={styles.chatMenuDanger} onClick={() => void deleteSavedChat(chat)}>Delete</button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
             )) : <p className={styles.emptyChats}>Your conversations will show up here.</p>}
           </div>
           <div className={styles.sidebarFooter}>
