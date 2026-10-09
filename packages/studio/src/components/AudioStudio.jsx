@@ -27,6 +27,17 @@ import {
 } from "../lib/audio/structuredInput.js";
 import { MavenButton } from "./mavensync/MavenButton.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
+import PresetVoicePicker from "./audio/PresetVoicePicker.jsx";
+import {
+  AUDIO_MODES,
+  DEFAULT_AUDIO_MODE_ID,
+  audioModeById,
+  defaultModelForMode,
+  modelKindLabel,
+  modelSupportsMode,
+  modelsForMode,
+  resolveModeForModel,
+} from "../lib/audio/audioModes.js";
 
 // ---------------------------------------------------------------------------
 // Upload button states
@@ -75,6 +86,39 @@ const MusicIcon = ({ className = "text-[#E82070]" }) => (
     <circle cx="18" cy="16" r="3" />
   </svg>
 );
+
+const VoiceWaveIcon = ({ className = "" }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+    <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+    <line x1="12" y1="18" x2="12" y2="22" />
+    <line x1="8" y1="22" x2="16" y2="22" />
+  </svg>
+);
+
+const SoundWaveIcon = ({ className = "" }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+    <line x1="3" y1="10" x2="3" y2="14" />
+    <line x1="7" y1="7" x2="7" y2="17" />
+    <line x1="11" y1="4" x2="11" y2="20" />
+    <line x1="15" y1="8" x2="15" y2="16" />
+    <line x1="19" y1="11" x2="19" y2="13" />
+  </svg>
+);
+
+// The studio's own icon follows the mode, so a voice task never reads as music.
+const MODE_ICONS = {
+  voice: VoiceWaveIcon,
+  clone: VoiceWaveIcon,
+  music: MusicIcon,
+  sfx: SoundWaveIcon,
+  all: MusicIcon,
+};
+
+const ModeIcon = ({ modeId, className }) => {
+  const Icon = MODE_ICONS[modeId] || MusicIcon;
+  return <Icon className={className} />;
+};
 
 const TrashIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -661,7 +705,12 @@ export default function AudioStudio({
   const PERSIST_KEY = "hg_audio_studio_persistent";
 
   // ── Mode & model state ──────────────────────────────────────────────────
-  const [selectedModelId, setSelectedModelId] = useState(audioModels[0]?.id ?? "");
+  // The studio opens on Voice Generator, so the model the operator first sees
+  // is the voice default rather than the catalog's first entry (a music model).
+  const [audioMode, setAudioMode] = useState(DEFAULT_AUDIO_MODE_ID);
+  const [selectedModelId, setSelectedModelId] = useState(
+    defaultModelForMode(DEFAULT_AUDIO_MODE_ID, audioModels)?.id ?? audioModels[0]?.id ?? ""
+  );
   const [params, setParams] = useState({});
   const [openDropdown, setOpenDropdown] = useState(false);
   const [openParamDropdown, setOpenParamDropdown] = useState(null);
@@ -697,6 +746,9 @@ export default function AudioStudio({
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   const selectedModel = getAudioModelById(selectedModelId);
+  const activeMode = audioModeById(audioMode);
+  // The catalog is only ever *filtered* — no model is removed by a mode.
+  const modeModels = modelsForMode(audioMode, audioModels);
 
   // ── Initialize params when model changes ──────────────────────────────
   useEffect(() => {
@@ -723,7 +775,17 @@ export default function AudioStudio({
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
-        if (data.selectedModelId) setSelectedModelId(data.selectedModelId);
+        // A restored model is never silently swapped for a mode default: the
+        // mode moves to match the stored model, so the operator's last choice
+        // stays visible (including specialised utilities, which open in All
+        // Models).
+        const storedMode = data.audioMode || DEFAULT_AUDIO_MODE_ID;
+        if (data.selectedModelId) {
+          setSelectedModelId(data.selectedModelId);
+          setAudioMode(resolveModeForModel(data.selectedModelId, storedMode, audioModels));
+        } else if (data.audioMode) {
+          setAudioMode(resolveModeForModel("", storedMode, audioModels));
+        }
         if (data.params) setParams(data.params);
         if (data.internalHistory) setInternalHistory(data.internalHistory);
         if (data.activeResultUrl) setActiveResultUrl(data.activeResultUrl);
@@ -741,6 +803,7 @@ export default function AudioStudio({
     const timer = setTimeout(() => {
       try {
         const state = {
+          audioMode,
           selectedModelId,
           params,
           internalHistory,
@@ -755,7 +818,7 @@ export default function AudioStudio({
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, activeResultVoiceId, view]);
+  }, [audioMode, selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, activeResultVoiceId, view]);
 
   // ── Handle Dropped Files ────────────────────────────────────────────────
   useEffect(() => {
@@ -924,6 +987,19 @@ export default function AudioStudio({
     }
   };
 
+  // Switching mode filters the model list and relabels the studio. The current
+  // model is kept whenever the new mode still lists it, so a mode change never
+  // discards a form the operator has already filled in.
+  const handleModeSelect = (modeId) => {
+    setAudioMode(modeId);
+    setOpenDropdown(false);
+    setOpenParamDropdown(null);
+    if (!modelSupportsMode(selectedModelId, modeId)) {
+      const next = defaultModelForMode(modeId, audioModels);
+      if (next) setSelectedModelId(next.id);
+    }
+  };
+
   const handleNew = () => {
     setView("input");
     setActiveResultUrl(null);
@@ -947,7 +1023,60 @@ export default function AudioStudio({
       {/* ─── LEFT CONFIGURATION SIDEBAR ─── */}
       <div ref={sidebarRef} className="w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] border-r border-[#2C2C2C] flex flex-col bg-[#101010]/95 flex-shrink-0 min-h-0 z-30">
         <div className="p-6 overflow-y-auto flex-1 min-h-0 custom-scrollbar space-y-6 pb-24">
-          
+
+          {/* Mode selector — a filter over the same audio catalog, not a
+              separate studio. Every model stays reachable via All Models. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                Studio
+              </label>
+              <span className="text-[10px] font-semibold text-[#8C8C8C]">
+                {modeModels.length} {activeMode.filterLabel.toLowerCase()}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {AUDIO_MODES.filter((mode) => mode.id !== "all").map((mode) => {
+                const isActive = audioMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => handleModeSelect(mode.id)}
+                    className={`px-3 py-2 rounded-md border text-left transition-all ${
+                      isActive
+                        ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/40"
+                        : "text-[#A3A3A3] bg-[#0B0B0B]/60 border-[#2C2C2C] hover:text-[#FAFAFA] hover:bg-[#2C2C2C]"
+                    }`}
+                  >
+                    <span className="block text-[11px] font-bold tracking-tight truncate">{mode.label}</span>
+                    <span className="block text-[9px] font-semibold uppercase tracking-wider opacity-60">
+                      {modelsForMode(mode.id, audioModels).length} models
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              aria-pressed={audioMode === "all"}
+              onClick={() => handleModeSelect("all")}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                audioMode === "all"
+                  ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/40"
+                  : "text-[#8C8C8C] bg-transparent border-[#2C2C2C] hover:text-[#FAFAFA] hover:bg-[#2C2C2C]"
+              }`}
+            >
+              <span>Advanced · All Models</span>
+              <span className="opacity-70">{modelsForMode("all", audioModels).length}</span>
+            </button>
+            <p className="text-[11px] text-[#8C8C8C] leading-relaxed">{activeMode.blurb}</p>
+            {activeMode.note && (
+              <p className="text-[11px] text-[#D4A858] leading-relaxed">{activeMode.note}</p>
+            )}
+          </div>
+
           {/* Model Selector */}
           <div className="space-y-2 relative">
             <label className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest block">
@@ -967,7 +1096,10 @@ export default function AudioStudio({
 
             {openDropdown && (
               <div className="absolute left-0 right-0 mt-2 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1.5">
-                {audioModels.map((model) => (
+                {modeModels.length === 0 && (
+                  <p className="px-4 py-3 text-[11px] text-[#8C8C8C]">{activeMode.emptyModel}</p>
+                )}
+                {modeModels.map((model) => (
                   <button
                     key={model.id}
                     type="button"
@@ -979,7 +1111,14 @@ export default function AudioStudio({
                       model.id === selectedModelId ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30" : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
                     }`}
                   >
-                    <span>{model.name}</span>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate">{model.name}</span>
+                      {modelKindLabel(model.id) && (
+                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider opacity-60">
+                          {modelKindLabel(model.id)}
+                        </span>
+                      )}
+                    </span>
                     {model.description && (
                       <span className="text-[10px] text-[#8C8C8C] truncate max-w-[320px] font-normal">
                         {model.description}
@@ -1087,43 +1226,57 @@ export default function AudioStudio({
                   : null;
                 return (
                   <div key={key} className="space-y-2 relative">
-                    <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
-                      {schema.title || key}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenDropdown(false);
-                        setOpenParamDropdown(isOpen ? null : key);
-                      }}
-                      className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#FAFAFA] flex items-center justify-between transition-all cursor-pointer"
-                    >
-                      <span className="truncate" title={selection || undefined}>{selection || "Select option"}</span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </button>
+                    {/* A voice enum is a library, not a list of IDs: a typed
+                        enum gets a searchable, grouped picker. Every other enum
+                        keeps the plain list it has always had. */}
+                    {typedField ? (
+                      <PresetVoicePicker
+                        schema={schema}
+                        value={selection}
+                        onChange={(next) => setParams(prev => ({ ...prev, [key]: next }))}
+                        label={schema.title || key}
+                      />
+                    ) : (
+                      <>
+                        <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                          {schema.title || key}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenDropdown(false);
+                            setOpenParamDropdown(isOpen ? null : key);
+                          }}
+                          className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#FAFAFA] flex items-center justify-between transition-all cursor-pointer"
+                        >
+                          <span className="truncate" title={selection || undefined}>{selection || "Select option"}</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
 
-                    {isOpen && (
-                      <div className="absolute left-0 right-0 mt-1 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1">
-                        {schema.enum.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setParams(prev => ({ ...prev, [key]: opt }));
-                              setOpenParamDropdown(null);
-                            }}
-                            className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all border ${
-                              params[key] === opt
-                                ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30"
-                                : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
+                        {isOpen && (
+                          <div className="absolute left-0 right-0 mt-1 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1">
+                            {schema.enum.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => {
+                                  setParams(prev => ({ ...prev, [key]: opt }));
+                                  setOpenParamDropdown(null);
+                                }}
+                                className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all border ${
+                                  params[key] === opt
+                                    ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30"
+                                    : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                     {schema.description && (
                       <span className="block text-[11px] text-[#8C8C8C] leading-normal">
@@ -1264,7 +1417,7 @@ export default function AudioStudio({
               </svg>
             ) : undefined}
           >
-            {isGenerating ? "Generating Audio..." : "Generate Track"}
+            {isGenerating ? `${activeMode.busy}…` : activeMode.cta}
           </MavenButton>
         </div>
       </div>
@@ -1303,15 +1456,15 @@ export default function AudioStudio({
                 <div className="relative">
                   <div className="w-24 h-24 border-[3px] border-[#2C2C2C] border-t-[#E82070] rounded-full animate-spin shadow-[0_0_20px_rgba(232,32,112,0.15)]" />
                   <div className="absolute inset-0 flex items-center justify-center text-[#E82070]">
-                    <MusicIcon className="animate-pulse text-[#E82070]" />
+                    <ModeIcon modeId={audioMode} className="animate-pulse text-[#E82070]" />
                   </div>
                 </div>
                 <div className="text-center space-y-2">
                   <div className="text-xs font-semibold text-[#A3A3A3] uppercase tracking-[0.3em] animate-pulse">
-                    Generating Soundtrack
+                    {activeMode.busy}
                   </div>
                   <div className="text-sm text-[#A3A3A3] font-semibold">
-                    Rendering audio waveforms and vocals...
+                    {activeMode.busyDetail}
                   </div>
                 </div>
               </div>
@@ -1321,11 +1474,11 @@ export default function AudioStudio({
             {view === "input" && !isGenerating && !generateError && (
               <div className="flex flex-col items-center gap-3.5 text-center animate-fade-in-up">
                 <div className="w-14 h-14 rounded-xl bg-[#1E1E1E] border border-[#D4A858]/25 flex items-center justify-center shadow-[0_4px_16px_rgba(0,0,0,0.2)]">
-                  <MusicIcon className="text-[#D4A858] w-7 h-7" />
+                  <ModeIcon modeId={audioMode} className="text-[#D4A858] w-7 h-7" />
                 </div>
-                <h3 className="text-[#FAFAFA] font-semibold text-lg tracking-tight">Audio Studio</h3>
+                <h3 className="text-[#FAFAFA] font-semibold text-lg tracking-tight">{activeMode.label}</h3>
                 <p className="max-w-xs text-sm text-[#A3A3A3] leading-relaxed">
-                  Craft your next high-fidelity track with an AI music model, voice clone, or sound generator.
+                  {activeMode.blurb}
                 </p>
               </div>
             )}

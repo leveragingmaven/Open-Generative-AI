@@ -74,6 +74,8 @@ function MediaPickerButton({
     await onUpload(file);
   };
 
+  const isIdle = uploadState === UPLOAD_STATE.IDLE;
+
   return (
     <button
       type="button"
@@ -83,9 +85,17 @@ function MediaPickerButton({
           : `Upload ${label.toLowerCase()} file`
       }
       onClick={handleClick}
-      className={promptMediaButtonClassName({
-        active: uploadState === UPLOAD_STATE.READY,
-      })}
+      // Idle is a labelled control ("Upload audio"), never a bare 40px glyph:
+      // the label previously lived only in the tooltip, so an empty slot showed
+      // an unlabelled icon. Once a file is set, the control collapses back to
+      // the compact preview chip that carries the filename in its tooltip.
+      className={
+        isIdle
+          ? promptControlClassName({ active: false, className: "shrink-0" })
+          : promptMediaButtonClassName({
+              active: uploadState === UPLOAD_STATE.READY,
+            })
+      }
     >
       <input
         ref={inputRef}
@@ -95,11 +105,14 @@ function MediaPickerButton({
         onChange={handleChange}
       />
 
-      {/* Idle state */}
-      {uploadState === UPLOAD_STATE.IDLE && (
-        <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
-          {icon}
-        </div>
+      {/* Idle state — the icon plus the action the button performs */}
+      {isIdle && (
+        <>
+          <span className="flex items-center justify-center shrink-0">{icon}</span>
+          <span className={PROMPT_CONTROL_LABEL_CLASS}>
+            Upload {label.toLowerCase()}
+          </span>
+        </>
       )}
 
       {/* Uploading indicator */}
@@ -927,7 +940,7 @@ export default function LipSyncStudio({
       {/* ── BOTTOM PROMPT BAR ── */}
       <PromptComposer>
           {/* Mode toggle row */}
-          <div className="flex items-center px-1">
+          <div className="flex items-center flex-wrap gap-1 px-1">
             <PromptSegmentedControl>
             <PromptSegmentOption
               type="button"
@@ -953,11 +966,16 @@ export default function LipSyncStudio({
               Video
             </PromptSegmentOption>
             </PromptSegmentedControl>
+            <span className="text-[10px] text-white/30 font-medium ml-2">
+              {inputMode === "image"
+                ? "A still portrait + an audio track. Switch to Video to sync a face video."
+                : "A face video + an audio track."}
+            </span>
           </div>
 
           {/* Uploads row */}
           <div className="flex items-center gap-2 px-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Image picker — only in image mode */}
               {inputMode === "image" && (
                 <MediaPickerButton
@@ -1053,6 +1071,10 @@ export default function LipSyncStudio({
                     title={`Use audio from the Creative Library (${libraryAudioPickerItems.length})`}
                     className={promptControlClassName({
                       active: openDropdown === "library",
+                      className:
+                        openDropdown === "library"
+                          ? undefined
+                          : "border-[#22d3ee]/35 text-[#22d3ee]/90 hover:bg-[#22d3ee]/10",
                     })}
                   >
                     <svg
@@ -1068,6 +1090,9 @@ export default function LipSyncStudio({
                     </svg>
                     <span className={PROMPT_CONTROL_LABEL_CLASS}>
                       Library audio
+                    </span>
+                    <span className="text-[10px] font-bold text-[#22d3ee] bg-[#22d3ee]/10 border border-[#22d3ee]/25 rounded px-1.5 py-0.5">
+                      {libraryAudioPickerItems.length}
                     </span>
                   </button>
                   <Dropdown
