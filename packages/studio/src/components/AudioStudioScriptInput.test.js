@@ -28,7 +28,12 @@ test("an over-long script is visible on the field, not just on submit", () => {
 });
 
 test("the script is refused before a provider call is made", () => {
-  const gateAt = studioSource.indexOf("invalidScriptField(selectedModel, params)");
+  // The gate inside the handler itself. The render gate that disables the action
+  // calls the same function and sits earlier in the file, so this anchors on the
+  // handler's own call rather than on the first match.
+  const gateAt = studioSource.indexOf(
+    "const scriptCheck = invalidScriptField(selectedModel, params)",
+  );
   const executeAt = studioSource.indexOf("executeMediaStudioRequest(createMediaStudioRequest(");
   const generateAt = studioSource.indexOf("generateAudio(apiKey, audioParams)");
   assert.ok(gateAt !== -1, "expected the script gate in handleGenerate");
@@ -37,6 +42,21 @@ test("the script is refused before a provider call is made", () => {
   // The existing gates still run first, unchanged.
   assert.ok(studioSource.indexOf("invalidCustomVoiceField(selectedModel, params)") < gateAt);
   assert.ok(studioSource.indexOf("validateModelStructuredInputs(selectedModel") < gateAt);
+});
+
+test("the action cannot spend a call on a script the gate would refuse", () => {
+  // One function decides for both: the button in render and the refusal in
+  // handleGenerate evaluate the same model and the same values, so a disabled
+  // action and an enforced gate can never drift apart.
+  assert.match(studioSource, /const scriptGate = invalidScriptField\(selectedModel, params\);/);
+  assert.match(studioSource, /disabled=\{!selectedModel \|\| Boolean\(scriptGate\)\}/);
+  // The refused script is explained next to the action, and still on the field.
+  assert.match(studioSource, /\{scriptGate && \(/);
+  assert.match(studioSource, /\{scriptGate\.error\}/);
+  assert.match(studioSource, /\{scriptState\.message && \(/);
+  // A model that declares no limit yields a null gate, which leaves the action
+  // enabled: the disabled state is never keyed off "has text" or a fixed cap.
+  assert.doesNotMatch(studioSource, /disabled=\{[^}]*scriptLimit/);
 });
 
 test("the field still writes exactly one value to the model", () => {

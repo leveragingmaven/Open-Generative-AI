@@ -215,6 +215,36 @@ export function defaultModelForMode(modeId, catalog = []) {
 }
 
 /**
+ * Modes that declare which of their models to open on.
+ *
+ * Voice Cloner lists two different products: a speech clone that produces a
+ * voice you can reuse for narration, and a singing clone for music. The mode's
+ * own note points creators at the speech clone, so the mode opens there instead
+ * of on whichever entry the catalog happens to list first. A preference can only
+ * choose which listed model is the default — it can never add, hide or rename a
+ * model, and an id that is not in the mode is ignored.
+ */
+export const PREFERRED_MODE_DEFAULT_MODEL_IDS = Object.freeze({
+  [AUDIO_MODE_IDS.CLONE]: "minimax-voice-clone",
+});
+
+/**
+ * The model a mode opens on when the operator has no earlier choice of their
+ * own: the mode's preferred entry when it declares one and still lists it,
+ * otherwise the catalog's first entry for that mode.
+ */
+export function modeDefaultModel(modeId, catalog = []) {
+  const preferredId = PREFERRED_MODE_DEFAULT_MODEL_IDS[modeId];
+  if (preferredId) {
+    const preferred = modelsForMode(modeId, catalog).find(
+      (model) => model?.id === preferredId,
+    );
+    if (preferred) return preferred;
+  }
+  return defaultModelForMode(modeId, catalog);
+}
+
+/**
  * Resolution used when restoring a persisted selection: the stored model is
  * kept whenever it is reachable, and the *mode* moves to match the model rather
  * than the model being silently swapped for the mode's default.

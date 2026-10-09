@@ -30,18 +30,37 @@ test("the mode filters the model list instead of replacing it", () => {
 
 test("the studio opens on Voice Generator with that mode's model", () => {
   assert.match(studioSource, /const \[audioMode, setAudioMode\] = useState\(DEFAULT_AUDIO_MODE_ID\);/);
-  assert.match(studioSource, /defaultModelForMode\(DEFAULT_AUDIO_MODE_ID, audioModels\)\?\.id/);
+  // The opening model is the mode's declared default, not the raw catalog-first
+  // entry, and the component never names a catalog id itself.
+  assert.match(studioSource, /modeDefaultModel\(DEFAULT_AUDIO_MODE_ID, audioModels\)\?\.id/);
+  assert.doesNotMatch(studioSource, /defaultModelForMode\(/);
   assert.match(studioSource, /const activeMode = audioModeById\(audioMode\);/);
 });
 
 test("a mode change keeps the current model whenever the mode still lists it", () => {
   const selectAt = studioSource.indexOf("const handleModeSelect = (modeId) => {");
   assert.ok(selectAt !== -1, "expected handleModeSelect");
-  const body = studioSource.slice(selectAt, selectAt + 500);
+  // Wide enough to hold the whole handler: the resolution below grew when the
+  // remembered choice was added, and a truncated window would silently pass.
+  const body = studioSource.slice(selectAt, selectAt + 900);
   assert.match(body, /setAudioMode\(modeId\)/);
   assert.match(body, /if \(!modelSupportsMode\(selectedModelId, modeId\)\) \{/);
-  assert.match(body, /const next = defaultModelForMode\(modeId, audioModels\);/);
+  // The operator's earlier choice in that mode is restored, and only ever a
+  // model the mode still lists...
+  assert.match(body, /const remembered = modelByModeRef\.current\[modeId\];/);
+  assert.match(body, /remembered && modelSupportsMode\(remembered, modeId\)/);
+  // ...and the mode's own default is only the fallback, for the first visit.
+  assert.match(body, /\) \|\| modeDefaultModel\(modeId, audioModels\);/);
   assert.match(body, /if \(next\) setSelectedModelId\(next\.id\);/);
+});
+
+test("the model each mode was left on is remembered, not overwritten", () => {
+  // One effect records the current model against the mode that owns it, which is
+  // what makes a restored session and an explicit pick behave the same way.
+  assert.match(studioSource, /const modelByModeRef = useRef\(\{\}\);/);
+  assert.match(studioSource, /const ownerMode = primaryModeForModel\(selectedModelId\) \|\| audioMode;/);
+  assert.match(studioSource, /modelByModeRef\.current\[ownerMode\] = selectedModelId;/);
+  assert.match(studioSource, /\}, \[selectedModelId, audioMode\]\);/);
 });
 
 test("the mode and the model are persisted and restored together", () => {

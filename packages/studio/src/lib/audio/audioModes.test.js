@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { audioModels } from "../../models.js";
+import { audioModels, getAudioModelById } from "../../models.js";
 import {
   AUDIO_MODE_IDS,
   AUDIO_MODES,
@@ -9,6 +9,7 @@ import {
   AUDIO_UTILITY_MODEL_IDS,
   audioModeById,
   defaultModelForMode,
+  modeDefaultModel,
   modeModelCounts,
   modelKind,
   modelKindLabel,
@@ -144,4 +145,39 @@ test("each mode carries its own copy and primary action", () => {
   }
   // The music-first copy that made the studio read as a music tool is gone.
   assert.ok(!AUDIO_MODES.some((mode) => mode.cta === "Generate Track"));
+});
+
+test("Voice Cloner opens on its speech clone without losing the singing clone", () => {
+  // The mode lists two different products; the preference only decides which one
+  // it opens on.
+  const clones = modelsForMode(AUDIO_MODE_IDS.CLONE, audioModels).map((model) => model.id);
+  assert.deepEqual([...clones].sort(), ["minimax-voice-clone", "suno-voice-clone"]);
+  assert.equal(modeDefaultModel(AUDIO_MODE_IDS.CLONE, audioModels).id, "minimax-voice-clone");
+  // A default is not a filter: the mode still lists both clones...
+  assert.ok(clones.includes("suno-voice-clone"));
+  assert.equal(modelsForMode(AUDIO_MODE_IDS.CLONE, audioModels).length, 2);
+  // ...the speech clone is still reachable from All Models...
+  assert.ok(
+    modelsForMode(AUDIO_MODE_IDS.ALL, audioModels).some((model) => model.id === "minimax-voice-clone"),
+  );
+  // ...and both keep their declared kind, so neither is reclassified.
+  assert.equal(primaryModeForModel("minimax-voice-clone"), AUDIO_MODE_IDS.CLONE);
+  assert.equal(primaryModeForModel("suno-voice-clone"), AUDIO_MODE_IDS.CLONE);
+});
+
+test("a mode without a declared preference keeps the catalog's first entry", () => {
+  for (const modeId of [AUDIO_MODE_IDS.VOICE, AUDIO_MODE_IDS.MUSIC, AUDIO_MODE_IDS.SFX, AUDIO_MODE_IDS.ALL]) {
+    assert.equal(
+      modeDefaultModel(modeId, audioModels).id,
+      defaultModelForMode(modeId, audioModels).id,
+      modeId,
+    );
+  }
+  // A preference cannot invent a model: with no catalog it is still null, and
+  // when the preferred entry is absent the mode's own first entry is used.
+  assert.equal(modeDefaultModel(AUDIO_MODE_IDS.CLONE, []), null);
+  assert.equal(
+    modeDefaultModel(AUDIO_MODE_IDS.CLONE, [getAudioModelById("suno-voice-clone")]).id,
+    "suno-voice-clone",
+  );
 });

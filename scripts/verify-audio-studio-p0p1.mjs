@@ -161,9 +161,21 @@ check("no voice preview or playback control is rendered", () => {
   assert.doesNotMatch(html, /<source/);
 });
 
-const { modelsForMode, unclassifiedModelIds, modeModelCounts, defaultModelForMode } = await import(
+const { modelsForMode, unclassifiedModelIds, modeModelCounts, defaultModelForMode, modeDefaultModel } = await import(
   pathToFileURL(join(root, "packages", "studio", "src", "lib", "audio", "audioModes.js")).href
 );
+
+check("Voice Cloner opens on the speech clone and keeps both clones listed", () => {
+  const clones = modelsForMode("clone", audioModels).map((model) => model.id);
+  assert.deepEqual([...clones].sort(), ["minimax-voice-clone", "suno-voice-clone"]);
+  assert.equal(modeDefaultModel("clone", audioModels).id, "minimax-voice-clone");
+  // The preference is a default only: the catalog's own first entry for the mode
+  // is unchanged, and no other mode gained a preference.
+  assert.equal(defaultModelForMode("clone", audioModels).id, audioModels.find((model) => model.id === clones[0])?.id);
+  for (const modeId of ["voice", "music", "sfx", "all"]) {
+    assert.equal(modeDefaultModel(modeId, audioModels).id, defaultModelForMode(modeId, audioModels).id, modeId);
+  }
+});
 
 check("Audio Studio mounts on Voice Generator and renders the mode controls", () => {
   const html = renderToStaticMarkup(

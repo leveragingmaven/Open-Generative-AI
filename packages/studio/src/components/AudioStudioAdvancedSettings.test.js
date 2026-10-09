@@ -47,7 +47,9 @@ test("the primary action is a compact button, not the oversized pink pill", () =
   // Nothing about the action's behaviour changed: same handler, same gate, same
   // label from the active mode.
   assert.match(action, /onClick=\{handleGenerate\}/);
-  assert.match(action, /disabled=\{!selectedModel\}/);
+  // Gated by the model and by the script check (the script test covers the
+  // second gate in full).
+  assert.match(action, /disabled=\{!selectedModel \|\| Boolean\(scriptGate\)\}/);
   assert.match(action, /isLoading=\{isGenerating\}/);
   assert.match(action, /\{isGenerating \? `\$\{activeMode\.busy\}…` : activeMode\.cta\}/);
 });

@@ -136,3 +136,50 @@ test("no audio model lost its prompt field or gained a cap it never declared", (
     assert.equal(model.inputs.prompt.type, "string", model.id);
   }
 });
+
+test("the same script is judged per model, so switching models re-decides it", () => {
+  // One script, four ceilings. Nothing is remembered between models: the verdict
+  // is a function of the model that is selected right now.
+  const text = "x".repeat(3000);
+  assert.equal(invalidScriptField(speech, { prompt: text }), null);
+  assert.equal(invalidScriptField(turbo, { prompt: text }), null);
+  assert.equal(invalidScriptField(clone, { prompt: text }).error.includes("up to 2000"), true);
+  assert.equal(invalidScriptField(sunoSounds, { prompt: text }).error.includes("up to 500"), true);
+  // The model that declares no limit never refuses it, whichever model preceded it.
+  assert.equal(invalidScriptField(unlimited, { prompt: text }), null);
+  // ...and the field's own state follows the same switch.
+  assert.equal(scriptLengthState({ text, limit: 10000 }).overLimit, false);
+  assert.equal(scriptLengthState({ text, limit: 2000 }).overLimit, true);
+});
+
+test("an empty or single-character script is never refused", () => {
+  // No model in the catalog declares a minimum, so the gate must not invent one:
+  // it only ever refuses what is longer than the limit.
+  for (const model of [speech, turbo, clone, sunoSounds, unlimited]) {
+    assert.equal(invalidScriptField(model, { prompt: "" }), null, model.id);
+    assert.equal(invalidScriptField(model, { prompt: "a" }), null, model.id);
+    const state = scriptLengthState({ text: "", limit: declaredScriptLimit(model) });
+    assert.equal(state.count, 0, model.id);
+    assert.equal(state.overLimit, false, model.id);
+    assert.equal(state.message, null, model.id);
+  }
+});
+
+test("the boundary is exact for every model that declares a limit", () => {
+  for (const model of [speech, turbo, clone, sunoSounds]) {
+    const limit = declaredScriptLimit(model);
+    // Exactly at the limit is accepted...
+    assert.equal(invalidScriptField(model, { prompt: "x".repeat(limit) }), null, model.id);
+    const state = scriptLengthState({ text: "x".repeat(limit), limit });
+    assert.equal(state.remaining, 0, model.id);
+    assert.equal(state.overLimit, false, model.id);
+    // ...and one character more is refused, with the model's own number.
+    const over = invalidScriptField(model, { prompt: "x".repeat(limit + 1) });
+    assert.ok(over, `${model.id} must refuse one character over its limit`);
+    assert.match(
+      over.error,
+      new RegExp(`${limit + 1} characters, but this model accepts up to ${limit}`),
+    );
+    assert.equal(scriptLengthState({ text: "x".repeat(limit + 1), limit }).overLimit, true, model.id);
+  }
+});

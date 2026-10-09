@@ -40,10 +40,11 @@ import {
   AUDIO_MODES,
   DEFAULT_AUDIO_MODE_ID,
   audioModeById,
-  defaultModelForMode,
+  modeDefaultModel,
   modelKindLabel,
   modelSupportsMode,
   modelsForMode,
+  primaryModeForModel,
   resolveModeForModel,
 } from "../lib/audio/audioModes.js";
 
@@ -831,16 +832,19 @@ export default function AudioStudio({
 
   // ── Mode & model state ──────────────────────────────────────────────────
   // The studio opens on Voice Generator, so the model the operator first sees
-  // is the voice default rather than the catalog's first entry (a music model).
+  // is that mode's default rather than the catalog's first entry (a music model).
   const [audioMode, setAudioMode] = useState(DEFAULT_AUDIO_MODE_ID);
   const [selectedModelId, setSelectedModelId] = useState(
-    defaultModelForMode(DEFAULT_AUDIO_MODE_ID, audioModels)?.id ?? audioModels[0]?.id ?? ""
+    modeDefaultModel(DEFAULT_AUDIO_MODE_ID, audioModels)?.id ?? audioModels[0]?.id ?? ""
   );
   const [params, setParams] = useState({});
   const [openDropdown, setOpenDropdown] = useState(false);
   const [openParamDropdown, setOpenParamDropdown] = useState(null);
   const modelBtnRef = useRef(null);
   const sidebarRef = useRef(null);
+  // The model each mode was last left on, so returning to a mode restores the
+  // operator's own choice instead of that mode's default.
+  const modelByModeRef = useRef({});
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -886,6 +890,13 @@ export default function AudioStudio({
   const advancedSettingsOpen = showAdvancedSettings || advancedSettingsActive;
   const parameterGroups = parameterGroupsForModel(selectedModel, audioMode);
 
+  // ── Script gate ────────────────────────────────────────────────────────
+  // The same gate `handleGenerate` enforces, evaluated in render as well, so the
+  // action can be disabled instead of letting a paid call be refused after the
+  // fact. One function decides, so the button and the handler cannot drift. A
+  // model that declares no limit never trips it.
+  const scriptGate = invalidScriptField(selectedModel, params);
+
   // ── Initialize params when model changes ──────────────────────────────
   useEffect(() => {
     if (!selectedModel) return;
@@ -904,6 +915,16 @@ export default function AudioStudio({
     });
     setParams(initial);
   }, [selectedModelId]); // Only reset when model ID changes
+
+  // Remember the selected model against the mode that owns it. A pick, a session
+  // restored from storage and a mode's own default all land here, so switching
+  // away from a mode and back restores the operator's choice rather than
+  // replacing it with the default.
+  useEffect(() => {
+    if (!selectedModelId) return;
+    const ownerMode = primaryModeForModel(selectedModelId) || audioMode;
+    modelByModeRef.current[ownerMode] = selectedModelId;
+  }, [selectedModelId, audioMode]);
 
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1132,13 +1153,20 @@ export default function AudioStudio({
 
   // Switching mode filters the model list and relabels the studio. The current
   // model is kept whenever the new mode still lists it, so a mode change never
-  // discards a form the operator has already filled in.
+  // discards a form the operator has already filled in. Otherwise the mode opens
+  // on the model the operator last used there — including one restored from
+  // storage — and only falls back to the mode's own default for the first visit
+  // (Voice Cloner opens on its speech clone, not the singing clone).
   const handleModeSelect = (modeId) => {
     setAudioMode(modeId);
     setOpenDropdown(false);
     setOpenParamDropdown(null);
     if (!modelSupportsMode(selectedModelId, modeId)) {
-      const next = defaultModelForMode(modeId, audioModels);
+      const remembered = modelByModeRef.current[modeId];
+      const next =
+        (remembered && modelSupportsMode(remembered, modeId)
+          ? getAudioModelById(remembered)
+          : null) || modeDefaultModel(modeId, audioModels);
       if (next) setSelectedModelId(next.id);
     }
   };
@@ -1592,13 +1620,20 @@ export default function AudioStudio({
         </div>
 
         {/* Dynamic Cost & Generate Section */}
-        <div className="p-4 py-3 border-t border-[#2C2C2C] bg-[#0B0B0B]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end">
+        <div className="p-4 py-3 border-t border-[#2C2C2C] bg-[#0B0B0B]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end gap-3">
+          {/* Why the action is unavailable, stated next to it — the field's own
+              counter can be scrolled out of view. */}
+          {scriptGate && (
+            <span className="min-w-0 flex-1 text-right text-[11px] font-semibold leading-snug text-[#F87171]">
+              {scriptGate.error}
+            </span>
+          )}
           <MavenButton
             variant="primaryPink"
             size="sm"
             type="button"
             onClick={handleGenerate}
-            disabled={!selectedModel}
+            disabled={!selectedModel || Boolean(scriptGate)}
             isLoading={isGenerating}
             className="min-h-9 w-full sm:w-auto uppercase tracking-[0.1em]"
             leftIcon={!isGenerating ? (
