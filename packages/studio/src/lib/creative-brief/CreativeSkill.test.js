@@ -12,6 +12,7 @@ import {
   STUDIO_CREATIVE_SKILLS,
 } from "./CreativeSkill.js";
 import { enrichCreativeRequest } from "./index.js";
+import { translateMarketing, translateVideo } from "./StudioTranslator.js";
 import { getSkill, SKILL_LIBRARY } from "../skills/index.js";
 
 const SKILL = getSkill("product-hero-photography");
@@ -268,4 +269,41 @@ test("creativeReviewMetadata returns advisory review without scoring", () => {
   assert.ok(Array.isArray(review.constraints));
   assert.equal(creativeReviewMetadata(null), null);
   assert.equal(creativeReviewMetadata({}), null);
+});
+
+test("promptStyle projects craft guidance without polluting the authored brief", () => {
+  const original = baseBrief();
+  const snapshot = JSON.stringify(original);
+  const enriched = applyCreativeSkill(original, SKILL);
+
+  // The authored brief and its craft vocabulary stay untouched.
+  assert.equal(JSON.stringify(original), snapshot);
+  assert.deepEqual(enriched.craft.vocabulary, SKILL.vocabulary);
+
+  // style keeps the authored value plus the full skill vocabulary (engineering glossary)...
+  assert.ok(enriched.style.includes("luxury minimal"));
+  assert.ok(enriched.style.includes("single protagonist of the frame"));
+
+  // ...while promptStyle carries only authored style plus craft guidance, no glossary meaning.
+  assert.equal(typeof enriched.promptStyle, "string");
+  assert.ok(enriched.promptStyle.includes("luxury minimal"));
+  assert.ok(enriched.promptStyle.includes("sculpted key light"));
+  assert.ok(!enriched.promptStyle.includes("single protagonist of the frame"));
+});
+
+test("video translation uses the glossary-free promptStyle projection", () => {
+  const enriched = applyCreativeSkill(baseBrief({ studio: "video", format: { medium: "video", aspect: "16:9", motion: "subtle drift" } }), SKILL);
+  const video = translateVideo(enriched);
+
+  assert.ok(video.text.includes("sculpted key light"));
+  assert.ok(!video.text.includes("single protagonist of the frame"));
+});
+
+test("marketing translation keeps a text-safe prompt without the style glossary", () => {
+  const enriched = applyCreativeSkill(baseBrief(), SKILL);
+  const marketing = translateMarketing(enriched);
+
+  assert.ok(!marketing.text.includes("single protagonist of the frame"));
+  assert.ok(!marketing.text.includes("sculpted key light"));
+  assert.ok(marketing.text.includes("negative space"));
 });

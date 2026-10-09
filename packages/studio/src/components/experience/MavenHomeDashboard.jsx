@@ -630,6 +630,15 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
           <div className={styles.canvasHeader}>
             <span className={styles.statusDot} aria-hidden="true" />
             <span>{hasMavenConversation ? "Maven conversation" : "Maven Workspace"}</span>
+            {mavenSessionId ? (
+              <a
+                href={`/studio/design-agent?session=${encodeURIComponent(mavenSessionId)}`}
+                aria-label="Continue this Maven conversation in Creator OS"
+                title="Turn this conversation into reviewed creative work in Creator OS"
+              >
+                Creator OS ↗
+              </a>
+            ) : null}
             <a href="/studio/overview" aria-label="Open workspace overview">···</a>
           </div>
           {chatError ? <p className={styles.chatError} role="alert">{chatError}</p> : null}

@@ -265,7 +265,10 @@ export function buildAgentReply(
   }
   if (agent.suggestedWorkflowIds?.length) {
     lines.push("");
-    lines.push("**Workflows I'd run**");
+    // These are authoring suggestions, not resolvable Workflow Studio ids: the
+    // workflow library is author-owned and lives in the provider
+    // (getTemplateWorkflows), so nothing local can bind them by name.
+    lines.push("**Workflows I'd run** _(workflow ideas to build in Workflow Studio — not saved workflows)_");
     agent.suggestedWorkflowIds.forEach((w) => lines.push(`- ${w}`));
   }
   if (skills.length) {
@@ -353,7 +356,7 @@ export function composeAgentRuntimeContext(
     ? `Recipes: ${agent.suggestedRecipeIds.join(", ")}`
     : null;
   const workflowContext = Array.isArray(agent?.suggestedWorkflowIds) && agent.suggestedWorkflowIds.length
-    ? `Workflows: ${agent.suggestedWorkflowIds.join(", ")}`
+    ? `Workflow ideas to build in Workflow Studio (not saved workflows): ${agent.suggestedWorkflowIds.join(", ")}`
     : null;
   const twinContext = twin
     ? [

@@ -830,6 +830,7 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
           {draftProfile.suggestedWorkflowIds?.length > 0 && (
             <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-3">
               <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-white/30">Suggested Workflows</p>
+              <p className="mb-2 text-[10px] leading-snug text-white/35">Workflow ideas to build in Workflow Studio — not saved workflows.</p>
               <div className="flex flex-wrap gap-1">
                 {draftProfile.suggestedWorkflowIds.map((w) => (
                   <span key={w} className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/60">{w}</span>

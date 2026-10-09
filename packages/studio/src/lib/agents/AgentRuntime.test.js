@@ -29,7 +29,7 @@ test("reply carries agent specialty and twin identity", () => {
     category: "Video",
     specialty: "Repurposing video into shorts",
     suggestedRecipeIds: ["video-transform"],
-    suggestedWorkflowIds: ["Social Repurposing Workflow"],
+    suggestedWorkflowIds: ["social repurposing"],
   });
   const twin = createTwinProfile({
     name: "Maya",
@@ -43,7 +43,9 @@ test("reply carries agent specialty and twin identity", () => {
   assert.match(reply, /Maya/);
   assert.match(reply, /Spring Drop/);
   assert.match(reply, /video-transform/);
-  assert.match(reply, /Social Repurposing Workflow/);
+  assert.match(reply, /social repurposing/);
+  // Workflow suggestions are labelled as ideas to build, not saved workflows.
+  assert.match(reply, /ideas to build in Workflow Studio/);
   assert.match(reply, /clear, direct/);
   assert.match(reply, /knowledge collections: brand, voice/);
 });

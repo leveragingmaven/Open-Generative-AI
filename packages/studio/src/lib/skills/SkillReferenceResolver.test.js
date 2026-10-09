@@ -100,10 +100,13 @@ test("legacy compatibleRecipes metadata is not interpreted as executable recipes
 });
 
 test("AgentProfile recipe and workflow suggestions remain advisory candidates", () => {
-  const resolver = new SkillReferenceResolver({ recipeResolver, workflows: { "Social Repurposing Workflow": { id: "Social Repurposing Workflow", version: 2 } } });
+  // Agent workflow suggestions are authoring guidance, not registered ids. When a
+  // canonical source happens to define a workflow with that key the suggestion
+  // resolves through it; otherwise it stays an unresolved advisory candidate.
+  const resolver = new SkillReferenceResolver({ recipeResolver, workflows: { "social repurposing": { id: "social repurposing", version: 2 } } });
   const result = resolver.resolve(skill({ recipes: [] , workflows: [] }), { agent: FEATURED_AGENT_TEMPLATES.find((template) => template.id === "social-video-strategist") });
   assert.ok(result.recipes.unresolved.some((issue) => issue.message === "recipe_not_found"));
-  assert.equal(result.workflows.selected.workflowId, "Social Repurposing Workflow");
+  assert.equal(result.workflows.selected.workflowId, "social repurposing");
   assert.equal(result.workflows.selected.provenance.field, "agent.suggestedWorkflowIds");
 });
 

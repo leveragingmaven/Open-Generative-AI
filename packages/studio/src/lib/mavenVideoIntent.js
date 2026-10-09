@@ -6,6 +6,9 @@ const EXPLICIT_I2V_MODEL = /\b(?:image[- ]to[- ]video|i2v|image video)\b/i;
 const I2V_INTENT = /\b(animate|bring to life|turn|convert|make|create|generate)\b.{0,70}\b(this|that|the|my|uploaded|attached|previous|last|image|photo|picture|portrait|artwork)\b.{0,60}\b(video|clip|animation|motion|moving)\b|\b(animate|bring to life)\b.{0,50}\b(image|photo|picture|portrait|artwork|it|this|that)\b/i;
 const ASPECT_RATIO = /\b(\d{1,2})\s*:\s*(\d{1,2})\b/;
 const DURATION = /\b(\d{1,3})\s*(?:-|\s)?(?:seconds?|secs?|s)\b/i;
+// Signals that the user wants a high-fidelity render. These only steer model *selection*
+// (towards models that declare higher resolutions); they make no claim about visual quality.
+const HIGH_QUALITY = /\b(cinematic|high[-\s]?quality|high[-\s]?resolution|hi[-\s]?res|professional|premium|photorealistic|ultra|best quality|4k)\b/i;
 const NUMBER_WORDS = Object.freeze({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30 });
 
 export function isImageToVideoRequest(message) {
@@ -38,6 +41,7 @@ export function parseVideoRequestOptions(message) {
     aspectRatio: ratio,
     duration,
     resolution: resolutionMatch ? resolutionMatch[1].toLowerCase() : null,
+    highQuality: HIGH_QUALITY.test(text),
   };
 }
 

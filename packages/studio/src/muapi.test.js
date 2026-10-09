@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateI2I, generateImage, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
+import { generateI2I, generateI2V, generateImage, generateVideo, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -108,6 +108,107 @@ async function rejectsWith(fetchImpl, expected, params = imageParams()) {
   globalThis.fetch = fetchImpl;
   await assert.rejects(() => generateImage('test-key', params), expected);
 }
+
+// Optional video quality controls are forwarded only when the selected model's
+// manifest declares them, so unsupported parameters never reach the provider.
+async function captureVideoSubmission(generate, params) {
+  let submissionUrl;
+  let submissionBody;
+  globalThis.fetch = mockSubmissionAndPolling({
+    polls: [response({ status: 'completed' })],
+    onFetch: (url, options) => {
+      if (options?.method === 'POST') {
+        submissionUrl = url;
+        submissionBody = JSON.parse(options.body);
+      }
+    },
+  });
+  await generate('test-key', params);
+  return { submissionUrl, submissionBody };
+}
+
+test('generateVideo forwards only the optional controls the model declares', async () => {
+  const { submissionUrl, submissionBody } = await captureVideoSubmission(generateVideo, {
+    model: 'seedance-2.5-text-to-video',
+    prompt: 'a fox in a forest',
+    camera_fixed: true,
+    generate_audio: true,
+    negative_prompt: 'blurry, low quality',
+    seed: 1234,
+    movement_amplitude: 0.8,
+  });
+
+  assert.equal(submissionUrl, 'https://api.muapi.ai/api/v1/seedance-2.5-text-to-video');
+  // Declared under those exact names on this model.
+  assert.equal(submissionBody.camera_fixed, true);
+  assert.equal(submissionBody.generate_audio, true);
+  // Not declared by this model, so they must be dropped rather than sent.
+  assert.equal('negative_prompt' in submissionBody, false);
+  assert.equal('seed' in submissionBody, false);
+  assert.equal('movement_amplitude' in submissionBody, false);
+});
+
+test('generateVideo maps generate_audio onto the declared generate_audio_switch field', async () => {
+  const { submissionBody } = await captureVideoSubmission(generateVideo, {
+    model: 'pixverse-v6-t2v',
+    prompt: 'a fox in a forest',
+    generate_audio: true,
+  });
+
+  assert.equal(submissionBody.generate_audio_switch, true);
+  assert.equal('generate_audio' in submissionBody, false);
+});
+
+test('generateVideo drops every optional control the model does not declare', async () => {
+  const { submissionBody } = await captureVideoSubmission(generateVideo, {
+    model: 'seedance-lite-t2v',
+    prompt: 'a fox in a forest',
+    negative_prompt: 'blurry',
+    seed: 1234,
+  });
+
+  assert.equal('negative_prompt' in submissionBody, false);
+  assert.equal('seed' in submissionBody, false);
+});
+
+test('generateI2V forwards declared controls and drops undeclared ones', async () => {
+  const declared = await captureVideoSubmission(generateI2V, {
+    model: 'seedance-2.5-image-to-video',
+    prompt: 'animate this frame',
+    image_url: 'https://test/frame.png',
+    camera_fixed: true,
+    generate_audio: true,
+    seed: 1234,
+  });
+
+  assert.equal(declared.submissionUrl, 'https://api.muapi.ai/api/v1/seedance-2.5-image-to-video');
+  assert.equal(declared.submissionBody.camera_fixed, true);
+  assert.equal(declared.submissionBody.generate_audio, true);
+  assert.equal('seed' in declared.submissionBody, false);
+
+  const undeclared = await captureVideoSubmission(generateI2V, {
+    model: 'veo3-image-to-video',
+    prompt: 'animate this frame',
+    image_url: 'https://test/frame.png',
+    negative_prompt: 'blurry',
+    seed: 7,
+  });
+
+  assert.equal('negative_prompt' in undeclared.submissionBody, false);
+  assert.equal('seed' in undeclared.submissionBody, false);
+});
+
+test('generateVideo skips optional controls left at their unset defaults', async () => {
+  const { submissionBody } = await captureVideoSubmission(generateVideo, {
+    model: 'seedance-2.5-text-to-video',
+    prompt: 'a fox in a forest',
+    camera_fixed: null,
+    generate_audio: '',
+  });
+
+  assert.equal('camera_fixed' in submissionBody, false);
+  assert.equal('generate_audio' in submissionBody, false);
+});
 
 test('default Ideogram v3 T2I submits only prompt and aspect ratio', async () => {
   const { submissionUrl, submissionBody } = await generateAndCaptureBody({

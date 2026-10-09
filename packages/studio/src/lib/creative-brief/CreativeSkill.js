@@ -80,6 +80,26 @@ function collectSkillStyleParts(briefStyle, skill) {
   ].filter(Boolean);
 }
 
+// The craft-guidance keys that compose the authored look. These are the same
+// keys collectSkillStyleParts contributes, so `promptStyle` and `style` carry
+// identical craft direction; the only difference is that `promptStyle` omits the
+// `vocabulary[].meaning` entries, which are internal engineering definitions.
+const PROMPT_STYLE_CRAFT_KEYS = ["composition", "lighting", "negativeSpace"];
+
+// Prompt-safe projection of a skill's craft guidance. Same additive craft
+// knowledge as collectSkillStyleParts, minus the vocabulary glossary, so a
+// provider prompt carries visual direction without shipping internal
+// definitions ("a composition authoring mode for one bespoke piece rather than
+// templated assembly") to a diffusion/video model. `brief.style` stays the full,
+// lossless enrichment record; `brief.promptStyle` is the provider-facing variant.
+function collectSkillPromptStyleParts(briefPromptStyle, skill) {
+  const craft = skill.craftGuidance && typeof skill.craftGuidance === "object" ? skill.craftGuidance : {};
+  return [
+    briefPromptStyle,
+    ...PROMPT_STYLE_CRAFT_KEYS.map((key) => craft[key]),
+  ].filter(Boolean);
+}
+
 function skillEnrichment(skill) {
   const vocabulary = Array.isArray(skill.vocabulary) ? skill.vocabulary : [];
   const craft = skill.craftGuidance && typeof skill.craftGuidance === "object" ? skill.craftGuidance : {};
@@ -111,11 +131,16 @@ export function applyCreativeSkill(brief, skill) {
   if (!skill || skill.status !== "active") return brief;
 
   const styleParts = collectSkillStyleParts(brief.style, skill);
+  // The prompt-safe projection starts from the authored style; the first skill
+  // seeds it and later skills append to the value it produced.
+  const promptSeed = typeof brief.promptStyle === "string" ? brief.promptStyle : brief.style;
+  const promptStyleParts = collectSkillPromptStyleParts(promptSeed, skill);
   const enrichment = skillEnrichment(skill);
 
   return {
     ...brief,
     ...(styleParts.length ? { style: styleParts.join("; ") } : {}),
+    ...(promptStyleParts.length ? { promptStyle: promptStyleParts.join("; ") } : {}),
     constraints: Array.isArray(skill.constraints) ? [...skill.constraints] : [],
     ...enrichment,
   };

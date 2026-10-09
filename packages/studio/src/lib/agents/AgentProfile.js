@@ -60,18 +60,26 @@ const CATEGORY_KEYWORDS = Object.freeze({
   Strategy: ["strategy", "plan", "research", "audience", "insight", "analyst", "planner"],
 });
 
+// Workflow Studio workflows are author-owned and live in the provider
+// (`MuApiWorkflowProvider.getTemplateWorkflows(apiKey)`); there is no local
+// registry an agent template could reference by id. These entries used to be
+// literal workflow names ("Product Campaign Workflow", ...) that matched no
+// workflow anywhere, and SkillReferenceResolver resolves `suggestedWorkflowIds`
+// against a supplied catalog, so each one surfaced as `workflow_not_found`.
+// They are now explicit authoring guidance — free-form descriptions of the kind
+// of workflow to attach — and are surfaced as such, never as a claimed id.
 const WORKFLOW_SUGGESTIONS = Object.freeze({
-  Image: ["Product Campaign Workflow", "Brand Kit Workflow"],
-  Video: ["Social Repurposing Workflow", "Video Post-Production Workflow"],
-  "Motion Graphics": ["Motion Asset Workflow", "Countdown Launch Workflow"],
-  Audio: ["Podcast Production Workflow", "Voiceover Workflow"],
-  Copywriting: ["Content Calendar Workflow", "Campaign Copy Workflow"],
-  Marketing: ["Campaign Launch Workflow", "Pinterest Campaign Workflow", "Funnel Build Workflow"],
-  Social: ["Social Repurposing Workflow", "Content Calendar Workflow"],
-  Character: ["Character Consistency Workflow", "Avatar Launch Workflow"],
-  Design: ["Brand Kit Workflow", "Product Campaign Workflow"],
-  Strategy: ["Research Brief Workflow", "Campaign Launch Workflow"],
-  General: ["Campaign Launch Workflow"],
+  Image: ["product campaign", "brand kit"],
+  Video: ["social repurposing", "video post-production"],
+  "Motion Graphics": ["motion asset", "countdown launch"],
+  Audio: ["podcast production", "voiceover"],
+  Copywriting: ["content calendar", "campaign copy"],
+  Marketing: ["campaign launch", "pinterest campaign", "funnel build"],
+  Social: ["social repurposing", "content calendar"],
+  Character: ["character consistency", "avatar launch"],
+  Design: ["brand kit", "product campaign"],
+  Strategy: ["research brief", "campaign launch"],
+  General: ["campaign launch"],
 });
 
 function tokens(text) {
@@ -218,7 +226,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Product Hero Photographer. Apply your craft guidance to brief product shots, keep the brand voice in mind, and produce a hero image asset.",
     suggestedSkillIds: ["product-hero-photography"],
     suggestedRecipeIds: ["image", "image-edit"],
-    suggestedWorkflowIds: ["Product Campaign Workflow"],
+    suggestedWorkflowIds: ["product campaign"],
     toolPreferences: ["image_generation", "image_editing"],
     categories: ["Image", "General"],
   },
@@ -240,7 +248,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "camera-special-techniques",
     ],
     suggestedRecipeIds: ["video"],
-    suggestedWorkflowIds: ["Video Post-Production Workflow"],
+    suggestedWorkflowIds: ["video post-production"],
     toolPreferences: ["video_generation"],
     categories: ["Video", "General"],
   },
@@ -254,7 +262,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Social Video Strategist. Analyze the source video, extract the strongest moments, and plan the shorts for each platform under the active campaign.",
     suggestedSkillIds: ["camera-pan-tilt", "camera-dolly-tracking"],
     suggestedRecipeIds: ["video-transform", "video"],
-    suggestedWorkflowIds: ["Social Repurposing Workflow"],
+    suggestedWorkflowIds: ["social repurposing"],
     toolPreferences: ["video_editing", "video_generation"],
     categories: ["Video", "Social"],
   },
@@ -268,7 +276,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Motion Graphics Designer. Plan the animation concept and apply motion design best practices for the brief.",
     suggestedSkillIds: [],
     suggestedRecipeIds: ["vibe-motion"],
-    suggestedWorkflowIds: ["Motion Asset Workflow", "Countdown Launch Workflow"],
+    suggestedWorkflowIds: ["motion asset", "countdown launch"],
     toolPreferences: ["video_generation"],
     categories: ["Motion Graphics", "Video"],
   },
@@ -282,7 +290,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Brand Designer. Apply the executing AI Twin's brand voice and visual knowledge to every asset you plan.",
     suggestedSkillIds: ["product-hero-photography"],
     suggestedRecipeIds: ["image", "marketing"],
-    suggestedWorkflowIds: ["Brand Kit Workflow"],
+    suggestedWorkflowIds: ["brand kit"],
     toolPreferences: ["image_generation"],
     categories: ["Design", "Image"],
   },
@@ -296,7 +304,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Pinterest Strategist. Plan the pin set and campaign structure for the active campaign, then produce the creative assets.",
     suggestedSkillIds: ["product-hero-photography"],
     suggestedRecipeIds: ["image", "marketing"],
-    suggestedWorkflowIds: ["Pinterest Campaign Workflow"],
+    suggestedWorkflowIds: ["pinterest campaign"],
     toolPreferences: ["image_generation"],
     categories: ["Marketing", "Social"],
   },
@@ -310,7 +318,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Campaign Copywriter. Draft headlines, scripts, and captions in the executing AI Twin's brand voice for the active campaign.",
     suggestedSkillIds: [],
     suggestedRecipeIds: ["marketing"],
-    suggestedWorkflowIds: ["Campaign Copy Workflow", "Content Calendar Workflow"],
+    suggestedWorkflowIds: ["campaign copy", "content calendar"],
     toolPreferences: [],
     categories: ["Copywriting", "Marketing"],
   },
@@ -324,7 +332,7 @@ export const FEATURED_AGENT_TEMPLATES = Object.freeze([
       "You are the Character Recast Artist. Plan the character recast and avatar animation for the brief, using the twin's creative context.",
     suggestedSkillIds: [],
     suggestedRecipeIds: ["recast", "ai-influencer"],
-    suggestedWorkflowIds: ["Character Consistency Workflow", "Avatar Launch Workflow"],
+    suggestedWorkflowIds: ["character consistency", "avatar launch"],
     toolPreferences: ["video_editing", "character_consistency"],
     categories: ["Character", "Video"],
   },

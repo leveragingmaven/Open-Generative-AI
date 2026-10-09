@@ -44,6 +44,16 @@ function prepare(brief) {
   return validateCreativeBrief(brief);
 }
 
+// The provider-facing style. When a brief has been through Creative Skill
+// enrichment it carries an additive `promptStyle` (craft direction without the
+// internal vocabulary glossary); prefer that for prompts and fall back to the
+// authored `style` so unenriched briefs are byte-for-byte unchanged.
+function promptStyle(brief) {
+  const projected = brief?.promptStyle;
+  if (typeof projected === "string" && projected.trim().length > 0) return projected;
+  return brief?.style;
+}
+
 function finalize(brief, text, params = {}) {
   return {
     text,
@@ -65,7 +75,7 @@ export function translateImage(brief) {
   const b = validation.valid ? brief : null;
   const parts = [];
   if (b?.subject) parts.push(`subject: ${b.subject}`);
-  if (b?.style) parts.push(`style: ${b.style}`);
+  if (promptStyle(b)) parts.push(`style: ${promptStyle(b)}`);
   if (b?.tone) parts.push(`mood: ${b.tone}`);
   parts.push("high detail, balanced composition, professional lighting");
   if (b?.brand) parts.push(`brand${brandContext(b.brand)}`);
@@ -81,7 +91,7 @@ export function translateVideo(brief) {
   const b = validation.valid ? brief : null;
   const parts = [];
   if (b?.subject) parts.push(`subject: ${b.subject}`);
-  if (b?.style) parts.push(`style: ${b.style}`);
+  if (promptStyle(b)) parts.push(`style: ${promptStyle(b)}`);
   if (b?.tone) parts.push(`mood: ${b.tone}`);
   if (b?.format?.motion) parts.push(`camera: ${b.format.motion}`);
   parts.push("smooth continuous motion, stable framing, professional video");

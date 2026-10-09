@@ -218,6 +218,36 @@ export async function generateI2I(apiKey, params) {
     return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 60, params.signal);
 }
 
+// Quality controls the catalog declares for some video models. These are forwarded only
+// when the selected model actually declares them (see applyDeclaredVideoControls).
+const OPTIONAL_VIDEO_FIELDS = ['negative_prompt', 'seed', 'camera_fixed', 'movement_amplitude', 'generate_audio'];
+const OPTIONAL_VIDEO_FIELD_ALIASES = { generate_audio: 'generate_audio_switch' };
+
+/**
+ * Forward the optional video quality controls a model declares, and only those.
+ *
+ * The catalog describes controls such as negative_prompt, seed, camera_fixed,
+ * movement_amplitude and generate_audio, but the payload builders previously forwarded
+ * only prompt/aspect_ratio/duration/resolution/quality/mode, so every declared control
+ * was silently discarded. Each control is now passed through under the field name the
+ * model declares; a control the model does not declare is dropped rather than sent, so
+ * unsupported parameters never reach the provider. undefined/null/'' are skipped so
+ * provider-side defaults are preserved.
+ */
+function applyDeclaredVideoControls(payload, modelInfo, params) {
+    const inputs = modelInfo?.inputs;
+    if (!inputs || !params) return payload;
+    for (const field of OPTIONAL_VIDEO_FIELDS) {
+        const value = params[field];
+        if (value === undefined || value === null || value === '') continue;
+        if (field in inputs) payload[field] = value;
+        else if (OPTIONAL_VIDEO_FIELD_ALIASES[field] && OPTIONAL_VIDEO_FIELD_ALIASES[field] in inputs) {
+            payload[OPTIONAL_VIDEO_FIELD_ALIASES[field]] = value;
+        }
+    }
+    return payload;
+}
+
 export async function generateVideo(apiKey, params) {
     const modelInfo = getVideoModelById(params.model);
     const endpoint = modelInfo?.endpoint || params.model;
@@ -232,6 +262,7 @@ export async function generateVideo(apiKey, params) {
     if (params.image_url) payload.image_url = params.image_url;
     if (params.images_list?.length > 0) payload.images_list = params.images_list;
     if (params.videos_list?.length > 0) payload.videos_list = params.videos_list;
+    applyDeclaredVideoControls(payload, modelInfo, params);
     return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 
@@ -267,6 +298,7 @@ export async function generateI2V(apiKey, params) {
     if (modelInfo?.inputs?.name) {
         payload.name = params.name || modelInfo.inputs.name.default;
     }
+    applyDeclaredVideoControls(payload, modelInfo, params);
     return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900, params.signal);
 }
 

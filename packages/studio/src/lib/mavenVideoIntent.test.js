@@ -14,11 +14,15 @@ test('keeps questions, image-reference requests, and non-video prompts out of T2
   assert.equal(isVideoGenerationRequest('Create a static image of a film poster.'), false);
 });
 
-test('parses duration, aspect ratio, and resolution', () => {
+test('parses duration, aspect ratio, resolution, and quality intent', () => {
   assert.deepEqual(parseVideoRequestOptions('Make a 5-second 9:16 1080p video'), {
-    aspectRatio: '9:16', duration: 5, resolution: '1080p',
+    aspectRatio: '9:16', duration: 5, resolution: '1080p', highQuality: false,
   });
   assert.equal(parseVideoRequestOptions('Create a thirty-second video').duration, 30);
+  // Quality intent is reported explicitly so the model router can escalate resolution
+  // instead of silently defaulting to a lightweight tier.
+  assert.equal(parseVideoRequestOptions('Make a cinematic 4 second 9:16 video').highQuality, true);
+  assert.equal(parseVideoRequestOptions('Make a 4 second 9:16 video').highQuality, false);
 });
 
 test('extracts only the generated video result link from assistant content', () => {

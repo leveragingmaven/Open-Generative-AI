@@ -333,3 +333,15 @@ test("CreativeCanvas delegates wire behavior to the shared conversation client",
   // persistence; only the controlled path must route through the client.
   assert.match(canvasSource, /conversationClient\.persist\(activeSessionId, safeMessages, getHeaders\(\)\)/);
 });
+
+test("Maven conversation hands off to the existing Creator OS execution surface without new orchestration", () => {
+  // The dashboard is the customer-facing Maven entry point. It must reuse the
+  // existing Design Agent execution surface (?session=<id> -> DesignAgentExecutionPanel
+  // -> /api/agent-execution/from-conversation) instead of adding a chat-to-agent path.
+  assert.match(dashboardSource, /mavenSessionId \? \(/);
+  assert.match(dashboardSource, /\/studio\/design-agent\?session=\$\{encodeURIComponent\(mavenSessionId\)\}/);
+  // No duplicated orchestration, no new endpoints, no direct paid execution from chat.
+  assert.doesNotMatch(dashboardSource, /agent-execution\/from-conversation/);
+  assert.doesNotMatch(dashboardSource, /beginAgentExecution|approveAgentExecutionPlan/);
+  assert.doesNotMatch(dashboardSource, /agentExecutionRequest|agentExecutionProposal/);
+});
