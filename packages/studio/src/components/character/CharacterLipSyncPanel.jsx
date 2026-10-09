@@ -7,13 +7,12 @@ import {
   getLipSyncModelById,
   getResolutionsForLipSyncModel,
 } from "../../models.js";
-import { readCreativeLibrary } from "../../lib/intelligence/CreativeLibrary.js";
+import { listLibraryMedia } from "../../lib/character/CharacterMediaTypes.js";
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
 import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
-import { isAudioUrl, isPlayableVideoUrl } from "../../lib/character/CharacterMediaTypes.js";
 import {
   createCharacterLipSyncRuntime,
   buildCharacterLipSyncJob,
@@ -80,39 +79,11 @@ export default function CharacterLipSyncPanel({
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      // Only genuinely playable video assets qualify — an asset record alone
-      // does not prove a media file. Deduplicated by actual media URL.
-      const seenVideo = new Set();
-      const videos = (readCreativeLibrary() || [])
-        .map((asset) => ({
-          id: asset.id,
-          name: asset.title || asset.metadata?.subtype || asset.id,
-          url: asset.generatedFiles?.[0] || asset.metadata?.videoUrl || asset.metadata?.url || null,
-          subtype: asset.metadata?.subtype || null,
-        }))
-        .filter((entry) => {
-          if (!isPlayableVideoUrl(entry.url)) return false;
-          if (seenVideo.has(entry.url)) return false;
-          seenVideo.add(entry.url);
-          return true;
-        });
-      setLibraryVideos(videos);
-
-      const seenAudio = new Set();
-      const audio = (readCreativeLibrary() || [])
-        .map((asset) => ({
-          id: asset.id,
-          name: asset.title || asset.metadata?.subtype || asset.id,
-          url: asset.generatedFiles?.[0] || asset.metadata?.audioUrl || asset.metadata?.url || null,
-          subtype: asset.metadata?.subtype || null,
-        }))
-        .filter((entry) => {
-          if (!isAudioUrl(entry.url)) return false;
-          if (seenAudio.has(entry.url)) return false;
-          seenAudio.add(entry.url);
-          return true;
-        });
-      setLibraryAudio(audio);
+      // One shared projection for both pickers: an asset record alone never
+      // qualifies (its URL must prove the media type), and entries are
+      // deduplicated by that URL.
+      setLibraryVideos(listLibraryMedia("video"));
+      setLibraryAudio(listLibraryMedia("audio"));
     } catch {
       setLibraryVideos([]);
       setLibraryAudio([]);
@@ -217,7 +188,9 @@ export default function CharacterLipSyncPanel({
     try {
       const job = buildCharacterLipSyncJob({
         mode: CHARACTER_LIP_SYNC_MODE,
-        sourceVideoUrl: videoUrl,
+        // The shared builder reads `videoUrl`; passing anything else silently
+        // failed the job before a provider call was ever made.
+        videoUrl,
         audioUrl,
         model: modelId,
         resolution: showResolution ? resolution : null,

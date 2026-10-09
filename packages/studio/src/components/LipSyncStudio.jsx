@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { processLipSync, uploadFile } from "../lib/providers/ProviderRegistry.js";
 import { downloadAsset } from "../lib/assets/assetManager.js";
+import { listLibraryMedia } from "../lib/character/CharacterMediaTypes.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
@@ -377,7 +378,22 @@ export default function LipSyncStudio({
   const [openDropdown, setOpenDropdown] = useState(null); // 'model' | 'resolution' | null
   const modelBtnRef = useRef(null);
   const resolutionBtnRef = useRef(null);
+  const libraryBtnRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Existing audio tracks from the canonical Creative Library, offered as an
+  // alternative to uploading a file. Loaded once on mount in an effect — the
+  // same shape the Character panels' pickers use — so no browser storage is
+  // read during render.
+  const [libraryAudio, setLibraryAudio] = useState([]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setLibraryAudio(listLibraryMedia("audio"));
+    } catch {
+      setLibraryAudio([]);
+    }
+  }, []);
 
   // ── Video ref for result ────────────────────────────────────────────────
   const resultVideoRef = useRef(null);
@@ -735,6 +751,13 @@ export default function LipSyncStudio({
 
   // ── Dropdown item lists ─────────────────────────────────────────────────
   const modelDropdownItems = currentModels;
+  // Library entries are keyed by media URL so the existing Dropdown shows the
+  // current selection without extra state.
+  const libraryAudioPickerItems = libraryAudio.map((entry) => ({
+    id: entry.url,
+    name: entry.name,
+    description: entry.subtype || "audio",
+  }));
   const resolutionDropdownItems = resolutionOptions.map((r) => ({
     id: r,
     name: r,
@@ -1013,6 +1036,58 @@ export default function LipSyncStudio({
                 isVideo={false}
                 apiKey={apiKey}
               />
+
+              {/* Reuse an audio track that already exists in the Creative Library
+                  (e.g. speech generated in Audio Studio) instead of re-uploading. */}
+              {libraryAudioPickerItems.length > 0 && (
+                <div className="relative">
+                  <button
+                    ref={libraryBtnRef}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenDropdown(
+                        openDropdown === "library" ? null : "library",
+                      );
+                    }}
+                    title={`Use audio from the Creative Library (${libraryAudioPickerItems.length})`}
+                    className={promptControlClassName({
+                      active: openDropdown === "library",
+                    })}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                    </svg>
+                    <span className={PROMPT_CONTROL_LABEL_CLASS}>
+                      Library audio
+                    </span>
+                  </button>
+                  <Dropdown
+                    isOpen={openDropdown === "library"}
+                    title="Creative Library audio"
+                    items={libraryAudioPickerItems}
+                    selectedId={audioUrl}
+                    onSelect={(item) => {
+                      // The media URL is the only value taken from the entry.
+                      setAudioUrl(item.id);
+                      setAudioName(item.name);
+                      setAudioState(UPLOAD_STATE.READY);
+                      setAudioProgress(0);
+                    }}
+                    onClose={() => setOpenDropdown(null)}
+                    anchorRef={libraryBtnRef}
+                    className="w-80 max-w-[calc(100vw-3rem)]"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Prompt textarea */}

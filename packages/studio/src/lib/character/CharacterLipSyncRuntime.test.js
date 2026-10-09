@@ -7,7 +7,11 @@ import {
   CHARACTER_LIPSYNC_DEFAULT_MODEL,
   TALKING_AVATAR_MODE,
   CHARACTER_LIP_SYNC_MODE,
+  defaultModelForMode,
+  isModelCompatibleWithMode,
+  mediaCategoryForMode,
 } from "./CharacterLipSyncRuntime.js";
+import { getLipSyncModelById } from "../../models.js";
 import {
   TALKING_AVATAR_RECIPE_ID,
   TALKING_AVATAR_SKILL_ID,
@@ -268,4 +272,77 @@ test("model and resolution flow into the job and lineage", async () => {
   assert.equal(run.ok, true);
   assert.equal(assetStore.saved[0].metadata.model, "kling-v2-avatar-standard");
   assert.equal(assetStore.saved[0].metadata.resolution, "720p");
+});
+
+test("each mode defaults to a catalog model from its own media category", () => {
+  assert.equal(mediaCategoryForMode(TALKING_AVATAR_MODE), "image");
+  assert.equal(mediaCategoryForMode(CHARACTER_LIP_SYNC_MODE), "video");
+  assert.equal(defaultModelForMode(TALKING_AVATAR_MODE), CHARACTER_LIPSYNC_DEFAULT_MODEL);
+
+  const avatarJob = buildCharacterLipSyncJob({ characterImage: CHARACTER_IMAGE, audioUrl: AUDIO_URL });
+  assert.equal(avatarJob.model, CHARACTER_LIPSYNC_DEFAULT_MODEL);
+  assert.equal(getLipSyncModelById(avatarJob.model).category, "image");
+  assert.equal(avatarJob.metadata.modelFallback, null);
+
+  const syncJob = buildCharacterLipSyncJob({
+    mode: CHARACTER_LIP_SYNC_MODE,
+    videoUrl: "https://cdn.test/source.mp4",
+    audioUrl: AUDIO_URL,
+  });
+  assert.equal(syncJob.model, defaultModelForMode(CHARACTER_LIP_SYNC_MODE));
+  assert.equal(getLipSyncModelById(syncJob.model).category, "video");
+  assert.equal(syncJob.metadata.modelFallback, null);
+
+  // The payload's model always matches the media field the payload carries.
+  const payload = buildCharacterLipSyncPayload(syncJob.inputs);
+  assert.ok("video_url" in payload);
+  assert.equal(getLipSyncModelById(payload.model).category, "video");
+});
+
+test("an explicit compatible model selection is preserved", () => {
+  const syncJob = buildCharacterLipSyncJob({
+    mode: CHARACTER_LIP_SYNC_MODE,
+    videoUrl: "https://cdn.test/source.mp4",
+    audioUrl: AUDIO_URL,
+    model: "latent-sync",
+  });
+  assert.equal(syncJob.model, "latent-sync");
+  assert.equal(syncJob.metadata.modelFallback, null);
+  assert.equal(isModelCompatibleWithMode(CHARACTER_LIP_SYNC_MODE, "latent-sync"), true);
+
+  const avatarJob = buildCharacterLipSyncJob({
+    characterImage: CHARACTER_IMAGE,
+    audioUrl: AUDIO_URL,
+    model: "kling-v2-avatar-standard",
+  });
+  assert.equal(avatarJob.model, "kling-v2-avatar-standard");
+  assert.equal(avatarJob.metadata.modelFallback, null);
+});
+
+test("a model from the wrong category is replaced by the modality default and reported", () => {
+  const job = buildCharacterLipSyncJob({
+    mode: CHARACTER_LIP_SYNC_MODE,
+    videoUrl: "https://cdn.test/source.mp4",
+    audioUrl: AUDIO_URL,
+    model: "kling-v2-avatar-standard",
+  });
+  assert.equal(job.model, defaultModelForMode(CHARACTER_LIP_SYNC_MODE));
+  assert.equal(getLipSyncModelById(job.model).category, "video");
+  assert.deepEqual(job.metadata.modelFallback, {
+    requested: "kling-v2-avatar-standard",
+    used: defaultModelForMode(CHARACTER_LIP_SYNC_MODE),
+    reason: "model_category_mismatch",
+  });
+  assert.equal(buildCharacterLipSyncPayload(job.inputs).model, job.model);
+});
+
+test("an unknown model id never reaches the provider", () => {
+  const job = buildCharacterLipSyncJob({
+    characterImage: CHARACTER_IMAGE,
+    audioUrl: AUDIO_URL,
+    model: "not-a-catalog-model",
+  });
+  assert.equal(job.model, CHARACTER_LIPSYNC_DEFAULT_MODEL);
+  assert.equal(job.metadata.modelFallback.reason, "model_category_mismatch");
+  assert.equal(isModelCompatibleWithMode(TALKING_AVATAR_MODE, "not-a-catalog-model"), false);
 });

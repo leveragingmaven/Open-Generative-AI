@@ -16,6 +16,7 @@ import {
   isTypedEnumField,
 } from "../lib/audio/customVoiceId.js";
 import { copyAssistantResponseText } from "../lib/copyAssistantResponse.js";
+import { registerGeneratedAudio } from "../lib/audio/audioCreativeAsset.js";
 import {
   defaultItemFor,
   isStructuredInputSchema,
@@ -887,6 +888,18 @@ export default function AudioStudio({
       }, activeCampaign, "audio");
 
       if (!historyItems) addToInternalHistory(entry);
+
+      // Register the track in the canonical Creative Library so the lip-sync
+      // surfaces can select it without a download/re-upload round trip. Best
+      // effort: a library failure never discards the generated audio.
+      registerGeneratedAudio({
+        url: res.url,
+        title,
+        prompt: params.prompt || "",
+        model: selectedModelId,
+        voiceId: clonedVoiceId || null,
+        campaign: activeCampaign,
+      });
 
       setActiveResultUrl(res.url);
       setActiveResultTitle(title);

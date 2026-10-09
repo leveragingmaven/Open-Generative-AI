@@ -33,11 +33,59 @@ import {
   CHARACTER_LIPSYNC_OPERATION,
   CHARACTER_LIPSYNC_PROVIDER_ID,
 } from "./CharacterLipSyncConstants.js";
+import { getLipSyncModelById, imageLipSyncModels, videoLipSyncModels } from "../../models.js";
 
 export const TALKING_AVATAR_MODE = "talking-avatar";
 export const CHARACTER_LIP_SYNC_MODE = "lip-sync";
 
-export const CHARACTER_LIPSYNC_DEFAULT_MODEL = "infinitetalk-image-to-video";
+// One default per modality. Talking Avatar sends an image_url and Lip Sync sends
+// a video_url, so a single shared default made half of the jobs self-
+// inconsistent (a video_url addressed to an image-category endpoint).
+const MODE_MEDIA_CATEGORY = {
+  [TALKING_AVATAR_MODE]: "image",
+  [CHARACTER_LIP_SYNC_MODE]: "video",
+};
+const MODE_DEFAULT_MODEL_ID = {
+  [TALKING_AVATAR_MODE]: "infinitetalk-image-to-video",
+  [CHARACTER_LIP_SYNC_MODE]: "sync-lipsync",
+};
+
+/** The image-category default, kept for existing callers. */
+export const CHARACTER_LIPSYNC_DEFAULT_MODEL = MODE_DEFAULT_MODEL_ID[TALKING_AVATAR_MODE];
+
+/** The media category a mode sends: image for Talking Avatar, video for Lip Sync. */
+export function mediaCategoryForMode(mode) {
+  return MODE_MEDIA_CATEGORY[mode] || MODE_MEDIA_CATEGORY[TALKING_AVATAR_MODE];
+}
+
+/** The catalog default for a mode, verified against its own category. */
+export function defaultModelForMode(mode) {
+  const category = mediaCategoryForMode(mode);
+  const preferred = getLipSyncModelById(MODE_DEFAULT_MODEL_ID[category === "video" ? CHARACTER_LIP_SYNC_MODE : TALKING_AVATAR_MODE]);
+  if (preferred?.category === category) return preferred.id;
+  const candidates = category === "video" ? videoLipSyncModels : imageLipSyncModels;
+  return candidates?.[0]?.id || MODE_DEFAULT_MODEL_ID[TALKING_AVATAR_MODE];
+}
+
+/** True when an explicit model exists and belongs to the mode's category. */
+export function isModelCompatibleWithMode(mode, modelId) {
+  const model = getLipSyncModelById(modelId);
+  return Boolean(model) && model.category === mediaCategoryForMode(mode);
+}
+
+/**
+ * An explicit model is honored only when it is compatible with the mode;
+ * otherwise the modality default is used and the substitution is reported so
+ * the caller can surface it instead of silently rendering the wrong model.
+ */
+export function resolveModelForMode(mode, modelId = null) {
+  if (!modelId) return { model: defaultModelForMode(mode), fallback: null };
+  if (isModelCompatibleWithMode(mode, modelId)) return { model: modelId, fallback: null };
+  return {
+    model: defaultModelForMode(mode),
+    fallback: { requested: modelId, used: defaultModelForMode(mode), reason: "model_category_mismatch" },
+  };
+}
 
 const stringOrNull = (value) => (value == null || value === "" ? null : String(value));
 
@@ -64,7 +112,7 @@ export function buildCharacterLipSyncPayload(input = {}) {
     throw new Error("Talking Avatar requires a character identity image");
   }
   const payload = {
-    model: input.model || input.model_id || CHARACTER_LIPSYNC_DEFAULT_MODEL,
+    model: input.model || input.model_id || defaultModelForMode(mode),
     audio_url: audioUrl,
   };
   if (mode === CHARACTER_LIP_SYNC_MODE) payload.video_url = videoUrl;
@@ -151,6 +199,9 @@ export function buildCharacterLipSyncJob({
   if (mode !== CHARACTER_LIP_SYNC_MODE && !characterImage) {
     throw new Error("Talking Avatar requires a character identity image");
   }
+  // An explicit, compatible model selection is preserved; an image model passed
+  // to video mode (or the reverse) is replaced by the modality default.
+  const resolvedModel = resolveModelForMode(mode, model);
   const defaults = resolveModeDefaults(mode);
   const recipe = RECIPE_LIBRARY[recipeId || defaults.recipeId] || RECIPE_LIBRARY[defaults.recipeId];
   const resolvedProvider = providerId || recipe?.providerId || CHARACTER_LIPSYNC_PROVIDER_ID;
@@ -169,7 +220,7 @@ export function buildCharacterLipSyncJob({
     subtype: defaults.subtype,
     providerId: resolvedProvider,
     provider: resolvedProvider,
-    model: model || CHARACTER_LIPSYNC_DEFAULT_MODEL,
+    model: resolvedModel.model,
     resolution: resolution || null,
     prompt: prompt ? String(prompt).trim() : null,
     campaignId,
@@ -185,12 +236,13 @@ export function buildCharacterLipSyncJob({
       characterIdentity: characterIdentity && typeof characterIdentity === "object" ? { ...characterIdentity } : null,
       videoUrl: mode === CHARACTER_LIP_SYNC_MODE ? videoUrl : null,
       audioUrl,
-      model: model || CHARACTER_LIPSYNC_DEFAULT_MODEL,
+      model: resolvedModel.model,
       resolution: resolution || null,
       prompt: prompt ? String(prompt).trim() : null,
     },
     metadata: {
       mode,
+      modelFallback: resolvedModel.fallback,
       characterImage: mode === CHARACTER_LIP_SYNC_MODE ? null : characterImage,
       characterIdentity: characterIdentity && typeof characterIdentity === "object" ? { ...characterIdentity } : null,
       videoUrl: mode === CHARACTER_LIP_SYNC_MODE ? videoUrl : null,
@@ -202,7 +254,7 @@ export function buildCharacterLipSyncJob({
       provider: resolvedProvider,
       recipeId: recipe?.id || defaults.recipeId,
       skillId: skillId || defaults.skillId,
-      model: model || CHARACTER_LIPSYNC_DEFAULT_MODEL,
+      model: resolvedModel.model,
       resolution: resolution || null,
     },
   };
