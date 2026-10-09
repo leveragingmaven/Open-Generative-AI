@@ -26,3 +26,33 @@ test('audio reply includes a playable/downloadable link and rejects missing/unsu
   await assert.rejects(generateMavenAudio({ identity, prompt: 'Create a professional voiceover for a product demo.', credentialResolver: async () => 'key' }), { code: 'audio_script_required' });
   await assert.rejects(generateMavenAudio({ identity, prompt: 'Narrate at speed 3: “Hello.”', credentialResolver: async () => 'key' }), { code: 'audio_option_unsupported' });
 });
+
+test('a cloned voice ID reaches the provider unchanged and is echoed back', async () => {
+  const cloneId = 'sf02174c-5f5d-46e6-8758-7544128c27b2';
+  const requests = [];
+  const result = await generateMavenAudio({
+    identity,
+    prompt: `Narrate with voice id ${cloneId}: “Welcome back.”`,
+    credentialResolver: async () => 'test-secret',
+    provider: { async generateAudio(key, inputs) { requests.push({ key, inputs }); return { url: audioUrl }; } },
+  });
+
+  // The provider receives exactly the cloned ID, never the catalog default.
+  assert.equal(requests[0].inputs.voice_id, cloneId);
+  assert.notEqual(requests[0].inputs.voice_id, 'Friendly_Person');
+  assert.equal(requests[0].inputs.prompt, 'Welcome back.');
+  assert.equal(result.voiceId, cloneId);
+  assert.match(buildGeneratedAudioReply(result), new RegExp(cloneId));
+});
+
+test('a malformed cloned voice ID fails closed before the provider runs', async () => {
+  await assert.rejects(
+    generateMavenAudio({
+      identity,
+      prompt: 'Narrate with voice id abc: “Hello.”',
+      credentialResolver: async () => 'key',
+      provider: { async generateAudio() { assert.fail('provider must not run'); } },
+    }),
+    { code: 'audio_option_unsupported' },
+  );
+});
