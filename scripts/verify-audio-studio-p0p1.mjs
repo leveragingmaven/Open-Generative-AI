@@ -102,6 +102,27 @@ check("open picker renders all 472 presets, labelled and grouped", () => {
   assert.ok((html.match(/English_/g) || []).length > 50, "expected the English IDs to render");
 });
 
+check("the open picker exposes combobox and listbox semantics", () => {
+  const html = render({ initialOpen: true });
+  // The search field is the combobox and owns the listbox.
+  assert.match(html, /role="combobox"/);
+  assert.match(html, /aria-autocomplete="list"/);
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /aria-controls="[^"]*-listbox"/);
+  // Every voice is an option, exactly one of which reports the current value.
+  assert.equal((html.match(/role="option"/g) || []).length, 472);
+  assert.equal((html.match(/aria-selected="true"/g) || []).length, 1);
+  assert.match(html, /aria-selected="true"[^>]*>\s*<span[^>]*>Friendly Person</);
+  // The active option is the one aria-activedescendant names.
+  const active = /aria-activedescendant="([^"]+)"/.exec(html)?.[1];
+  assert.ok(active, "expected aria-activedescendant");
+  assert.ok(html.includes(`id="${active}"`), `${active} must be a rendered option`);
+  // Groups are announced with their size rather than being decorative headers.
+  assert.match(html, /role="group" aria-label="English, 76 voices"/);
+  assert.match(html, /role="group" aria-label="Custom voice IDs, 12 voices"/);
+});
+
 check("no preset is hidden behind a collapsed group by default", () => {
   const html = render({ initialOpen: true });
   // Taken from the helpers rather than hardcoded, so the check follows the
@@ -111,6 +132,9 @@ check("no preset is hidden behind a collapsed group by default", () => {
     assert.ok(voice, `no voice found for group ${group}`);
     assert.ok(html.includes(voice.id), `${voice.id} (${group}) did not render`);
   }
+  // No re-entrant disclosure is collapsed inside the popover: the only element
+  // that reports an expanded state is the combobox itself.
+  assert.doesNotMatch(html, /aria-expanded="false"/);
 });
 
 check("a cloned id renders as a custom value, not a preset", () => {
