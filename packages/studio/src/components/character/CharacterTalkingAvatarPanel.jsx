@@ -13,13 +13,13 @@ import {
   getLipSyncModelById,
   getResolutionsForLipSyncModel,
 } from "../../models.js";
-import { readCreativeLibrary } from "../../lib/intelligence/CreativeLibrary.js";
+
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
 import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
-import { isAudioUrl } from "../../lib/character/CharacterMediaTypes.js";
+import { listLibraryMedia } from "../../lib/character/CharacterMediaTypes.js";
 import {
   createCharacterLipSyncRuntime,
   buildCharacterLipSyncJob,
@@ -97,23 +97,9 @@ export default function CharacterTalkingAvatarPanel({
       setTwins([]);
     }
     try {
-      // Only genuinely playable audio assets qualify — an asset record alone
-      // does not prove a media file. Deduplicated by actual media URL.
-      const seen = new Set();
-      const audio = (readCreativeLibrary() || [])
-        .map((asset) => ({
-          id: asset.id,
-          name: asset.title || asset.metadata?.subtype || asset.id,
-          url: asset.generatedFiles?.[0] || asset.metadata?.audioUrl || asset.metadata?.url || null,
-          subtype: asset.metadata?.subtype || null,
-        }))
-        .filter((entry) => {
-          if (!isAudioUrl(entry.url)) return false;
-          if (seen.has(entry.url)) return false;
-          seen.add(entry.url);
-          return true;
-        });
-      setLibraryAudio(audio);
+      // Shared projection: an asset record alone never qualifies — its URL must
+      // prove an audio file — and entries are deduplicated by that URL.
+      setLibraryAudio(listLibraryMedia("audio"));
     } catch {
       setLibraryAudio([]);
     }
