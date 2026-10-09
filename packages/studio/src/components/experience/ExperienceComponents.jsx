@@ -109,11 +109,11 @@ export function MetricCard({ label, value, detail, className = "" }) {
 }
 
 export const PrimaryButton = forwardRef(function PrimaryButton({ as: Element = "button", className = "", children, ...props }, ref) {
-  return <Element ref={ref} className={classes("inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--ms-radius-button)] bg-[var(--ms-color-pink-primary)] px-5 py-2.5 text-sm font-semibold text-white shadow-[var(--ms-shadow-pink)] transition-[background-color,transform,box-shadow] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:bg-[var(--ms-color-pink-hover)]", className)} {...props}>{children}</Element>;
+  return <Element ref={ref} className={classes("inline-flex min-h-9 items-center justify-center gap-2 rounded-[var(--ms-radius-button)] bg-[var(--ms-color-pink-primary)] px-4 py-2 text-xs font-semibold text-white shadow-[var(--ms-shadow-pink)] transition-[background-color,transform,box-shadow] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:bg-[var(--ms-color-pink-hover)]", className)} {...props}>{children}</Element>;
 });
 
 export const SecondaryButton = forwardRef(function SecondaryButton({ as: Element = "button", className = "", children, ...props }, ref) {
-  return <Element ref={ref} className={classes("inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-5 py-2.5 text-sm font-semibold text-[var(--ms-color-text-primary)] transition-[background-color,border-color,transform] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:bg-[rgba(212,168,88,0.12)]", className)} {...props}>{children}</Element>;
+  return <Element ref={ref} className={classes("inline-flex min-h-9 items-center justify-center gap-2 rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[rgba(212,168,88,0.04)] px-4 py-2 text-xs font-semibold text-[var(--ms-color-text-primary)] transition-[background-color,border-color,transform] duration-[var(--ms-motion-hover)] hover:-translate-y-px hover:border-[var(--ms-color-border-emphasized)] hover:bg-[rgba(212,168,88,0.09)]", className)} {...props}>{children}</Element>;
 });
 
 const badgeTones = {

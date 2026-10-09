@@ -141,7 +141,7 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = 
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-full border border-white/10 bg-[#1B1B1B] px-3.5 py-2 text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
+        className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#1B1B1B] px-3 py-1.5 text-[12px] font-semibold text-white/80 hover:text-white hover:border-[#D4A858]/40 hover:bg-[#232323] transition-colors"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" />

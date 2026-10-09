@@ -86,10 +86,10 @@ function AgentAvatar({ agent, className = "", size = "lg" }) {
 function AgentCard({ agent, onClick, onEdit, onAdd }) {
   const img = agent?.iconUrl || agent?.imageUrl || agent?.icon_url || agent?.metadata?.iconUrl;
   return (
-    <div className="group relative aspect-[4/5] rounded-xl cursor-pointer">
+    <div className="group relative aspect-[4/3] rounded-xl cursor-pointer">
       <div
         onClick={() => onClick(agent)}
-        className="absolute inset-0 rounded-xl overflow-hidden border border-white/5 bg-[#0a0a0a] transition-all group-hover:border-[#E82070]/30 group-hover:scale-[1.02] shadow-2xl"
+        className="absolute inset-0 overflow-hidden rounded-xl border border-white/5 bg-[#0a0a0a] shadow-lg transition-all group-hover:scale-[1.02] group-hover:border-[#E82070]/30"
       >
         {img ? (
           <img
@@ -99,18 +99,18 @@ function AgentCard({ agent, onClick, onEdit, onAdd }) {
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#E82070]/10 to-[#D4A858]/10 flex items-center justify-center">
-            <span className="text-5xl font-black text-white/15">{agent?.avatarPlaceholder || "A"}</span>
+            <span className="text-4xl font-black text-white/15">{agent?.avatarPlaceholder || "A"}</span>
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 p-4">
-          <div className="text-[10px] font-bold text-[#E82070] uppercase tracking-wider mb-1 opacity-80">
+        <div className="absolute inset-x-0 bottom-0 p-3">
+          <div className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#E82070] opacity-90">
             {agent.category || "AI Assistant"}
           </div>
           <h3 className="text-sm font-bold text-white truncate group-hover:text-[#E82070] transition-colors">
             {agent.name || "Unnamed Agent"}
           </h3>
-          <p className="text-[9px] text-white/40 mt-1 uppercase tracking-tighter font-black line-clamp-2">
+          <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-white/60">
             {agent.specialty || agent.description}
           </p>
         </div>
@@ -123,7 +123,7 @@ function AgentCard({ agent, onClick, onEdit, onAdd }) {
             onEdit(agent);
           }}
           title="Edit agent"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-[#E82070] hover:text-black hover:scale-110 z-10"
+          className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-black/60 text-white opacity-75 transition-all hover:bg-[#E82070] hover:text-black focus-visible:opacity-100 group-hover:opacity-100"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -138,7 +138,7 @@ function AgentCard({ agent, onClick, onEdit, onAdd }) {
             onAdd(agent);
           }}
           title="Add to My Agents"
-          className="absolute bottom-3 right-3 w-8 h-8 rounded-full bg-black/60 border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all hover:bg-[#E82070] hover:text-black hover:scale-110 z-10"
+          className="absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-black/60 text-white opacity-75 transition-all hover:bg-[#E82070] hover:text-black focus-visible:opacity-100 group-hover:opacity-100"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 5v14M5 12h14" />
@@ -154,10 +154,10 @@ function ConversationCard({ conv, onClick }) {
   return (
     <div
       onClick={() => onClick(conv)}
-      className="group flex flex-col gap-3 bg-white/[0.03] border border-white/5 rounded-xl p-4 hover:border-[#E82070]/20 hover:bg-white/5 transition-all cursor-pointer"
+      className="group flex cursor-pointer flex-col gap-2.5 rounded-xl border border-white/5 bg-white/[0.03] p-3 transition-all hover:border-[#E82070]/20 hover:bg-white/5"
     >
       <div className="flex items-center gap-3">
-        <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-white/5 border border-white/5 shrink-0">
+        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-white/5 bg-white/5">
           <span className="absolute inset-0 flex items-center justify-center text-white/30 text-sm font-bold">
             {conv.agentName?.charAt(0) || "A"}
           </span>
@@ -187,7 +187,7 @@ function Modal({ children, onClose }) {
     <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#0d0d0d] p-6 text-white shadow-2xl"
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#0d0d0d] p-5 text-white shadow-2xl"
       >
         {children}
       </div>
@@ -432,7 +432,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
     const agentMessages = openConversation ? getAgentMessages(openConversation.id) : [];
     return (
       <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
-        <div className="flex-shrink-0 h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/40">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-black/40 px-4 py-3 sm:px-5">
           <div className="flex items-center gap-4 min-w-0">
             <button
               onClick={() => { setOpenChat(null); setChatDraft(""); }}
@@ -450,25 +450,25 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
           </div>
           <div className="flex items-center gap-2">
             {twin && (
-              <span className="rounded-full border border-[#E82070]/25 bg-[#E82070]/[0.06] px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#E82070]/80">
+              <span className="rounded-full border border-[#E82070]/25 bg-[#E82070]/[0.06] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#E82070]/80">
                 Executes as {twin.name}
               </span>
             )}
             {openConversation?.campaignName && (
-              <span className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/50">
+              <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/50">
                 {openConversation.campaignName}
               </span>
             )}
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar p-8">
+        <div ref={scrollRef} className="custom-scrollbar flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           {!openConversation ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
-              <AgentAvatar agent={openAgent} className="w-24 h-24 rounded-2xl" />
+              <AgentAvatar agent={openAgent} className="h-16 w-16 rounded-2xl" />
               <div className="max-w-md">
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#E82070]">{openAgent.category}</p>
-                <h3 className="text-xl font-black mt-2">{openAgent.name}</h3>
+                <h3 className="mt-1.5 text-lg font-semibold">{openAgent.name}</h3>
                 <p className="text-sm text-white/50 mt-2 leading-relaxed">{openAgent.description}</p>
               </div>
               <div className="mt-2 grid grid-cols-1 gap-3 w-full max-w-md text-left">
@@ -487,7 +487,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
               </div>
               <button
                 onClick={startChat}
-                className="mt-2 px-6 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all active:scale-95 disabled:opacity-40"
+                className="mt-1 rounded-lg bg-[#E82070] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B] active:scale-95 disabled:opacity-40"
               >
                 Start conversation
               </button>
@@ -501,7 +501,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                 {agentMessages.length === 0 && (openAgent.welcomeMessage || agentSuggestions.length > 0) && (
                   <div className="space-y-3">
                     {openAgent.welcomeMessage && (
-                      <div className="max-w-[85%] rounded-2xl rounded-tl-md border border-white/10 bg-[#0d0d0d] px-4 py-3 text-sm leading-relaxed text-white/85">
+                      <div className="max-w-[85%] rounded-2xl rounded-tl-md border border-white/10 bg-[#0d0d0d] px-3.5 py-2.5 text-[13px] leading-relaxed text-white/85">
                         {openAgent.welcomeMessage}
                       </div>
                     )}
@@ -512,7 +512,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                             key={`${suggestion.label || suggestion.prompt || "suggestion"}-${index}`}
                             type="button"
                             onClick={() => setChatDraft(suggestion.prompt || "")}
-                            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-xs text-white/75 transition-colors hover:border-[#E82070]/40 hover:text-white"
+                            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-left text-[11px] text-white/75 transition-colors hover:border-[#E82070]/40 hover:text-white"
                           >
                             {suggestion.label || suggestion.prompt}
                           </button>
@@ -525,7 +525,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                   const isAssistant = msg.role === "assistant";
                   return (
                     <div key={msg.id || i} className={`flex ${isAssistant ? "justify-start" : "justify-end"}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${isAssistant ? "border border-white/10 bg-[#0d0d0d] text-white/85" : "bg-[#E82070]/15 text-[#E82070]"}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${isAssistant ? "border border-white/10 bg-[#0d0d0d] text-white/85" : "bg-[#E82070]/15 text-[#E82070]"}`}>
                         {isAssistant && (
                           <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-[#E82070]/70">
                             {openAgent.name}
@@ -549,8 +549,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
         </div>
 
         {openConversation && (
-          <div className="flex-shrink-0 border-t border-white/5 p-4 bg-black/30">
-            <div className="max-w-3xl mx-auto flex items-end gap-2">
+          <div className="flex shrink-0 items-center justify-center border-t border-white/5 bg-black/30 px-4 py-3 sm:px-5">
+            <div className="flex w-full max-w-3xl items-end gap-2">
               <textarea
                 value={chatDraft}
                 onChange={(e) => setChatDraft(e.target.value)}
@@ -562,12 +562,12 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
                 }}
                 rows={2}
                 placeholder={`Message ${openAgent.name}…`}
-                className="flex-1 resize-none rounded-xl border border-white/10 bg-[#0d0d0d] px-4 py-2.5 text-sm text-white outline-none focus:border-[#E82070]/50"
+                className="min-h-10 flex-1 resize-none rounded-lg border border-white/10 bg-[#0d0d0d] px-3 py-2 text-[13px] text-white outline-none focus:border-[#E82070]/50"
               />
               <button
                 onClick={sendMessage}
                 disabled={!chatDraft.trim()}
-                className="px-5 py-2.5 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all active:scale-95 disabled:opacity-40"
+                className="shrink-0 rounded-lg bg-[#E82070] px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B] active:scale-95 disabled:opacity-40"
               >
                 Send
               </button>
@@ -581,16 +581,16 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
   // ── Browse shell ───────────────────────────────────────────────────────────
   return (
     <div className="ms-creative-studio h-full flex flex-col bg-[#030303] text-white">
-      <div className="flex-shrink-0 h-16 border-b border-white/5 flex items-center justify-between px-8 bg-black/40 gap-4">
-        <div className="flex items-center gap-6 h-full min-w-0">
-          <h2 className="text-sm font-black uppercase tracking-[0.2em] text-[#E82070] shrink-0">Agents</h2>
-          <div className="flex gap-1 bg-white/5 p-1 rounded-xl shrink-0">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-black/40 px-4 py-3 sm:px-5">
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <h2 className="shrink-0 text-xs font-bold uppercase tracking-[0.18em] text-[#E82070]">Agents</h2>
+          <div className="custom-scrollbar flex min-w-0 gap-1 overflow-x-auto rounded-lg bg-white/5 p-1">
             {MAIN_TABS.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveMainTab(tab)}
-                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                  activeMainTab === tab ? "bg-white text-black shadow-xl" : "text-white/40 hover:text-white hover:bg-white/5"
+                className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors ${
+                  activeMainTab === tab ? "bg-white text-black" : "text-white/40 hover:bg-white/5 hover:text-white"
                 }`}
               >
                 {tab.replace(/-/g, " ")}
@@ -630,7 +630,7 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
           </div>
           <button
             onClick={() => { setShowCreate(true); setSpecialty(""); setDraftProfile(null); }}
-            className="px-6 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all active:scale-95 flex items-center gap-2"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#E82070] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B] active:scale-95"
           >
             <span className="text-sm">+</span>
             Create
@@ -640,12 +640,12 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
 
       {/* Category filter */}
       {activeMainTab !== "my-chats" && (
-        <div className="flex-shrink-0 flex items-center gap-1.5 overflow-x-auto px-8 py-3 border-b border-white/5 custom-scrollbar">
+        <div className="custom-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-white/5 px-4 py-2 sm:px-5">
           {["all", ...AGENT_CATEGORIES].map((category) => (
             <button
               key={category}
               onClick={() => pickCategory(category)}
-              className={`shrink-0 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${
+              className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-colors ${
                 categoryFilter === category
                   ? "bg-[#E82070] text-black"
                   : "bg-white/5 text-white/40 hover:text-white hover:bg-white/10"
@@ -657,21 +657,21 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-4 py-4 sm:px-5">
         {activeMainTab === "my-chats" ? (
           visibleChats.length === 0 ? (
-            <EmptyState title="No chats yet" action={<button onClick={() => setActiveMainTab("featured")} className="text-[10px] text-[#E82070] hover:text-white border border-[#E82070]/20 hover:border-white/20 px-4 py-2 rounded-lg transition-colors">Browse Agents</button>} />
+            <EmptyState title="No chats yet" action={<button onClick={() => setActiveMainTab("featured")} className="rounded-lg border border-[#E82070]/20 px-3.5 py-1.5 text-[10px] font-semibold text-[#E82070] transition-colors hover:border-white/20 hover:text-white">Browse Agents</button>} />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-w-[1600px] mx-auto">
+            <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {visibleChats.map((conv) => (
                 <ConversationCard key={conv.id} conv={conv} onClick={(c) => { const agent = getAgent(c.agentId); if (agent) openChatWithAgent(agent, c.id); }} />
               ))}
             </div>
           )
         ) : visibleAgents.length === 0 ? (
-          <EmptyState title={query ? "No agents found" : activeMainTab === "my-agents" ? "No agents yet" : "No agents found"} action={activeMainTab === "my-agents" ? <button onClick={() => { setShowCreate(true); setSpecialty(""); setDraftProfile(null); }} className="text-[10px] text-[#E82070] hover:text-white border border-[#E82070]/20 hover:border-white/20 px-4 py-2 rounded-lg transition-colors">Create Agent</button> : undefined} />
+          <EmptyState title={query ? "No agents found" : activeMainTab === "my-agents" ? "No agents yet" : "No agents found"} action={activeMainTab === "my-agents" ? <button onClick={() => { setShowCreate(true); setSpecialty(""); setDraftProfile(null); }} className="rounded-lg border border-[#E82070]/20 px-3.5 py-1.5 text-[10px] font-semibold text-[#E82070] transition-colors hover:border-white/20 hover:text-white">Create Agent</button> : undefined} />
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6 max-w-[1600px] mx-auto">
+          <div className="mx-auto grid max-w-[1600px] grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6 sm:gap-4">
             {visibleAgents.map((agent) =>
               activeMainTab === "my-agents" ? (
                 <AgentCard
@@ -729,8 +729,8 @@ export default function AgentStudio({ apiKey, isHeaderVisible, onToggleHeader })
 
 function EmptyState({ title, action }) {
   return (
-    <div className="h-full flex flex-col items-center justify-center text-white/10 gap-4">
-      <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.5">
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-white/10">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.5">
         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
       </svg>
       <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/30">{title}</p>
@@ -763,7 +763,7 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
 
   return (
     <div>
-      <h3 className="text-lg font-black uppercase tracking-widest text-white">Create Agent</h3>
+      <h3 className="text-base font-bold uppercase tracking-[0.16em] text-white">Create Agent</h3>
       <p className="mt-1 text-xs text-white/40">
         Describe what the agent should specialize in. Creative OS generates its profile — no provider call needed.
       </p>
@@ -779,19 +779,19 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
             />
           </Field>
           <div className="mt-5 flex justify-end gap-2">
-            <button onClick={onBack} className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white">Cancel</button>
+            <button onClick={onBack} className="rounded-lg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40 hover:text-white">Cancel</button>
             <button
               onClick={onGenerate}
               disabled={!specialty.trim()}
-              className="px-5 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all disabled:opacity-40"
+              className="rounded-lg bg-[#E82070] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B] disabled:opacity-40"
             >
               Generate Profile
             </button>
           </div>
         </div>
       ) : (
-        <div className="mt-5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Name">
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
             </Field>
@@ -818,17 +818,17 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} className={inputCls} />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-3">
+            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-2.5">
               <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-white/30">Suggested Creative Skills</p>
               <SkillChips ids={draftProfile.suggestedSkillIds} />
             </div>
-            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-3">
+            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-2.5">
               <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-white/30">Suggested Recipes</p>
               <RecipeChips ids={draftProfile.suggestedRecipeIds} />
             </div>
           </div>
           {draftProfile.suggestedWorkflowIds?.length > 0 && (
-            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-3">
+            <div className="rounded-xl border border-white/10 bg-[#0d0d0d] p-2.5">
               <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-white/30">Suggested Workflows</p>
               <p className="mb-2 text-[10px] leading-snug text-white/35">Workflow ideas to build in Workflow Studio — not saved workflows.</p>
               <div className="flex flex-wrap gap-1">
@@ -839,10 +839,10 @@ function CreateAgentFlow({ specialty, setSpecialty, draftProfile, onGenerate, on
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <button onClick={onBack} className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white">Back</button>
+            <button onClick={onBack} className="rounded-lg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40 hover:text-white">Back</button>
             <button
               onClick={() => onSave({ ...draftProfile, name, description, prompt })}
-              className="px-5 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all"
+              className="rounded-lg bg-[#E82070] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B]"
             >
               Save Agent
             </button>
@@ -861,7 +861,7 @@ function EditAgentFlow({ agent, onSave, onDelete }) {
   const [category, setCategory] = useState(agent.category);
   return (
     <div>
-      <h3 className="text-lg font-black uppercase tracking-widest text-white">Edit Agent</h3>
+      <h3 className="text-base font-bold uppercase tracking-[0.16em] text-white">Edit Agent</h3>
       <div className="mt-5 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Name">
@@ -883,10 +883,10 @@ function EditAgentFlow({ agent, onSave, onDelete }) {
           <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} className={inputCls} />
         </Field>
         <div className="flex justify-between gap-2">
-          <button onClick={onDelete} className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest text-red-400/70 hover:text-red-400">Delete</button>
+          <button onClick={onDelete} className="rounded-lg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-red-400/70 hover:text-red-400">Delete</button>
           <button
             onClick={() => onSave({ name, description, specialty, prompt, category })}
-            className="px-5 py-2 bg-[#E82070] text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#ebff66] transition-all"
+            className="rounded-lg bg-[#E82070] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-black transition-colors hover:bg-[#F03A8B]"
           >
             Save
           </button>
