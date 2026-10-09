@@ -89,13 +89,20 @@ export async function loadEndpointServices() {
     { DesignAgentSessionOwnershipService },
     { DesignAgentConversationReader },
     { MuApiDesignAgentProvider },
+    { DesignAgentProjectContextService },
   ] = await Promise.all([
     import('./designAgentSessionOwnership.js'),
     import('./designAgentConversationReader.js'),
     import('../../packages/studio/src/lib/providers/design/index.js'),
+    import('./designAgentProjectContext.js'),
   ]);
 
   const ownershipService = new DesignAgentSessionOwnershipService();
+  // Phase 7.1c: the project resolver reads the session's project from the
+  // ownership-scoped server rows. It is imported lazily and constructed lazily: a
+  // deployment whose project data layer is not configured must lose project context,
+  // not the ability to talk to Maven at all.
+  let projectContextService = null;
 
   // Mirror the server-owned Design Agent provider construction used by the
   // working /api/agent-execution/from-conversation preparation path: an
@@ -128,6 +135,10 @@ export async function loadEndpointServices() {
   return {
     ownershipService,
     conversationReader,
+    resolveProjectContext({ identity, designSessionId }) {
+      if (!projectContextService) projectContextService = new DesignAgentProjectContextService();
+      return projectContextService.resolveForSession({ identity, designSessionId });
+    },
     createTextProvider() {
       // Reuse the exact validated configuration factory shared with the
       // preparation path; fail closed with a typed, sanitized error when the
@@ -214,6 +225,11 @@ const forbiddenFields = [
   'provider', 'model', 'endpoint', 'apiKey', 'routing', 'recipe', 'operation',
   'funding', 'authorization', 'accountId', 'creatorId', 'identityKey', 'references',
   'attachmentUrls', 'executionSettings', 'toolSettings',
+  // Phase 7.1c: project context is server-derived from the authenticated session.
+  // A browser may associate a session with a project id through
+  // /api/design-agent/sessions/{id}/project and nothing else, so project content
+  // in this payload is refused rather than ignored silently.
+  'project', 'projectId', 'projectContext', 'projectInstructions', 'instructions', 'campaign',
 ];
 
 const ATTACHMENT_ID_PATTERN = /^asset_[A-Za-z0-9_-]{1,190}$/;
@@ -399,7 +415,7 @@ function sseFrame(payload) {
  * Raw upstream provider frames never cross this boundary; the full assistant
  * response is accumulated server-side and sanitized before `done` is emitted.
  */
-export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [], visionAttachments = [], generatedReferences = [] }) {
+export function buildConversationStreamResponse({ service, sessionReadResult, message, attachments = [], visionAttachments = [], generatedReferences = [], projectContext = '' }) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -420,6 +436,7 @@ export function buildConversationStreamResponse({ service, sessionReadResult, me
           newMessage: message,
           attachments,
           visionAttachments,
+          projectContext,
           onDelta: (text) => send({ type: 'delta', text }),
         })
         .then(({ reply }) => {
@@ -711,6 +728,23 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       ? selectedImageAttachments
       : (sessionImageAttachment ? [sessionImageAttachment] : []);
 
+    // Phase 7.1c: the associated project is derived from the authenticated session
+    // here, never from the request body — a browser may only associate an id. The
+    // resolution is fail-open by design: an unavailable or deleted project leaves
+    // the turn exactly as it was before this feature existed.
+    let projectContext = '';
+    try {
+      const resolveProjectContext = deps.resolveProjectContext !== undefined
+        ? deps.resolveProjectContext
+        : await getService('resolveProjectContext');
+      if (typeof resolveProjectContext === 'function') {
+        const resolved = await resolveProjectContext({ identity, designSessionId: conversationId });
+        projectContext = typeof resolved?.text === 'string' ? resolved.text : '';
+      }
+    } catch {
+      projectContext = '';
+    }
+
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');
     const visionTextIntelligence = visionAttachments.length
@@ -719,7 +753,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     const service = conversationServiceFactory(textProviderFactory(), visionTextIntelligence);
 
     if (wantsStream) {
-      return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments, visionAttachments });
+      return buildConversationStreamResponse({ service, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments, visionAttachments, projectContext });
     }
 
     const { reply } = await service.respond({
@@ -727,6 +761,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       newMessage: message,
       attachments: trustedAttachments,
       visionAttachments,
+      projectContext,
     });
 
     return {

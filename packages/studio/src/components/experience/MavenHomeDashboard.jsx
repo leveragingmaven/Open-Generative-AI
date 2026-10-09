@@ -16,6 +16,7 @@ import {
   readStoredDashboardSessionId,
   storeDashboardSessionId,
 } from "design-agent";
+import { createCreatorProjectClient } from "../../lib/campaigns/creatorProjectClient.js";
 import { ExperiencePage } from "./ExperienceComponents.jsx";
 import styles from "./MavenHomeDashboard.module.css";
 
@@ -62,6 +63,20 @@ function removeDashboardChat(storage, chatId) {
   const next = readDashboardChatList(storage).filter((chat) => chat.id !== chatId);
   storage.setItem(DASHBOARD_CHAT_LIST_STORAGE_KEY, JSON.stringify(next));
   return next;
+}
+
+// One shared project client for the whole dashboard, resolved lazily so a render
+// on a host without fetch cannot break the chat screen. If no client can be
+// created, every project affordance degrades to "no project".
+function mavenProjectClient(ref) {
+  if (!ref.current) {
+    try {
+      ref.current = createCreatorProjectClient();
+    } catch {
+      ref.current = null;
+    }
+  }
+  return ref.current;
 }
 
 function Icon({ type, size = 18 }) {
@@ -286,7 +301,17 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const [renamingChatId, setRenamingChatId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [chatActionBusy, setChatActionBusy] = useState(false);
+  const [projectList, setProjectList] = useState([]);
+  const [chatProjectId, setChatProjectId] = useState(null);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectError, setProjectError] = useState(null);
+  const [projectListError, setProjectListError] = useState(null);
   const mavenClientRef = useRef(null);
+  const projectClientRef = useRef(null);
+  // Monotonic id for the association read. A read that started before a confirmed
+  // write (or before a different conversation) must never apply its answer, or a
+  // stale "no project" would replace the project the creator just selected.
+  const projectRequestRef = useRef(0);
   const attachmentInputRef = useRef(null);
   const sessionCreationRef = useRef(null);
   const moreRef = useRef(null);
@@ -327,6 +352,69 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       cancelled = true;
     };
   }, []);
+
+  // The creator's projects, for the selector. A failure is surfaced and the list
+  // stays empty; nothing about chatting depends on it.
+  useEffect(() => {
+    const client = mavenProjectClient(projectClientRef);
+    if (!client) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const projects = await client.listProjects();
+        if (!cancelled) {
+          setProjectList(Array.isArray(projects) ? projects : []);
+          setProjectListError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProjectList([]);
+          // Remembered separately from a write failure, so the picker never reports
+          // an unreadable list as "this project no longer exists".
+          setProjectListError(error?.message || "Your projects are unavailable right now.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The association lives on the session, so it is read per conversation. The
+  // client only ever sends the id: the server loads the project's own brand,
+  // voice, audience and instructions, so this screen can never inject them.
+  useEffect(() => {
+    // Each conversation change invalidates earlier reads, so a late answer for a
+    // previous chat can never set this chat's project.
+    const requestId = projectRequestRef.current + 1;
+    projectRequestRef.current = requestId;
+    if (!mavenSessionId) {
+      setChatProjectId(null);
+      return undefined;
+    }
+    const client = mavenProjectClient(projectClientRef);
+    if (!client) {
+      setChatProjectId(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setProjectBusy(true);
+    client.getSessionProject(mavenSessionId)
+      .then((association) => {
+        if (!cancelled && projectRequestRef.current === requestId) setChatProjectId(association?.projectId || null);
+      })
+      .catch(() => {
+        // An unreadable association is not something the creator must fix: the
+        // conversation simply continues as a normal, project-free chat.
+        if (!cancelled && projectRequestRef.current === requestId) setChatProjectId(null);
+      })
+      .finally(() => {
+        if (!cancelled && projectRequestRef.current === requestId) setProjectBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mavenSessionId]);
 
   const ensureMavenSession = async () => {
     if (mavenSessionId) return mavenSessionId;
@@ -485,6 +573,46 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     }
   };
 
+  // Select, change or clear the conversation's project. A brand-new chat has no
+  // session yet, so its owned session is created first and the association is
+  // written through the same ownership-checked endpoint.
+  const changeChatProject = async (projectId) => {
+    const client = mavenProjectClient(projectClientRef);
+    const nextProjectId = projectId || null;
+    if (!client || projectBusy) return;
+    setProjectError(null);
+    setProjectBusy(true);
+    try {
+      const sessionId = await ensureMavenSession();
+      const association = await client.setSessionProject(sessionId, nextProjectId);
+      // Only a confirmed association is shown. An unconfirmed write is reported
+      // instead of being displayed as if it had been saved.
+      if (!association) throw new Error("The project change was not confirmed. Please try again.");
+      // The confirmed write wins over any association read still in flight for this
+      // session, which may have been issued before the write landed.
+      projectRequestRef.current += 1;
+      setChatProjectId(association.projectId || null);
+    } catch (error) {
+      setProjectError(error?.message || "Unable to change this conversation's project. Nothing was saved.");
+    } finally {
+      setProjectBusy(false);
+    }
+  };
+
+  const activeChatProject = projectList.find((project) => project.id === chatProjectId) || null;
+  // This screen knows which project the conversation is linked to; whether the
+  // server could load that project's instructions for a given message is decided
+  // server-side and is deliberately not asserted here.
+  const chatProjectStatus = projectBusy
+    ? "Updating this chat's project…"
+    : !chatProjectId
+      ? "No project selected — this chat stays general."
+      : activeChatProject
+        ? `Linked to ${activeChatProject.name} — Maven loads its brand, voice and instructions when the server can.`
+        : projectListError
+          ? "This chat is linked to a project, but your project list could not be loaded right now."
+          : "This chat's project is no longer available — new messages continue without it.";
+
   const hasMavenConversation = mavenMessages.length > 0;
 
   useEffect(() => {
@@ -509,6 +637,8 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setMavenSessionId(null);
     setMavenMessages([]);
     setMavenMessage("");
+    setChatProjectId(null);
+    setProjectError(null);
     attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
     setAttachments([]);
     setSelectedImageReference(null);
@@ -781,6 +911,24 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
             ) : null}
             <a href="/studio/overview" aria-label="Open workspace overview">···</a>
           </div>
+          <div className={styles.projectBar}>
+            <label className={styles.projectLabel} htmlFor="maven-chat-project">Chat project</label>
+            <select
+              id="maven-chat-project"
+              className={styles.projectSelect}
+              value={chatProjectId || ""}
+              onChange={(event) => void changeChatProject(event.target.value || null)}
+              disabled={!mavenReady || projectBusy}
+              title="Use this project's brand, voice, audience and instructions in this conversation"
+            >
+              <option value="">No project</option>
+              {projectList.map((project) => (
+                <option key={project.id} value={project.id}>{project.name || "Untitled Campaign"}</option>
+              ))}
+            </select>
+            <span className={styles.projectStatus} role="status">{chatProjectStatus}</span>
+          </div>
+          {projectError ? <p className={styles.projectError} role="alert">{projectError}</p> : null}
           {chatError ? <p className={styles.chatError} role="alert">{chatError}</p> : null}
           {!hasMavenConversation ? (
             <div className={styles.welcome}>

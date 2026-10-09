@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CampaignStore, CAMPAIGN_STATUSES } from "../lib/campaigns/CampaignStore.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
+import { createCreatorProjectClient } from "../lib/campaigns/creatorProjectClient.js";
 import {
   CAMPAIGN_STATUS_LABELS as STATUS_LABELS,
   formatCampaignDate as formatDate,
@@ -37,6 +38,9 @@ function statusTone(status) {
 
 function CampaignCard({ campaign, isActive, onSelect }) {
   const status = CAMPAIGN_STATUSES.includes(campaign.status) ? campaign.status : "draft";
+  // A record that exists only in this browser is labelled as such: the server is the
+  // authoritative store, so a device-only campaign must never look saved.
+  const pendingSync = campaign.pendingSync === true;
   return (
     <WorkspaceCard
       as="button"
@@ -48,10 +52,11 @@ function CampaignCard({ campaign, isActive, onSelect }) {
     >
       <div className="flex items-start justify-between gap-3">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="campaign" size={17} /></span>
-        <div className="flex flex-wrap justify-end gap-1.5">{isActive && <StatusBadge tone="gold" dot>Active</StatusBadge>}<StatusBadge tone={statusTone(status)}>{STATUS_LABELS[status] || status}</StatusBadge></div>
+        <div className="flex flex-wrap justify-end gap-1.5">{isActive && <StatusBadge tone="gold" dot>Active</StatusBadge>}{pendingSync && <StatusBadge tone="warning">Not saved</StatusBadge>}<StatusBadge tone={statusTone(status)}>{STATUS_LABELS[status] || status}</StatusBadge></div>
       </div>
       <h3 className="mt-5 truncate text-sm font-semibold">{campaign.name}</h3>
       <p className="mt-1 line-clamp-2 min-h-8 text-[10px] leading-4 text-[var(--ms-color-text-muted)]">{campaign.description || "No campaign description yet."}</p>
+      {pendingSync && <p className="mt-2 text-[10px] leading-4 text-[var(--ms-color-gold-primary)]">On this device only — not in your account yet.</p>}
       <div className="mt-4 flex items-center justify-between border-t border-[var(--ms-color-border-subtle)] pt-3 text-[9px] text-[var(--ms-color-text-muted)]"><span>Updated {formatDate(campaign.updatedAt)}</span><span className="inline-flex items-center gap-1 text-[var(--ms-color-pink-primary)]">{isActive ? "Current" : "Make active"} <Icon type="arrow" size={11} /></span></div>
     </WorkspaceCard>
   );
@@ -63,20 +68,77 @@ export default function CampaignWorkspace({ onNavigate = () => {} }) {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const { activeCampaign, activeCampaignId, setActiveCampaign } = useActiveCampaign();
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+  const [createNotice, setCreateNotice] = useState(null);
+  const {
+    activeCampaign,
+    activeCampaignId,
+    setActiveCampaign,
+    legacyQuarantineCount,
+    legacyNotice,
+    importLegacyProjects,
+    discardLegacyProjects,
+  } = useActiveCampaign();
 
   useEffect(() => {
+    let cancelled = false;
     setCampaigns(CampaignStore.list());
     setLoading(false);
+    // The store is a cache of the durable project store, so the list re-derives as
+    // soon as hydration or an import lands.
+    const unsubscribe = CampaignStore.subscribe(() => {
+      if (!cancelled) setCampaigns(CampaignStore.list());
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   const sorted = useMemo(() => [...campaigns].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)), [campaigns]);
 
-  const handleCreate = (event) => {
+  // Creation goes to the account first. The server is the authoritative store, so a
+  // campaign that only reached this browser must never be presented as saved: the
+  // fallback below keeps the work as a labelled device-only draft instead.
+  const handleCreate = async (event) => {
     event.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed) return;
-    CampaignStore.create({ name: trimmed, description });
+    if (!trimmed || creating) return;
+    setCreateError(null);
+    setCreateNotice(null);
+    setCreating(true);
+    try {
+      let client = null;
+      try {
+        client = createCreatorProjectClient();
+      } catch {
+        client = null;
+      }
+      if (!client) {
+        setCreateError("This browser cannot reach your account yet, so nothing was saved.");
+        return;
+      }
+      try {
+        await CampaignStore.createAsync({ name: trimmed, description }, { client });
+      } catch (error) {
+        if (error?.code === "campaign_scope_unavailable" || error?.code === "campaign_client_unavailable") {
+          // No resolved profile scope means there is nowhere to keep the record at
+          // all, so say that plainly instead of creating something invisible.
+          setCreateError("Your projects are not available yet, so nothing was saved. Try again in a moment.");
+          return;
+        }
+        // Offline or rejected: keep the work as a device-only draft that is visibly
+        // labelled as not saved, rather than losing what the creator typed.
+        CampaignStore.create({ name: trimmed, description });
+        setCreateNotice(`${trimmed} is saved in this browser only — it is not in your account yet.`);
+      }
+    } catch (error) {
+      setCreateError(error?.message || "This campaign could not be saved. Nothing was created.");
+      return;
+    } finally {
+      setCreating(false);
+    }
     setCampaigns(CampaignStore.list());
     setName("");
     setDescription("");
@@ -92,6 +154,41 @@ export default function CampaignWorkspace({ onNavigate = () => {} }) {
           description="See the active campaign, the work connected to it, what needs attention, and the clearest next action."
           actions={<PrimaryButton type="button" onClick={() => setShowCreate(true)} className="min-h-10 px-4 py-2 text-xs"><Icon type="plus" size={15} /> Create Campaign</PrimaryButton>}
         />
+
+        {/* Browser-local campaigns from before campaigns were stored per account. They
+            may belong to another creator on this device, so nothing is imported until
+            the person here explicitly says they are theirs. Only the count is shown;
+            the names stay hidden until that decision is made. */}
+        {legacyQuarantineCount > 0 && (
+          <WorkspaceHero className="mt-5">
+            <div className="grid gap-5 sm:grid-cols-[auto_1fr] sm:items-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="campaign" size={22} /></span>
+              <div>
+                <StatusBadge tone="warning">Campaigns found on this device</StatusBadge>
+                <h2 className="mt-3 text-xl font-semibold">
+                  {legacyQuarantineCount} campaign{legacyQuarantineCount === 1 ? "" : "s"} saved in this browser are not in any account yet.
+                </h2>
+                <p className="mt-1 text-xs text-[var(--ms-color-text-secondary)]">
+                  They were stored before campaigns became account-scoped, so they may belong to a different creator who used
+                  this device. Nothing has been imported or changed.
+                </p>
+                {legacyNotice && <p className="mt-2 text-xs text-[var(--ms-color-text-muted)]" role="status">{legacyNotice}</p>}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <PrimaryButton type="button" onClick={() => { void importLegacyProjects(); }} className="min-h-10 px-4 py-2 text-xs">
+                    Import into this account
+                  </PrimaryButton>
+                  <button type="button" onClick={() => discardLegacyProjects()} className="rounded-lg border border-[var(--ms-color-border-subtle)] px-4 py-2 text-xs font-medium text-[var(--ms-color-text-secondary)] hover:text-white">
+                    They are not mine — discard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </WorkspaceHero>
+        )}
+
+        {createNotice && (
+          <p className="mt-5 rounded-lg border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.08)] px-4 py-3 text-xs text-[var(--ms-color-text-secondary)]" role="status">{createNotice}</p>
+        )}
 
         {loading ? (
           <LoadingState title="Loading campaigns" description="Restoring your campaign workspace…" className="mt-5" />
@@ -137,7 +234,8 @@ export default function CampaignWorkspace({ onNavigate = () => {} }) {
             <input id="campaign-name" value={name} onChange={(event) => setName(event.target.value)} autoFocus placeholder="e.g. Summer Launch 2026" className="mt-2 w-full rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-border-emphasized)] focus:ring-2 focus:ring-[rgba(212,168,88,0.16)]" />
             <label className="mt-4 block text-[10px] uppercase tracking-[0.2em] text-[var(--ms-color-gold-muted)]" htmlFor="campaign-description">Description</label>
             <textarea id="campaign-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="What is this campaign about?" className="mt-2 w-full resize-none rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-border-emphasized)] focus:ring-2 focus:ring-[rgba(212,168,88,0.16)]" />
-            <div className="mt-6 flex items-center justify-end gap-3"><button type="button" onClick={() => setShowCreate(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--ms-color-text-secondary)] hover:text-white">Cancel</button><PrimaryButton type="submit" disabled={!name.trim()} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Create Campaign</PrimaryButton></div>
+            {createError && <p className="mt-4 text-xs text-[var(--ms-color-pink-primary)]" role="alert">{createError}</p>}
+            <div className="mt-6 flex items-center justify-end gap-3"><button type="button" onClick={() => setShowCreate(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--ms-color-text-secondary)] hover:text-white">Cancel</button><PrimaryButton type="submit" disabled={!name.trim() || creating} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{creating ? "Creating…" : "Create Campaign"}</PrimaryButton></div>
           </form>
         </div>
       )}

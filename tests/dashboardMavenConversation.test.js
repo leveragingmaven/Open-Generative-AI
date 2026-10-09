@@ -9,6 +9,7 @@ import {
   readStoredDashboardSessionId,
   storeDashboardSessionId,
 } from "../packages/Open-AI-Design-Agent/packages/design-agent/src/conversationClient.js";
+import { createCreatorProjectClient } from "../packages/studio/src/lib/campaigns/creatorProjectClient.js";
 
 const dashboardSource = readFileSync(
   new URL("../packages/studio/src/components/experience/MavenHomeDashboard.jsx", import.meta.url),
@@ -367,4 +368,108 @@ test("Maven conversation hands off to the existing Creator OS execution surface 
   assert.doesNotMatch(dashboardSource, /agent-execution\/from-conversation/);
   assert.doesNotMatch(dashboardSource, /beginAgentExecution|approveAgentExecutionPlan/);
   assert.doesNotMatch(dashboardSource, /agentExecutionRequest|agentExecutionProposal/);
+});
+
+test("Dashboard associates a conversation with a project through the ownership-checked client", () => {
+  assert.match(dashboardSource, /import \{ createCreatorProjectClient \} from "\.\.\/\.\.\/lib\/campaigns\/creatorProjectClient\.js"/);
+  assert.match(dashboardSource, /createCreatorProjectClient\(\)/);
+  // The association is read per conversation and written through the same client.
+  assert.match(dashboardSource, /client\.getSessionProject\(mavenSessionId\)/);
+  assert.match(dashboardSource, /const nextProjectId = projectId \|\| null;/);
+  assert.match(dashboardSource, /client\.setSessionProject\(sessionId, nextProjectId\)/);
+  // Selecting, changing and clearing are all one explicit choice in the picker.
+  assert.match(dashboardSource, /<option value="">No project<\/option>/);
+  assert.match(dashboardSource, /onChange=\{\(event\) => void changeChatProject\(event\.target\.value \|\| null\)\}/);
+  assert.match(dashboardSource, /id="maven-chat-project"/);
+});
+
+test("Dashboard sends only the creator's message: the project id never rides along", () => {
+  // The client sends the project id to its own endpoint and nothing else; the
+  // server derives every instruction, so no project content can be injected here.
+  assert.doesNotMatch(dashboardSource, /\/api\/projects/);
+  assert.doesNotMatch(dashboardSource, /projectId:/);
+
+  const sendBlock = dashboardSource.match(/client\.send\(\{[\s\S]*?\n      \}\);/);
+  assert.ok(sendBlock, "the conversation send call must exist");
+  assert.doesNotMatch(sendBlock[0], /project/i);
+  assert.match(sendBlock[0], /conversationId: sessionId,/);
+  assert.match(sendBlock[0], /message: text,/);
+});
+
+test("Dashboard keeps chatting when the project association cannot be read or written", () => {
+  // A failed read is a normal, project-free chat — never a blocked one.
+  assert.match(dashboardSource, /client\.getSessionProject\(mavenSessionId\)[\s\S]*?\.catch\(\(\) => \{[\s\S]*?setChatProjectId\(null\);[\s\S]*?\}\)/);
+  // A failed or unconfirmed write is surfaced, never displayed as saved.
+  assert.match(dashboardSource, /if \(!association\) throw new Error\("The project change was not confirmed\. Please try again\."\);/);
+  assert.match(dashboardSource, /setProjectError\(error\?\.message \|\| "Unable to change this conversation's project\. Nothing was saved\."\)/);
+  assert.match(dashboardSource, /projectError \? <p className=\{styles\.projectError\} role="alert">/);
+  // Both quiet states are explicit: no project, and a project that is gone.
+  assert.match(dashboardSource, /"No project selected — this chat stays general\."/);
+  assert.match(dashboardSource, /"This chat's project is no longer available — new messages continue without it\."/);
+});
+
+test("Dashboard never claims project instructions were applied, only that the chat is linked", () => {
+  // The status line describes the association the browser actually confirmed. Whether
+  // the server could load the project's instructions for a given turn is decided
+  // server-side and is not observable here, so the UI must not assert it was used.
+  assert.match(dashboardSource, /Linked to \$\{activeChatProject\.name\}/);
+  assert.match(dashboardSource, /Maven loads its brand, voice and instructions when the server can\./);
+  assert.doesNotMatch(dashboardSource, /apply to this chat/, 'no claim that the model used the project');
+  // An unreadable project list is reported as an unreadable list, never as a deleted
+  // project, so a transient failure cannot be described as data loss.
+  assert.match(dashboardSource, /setProjectListError\(error\?\.message \|\| "Your projects are unavailable right now\."\)/);
+  assert.match(dashboardSource, /"This chat is linked to a project, but your project list could not be loaded right now\."/);
+  // The list failure is tracked separately from a write failure.
+  assert.match(dashboardSource, /const \[projectListError, setProjectListError\] = useState\(null\)/);
+});
+
+test("Dashboard discards an association read that a confirmed write has superseded", () => {
+  // A PATCH can be confirmed while the GET issued when the session was created is
+  // still in flight, and the GET's answer (usually "no project") must not overwrite
+  // the selection the creator just made.
+  assert.match(dashboardSource, /const requestId = projectRequestRef\.current \+ 1;\s*\n\s*projectRequestRef\.current = requestId;/);
+  assert.match(dashboardSource, /if \(!cancelled && projectRequestRef\.current === requestId\) setChatProjectId\(association\?\.projectId \|\| null\);/);
+  assert.match(dashboardSource, /projectRequestRef\.current \+= 1;\s*\n\s*setChatProjectId\(association\.projectId \|\| null\);/);
+});
+
+test("Dashboard re-reads the association per conversation and resets it for a new chat", () => {
+  assert.match(dashboardSource, /\}, \[mavenSessionId\]\);/);
+  assert.match(dashboardSource, /setChatProjectId\(null\);\s*\n\s*setProjectError\(null\);/);
+});
+
+test("Project association client selects by id, clears with null, and reads with GET", async () => {
+  const calls = [];
+  const client = createCreatorProjectClient({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      const body = options.body ? JSON.parse(options.body) : null;
+      return jsonResponse(options.method === "PATCH"
+        ? { association: { designSessionId: "s1", projectId: body?.projectId ?? null } }
+        : { association: { designSessionId: "s1", projectId: "campaign-9" } });
+    },
+  });
+
+  const selected = await client.setSessionProject("s1", "campaign-9");
+  assert.equal(selected.projectId, "campaign-9");
+  const cleared = await client.setSessionProject("s1", null);
+  assert.equal(cleared.projectId, null);
+  const association = await client.getSessionProject("s1");
+  assert.equal(association.projectId, "campaign-9");
+
+  assert.equal(calls[0].url, "/api/design-agent/sessions/s1/project");
+  assert.equal(calls[0].options.method, "PATCH");
+  assert.equal(calls[0].options.credentials, "include");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { projectId: "campaign-9" });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { projectId: null });
+  assert.equal(calls[2].options.method, "GET");
+});
+
+test("Project association client reports a rejected write instead of claiming success", async () => {
+  const client = createCreatorProjectClient({
+    fetchImpl: async () => jsonResponse({ error: "Project not found.", code: "project_not_found" }, 404),
+  });
+  await assert.rejects(
+    () => client.setSessionProject("s1", "campaign-3"),
+    (error) => error.code === "project_not_found" && error.status === 404,
+  );
 });

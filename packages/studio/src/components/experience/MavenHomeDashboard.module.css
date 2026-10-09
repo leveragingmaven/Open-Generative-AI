@@ -623,6 +623,31 @@
   text-decoration: none;
 }
 .canvasHeader a:hover { background: rgba(255,255,255,.05); color: #fff; }
+.projectBar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  width: min(calc(100% - 40px), 760px);
+  min-width: 0;
+  margin: 2px auto 0;
+}
+.projectLabel { flex: 0 0 auto; color: #8e8982; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.projectSelect {
+  flex: 0 1 auto;
+  max-width: 220px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  color: #d8d2cc;
+  font-size: 11px;
+}
+.projectSelect:hover:not(:disabled) { border-color: rgba(226,56,132,.35); }
+.projectSelect:disabled { opacity: .5; cursor: not-allowed; }
+.projectStatus { overflow: hidden; flex: 1 1 auto; color: #85817c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.projectError { width: min(calc(100% - 40px), 760px); margin: 4px auto 0; color: #f39a9f; font-size: 11px; line-height: 1.55; }
 .statusDot { width: 7px; height: 7px; border-radius: 50%; background: #d4a858; box-shadow: 0 0 12px rgba(212,168,88,.42); }
 .welcome {
   display: flex;
@@ -804,6 +829,8 @@
   .sidebarFooter a { justify-content: center; min-height: 38px; }
   .sidebarFooter a > span,.sidebarFooter button > span { display: none; }
   .canvasHeader { min-height: 42px; padding: 0 13px; }
+  .projectBar { width: calc(100% - 26px); }
+  .projectStatus { display: none; }
   .welcome { padding: 14px 14px 0; }
   .welcome h1 { max-width: 390px; font-size: clamp(21px, 6vw, 28px); }
   .welcome p { max-width: 350px; font-size: 11px; }
