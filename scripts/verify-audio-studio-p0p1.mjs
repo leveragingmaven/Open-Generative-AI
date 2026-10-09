@@ -39,6 +39,7 @@ async function loadBundle() {
         'export { default as AudioStudio } from "../AudioStudio.jsx";',
         'export { default as LipSyncStudio } from "../LipSyncStudio.jsx";',
         'export { audioModels, getAudioModelById } from "../../models.js";',
+        'export { parameterGroupsForModel, hasNonDefaultAdvancedValue, advancedCloneSettingKeys } from "../AudioStudio.jsx";',
       ].join("\n"),
       resolveDir: pickerDir,
       loader: "jsx",
@@ -66,8 +67,18 @@ async function loadBundle() {
   return loaded;
 }
 
-const { React, renderToStaticMarkup, PresetVoicePicker, AudioStudio, LipSyncStudio, audioModels, getAudioModelById } =
-  await loadBundle();
+const {
+  React,
+  renderToStaticMarkup,
+  PresetVoicePicker,
+  AudioStudio,
+  LipSyncStudio,
+  audioModels,
+  getAudioModelById,
+  parameterGroupsForModel,
+  hasNonDefaultAdvancedValue,
+  advancedCloneSettingKeys,
+} = await loadBundle();
 
 const schema = getAudioModelById("minimax-speech-2.6-hd").inputs.voice_id;
 const { listPresetVoices } = await import(
@@ -205,6 +216,78 @@ check("Lip Sync mounts with labelled upload controls and a stated mode", () => {
   // incompatible image/video combination stays impossible.
   assert.doesNotMatch(html, /Upload video/);
   assert.match(html, /A still portrait \+ an audio track\. Switch to Video to sync a face video\./);
+});
+
+check("the Lip Sync workspace renders its areas with a compact action", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(LipSyncStudio, {
+      apiKey: "render-check",
+      onGenerationComplete: () => {},
+      onGenerationError: () => {},
+    }),
+  );
+  // The single crowded row is now a source column and a settings column, and
+  // the two-area split is the same one the component test names.
+  assert.match(html, /Source media/);
+  assert.match(html, /Speech direction/);
+  assert.match(html, /lg:grid-cols-\[1\.3fr_1fr\]/);
+  // A compact header replaced the hero that used to fill the viewport.
+  assert.match(html, /<h1 class="[^"]*">Lip Sync<\/h1>/);
+  assert.doesNotMatch(html, /Create a lip sync video\./);
+  assert.doesNotMatch(html, /text-5xl/);
+  // The action is the compact control now, and the oversized pink pill is gone
+  // from the markup of every studio that shares the primitive.
+  assert.match(html, /min-h-9 px-4 py-2 rounded-lg/);
+  assert.doesNotMatch(html, /px-7 py-3/);
+  assert.doesNotMatch(html, /rounded-full font-bold text-sm/);
+  // Model, quality and the action itself are still mounted.
+  assert.match(html, /Sync Lip/);
+});
+
+check("Voice Cloner groups only its own knobs, and opens when one is set", () => {
+  const clone = getAudioModelById("minimax-voice-clone");
+  assert.ok(clone, "expected the Minimax voice-clone model in the catalog");
+
+  const groups = parameterGroupsForModel(clone, "clone");
+  const advanced = groups.find((group) => group.id === "advanced");
+  const primary = groups.find((group) => group.id === "primary");
+  assert.ok(advanced && advanced.collapsible, "the clone flow needs an advanced group");
+  assert.deepEqual(
+    advanced.entries.map(([key]) => key).sort(),
+    ["accuracy", "need_noise_reduction", "need_volume_normalization"],
+  );
+
+  // The two groups partition the model's inputs: nothing is dropped, and no
+  // required input is moved out of the open flow.
+  const primaryKeys = primary.entries.map(([key]) => key);
+  const advancedKeys = advanced.entries.map(([key]) => key);
+  for (const key of clone.required || []) {
+    assert.ok(primaryKeys.includes(key), `${key} is required and must stay visible`);
+  }
+  assert.deepEqual(
+    [...primaryKeys, ...advancedKeys].sort(),
+    Object.keys(clone.inputs).filter((key) => key !== "model").sort(),
+  );
+
+  // An untouched form stays collapsed; moving a knob off its catalog default
+  // opens the section, so a chosen value can never be hidden.
+  assert.equal(hasNonDefaultAdvancedValue(clone, advancedKeys, { accuracy: 0.7 }), false);
+  assert.equal(hasNonDefaultAdvancedValue(clone, advancedKeys, { accuracy: 0.9 }), true);
+  assert.equal(
+    hasNonDefaultAdvancedValue(clone, advancedKeys, { need_noise_reduction: true }),
+    true,
+  );
+
+  // Every other mode and model is untouched: nothing is grouped away from them,
+  // and each keeps exactly one open group carrying its whole schema.
+  const music = getAudioModelById("suno-create-music");
+  const musicIds = Object.keys(music.inputs).filter((key) => key !== "model");
+  assert.equal(advancedCloneSettingKeys(music, "music").length, 0);
+  assert.equal(advancedCloneSettingKeys(clone, "music").length, 0);
+  const musicGroups = parameterGroupsForModel(music, "music");
+  assert.equal(musicGroups.length, 1);
+  assert.equal(musicGroups[0].collapsible, false);
+  assert.deepEqual(musicGroups[0].entries.map(([key]) => key).sort(), [...musicIds].sort());
 });
 
 check("the capability map still covers the whole catalog", () => {

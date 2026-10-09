@@ -36,6 +36,7 @@ import { MavenButton } from "./mavensync/MavenButton.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 import PresetVoicePicker from "./audio/PresetVoicePicker.jsx";
 import {
+  AUDIO_MODE_IDS,
   AUDIO_MODES,
   DEFAULT_AUDIO_MODE_ID,
   audioModeById,
@@ -699,6 +700,123 @@ function ClonedVoiceCard({ voiceId }) {
 }
 
 // ---------------------------------------------------------------------------
+// Advanced Settings
+// ---------------------------------------------------------------------------
+// A voice-clone model declares its tuning knobs next to the inputs that define
+// the clone itself. Three of them only change how the submitted sample is
+// processed, and a creator reaches for them *after* the first clone works, so
+// they belong behind one labelled disclosure rather than in the primary flow.
+//
+// The keys are the provider's own parameter names in the catalog — the unit
+// test checks them against `models.js` — so this list cannot drift away from
+// the payload it writes. Every key the list does not name stays in the open
+// flow: grouping can move a parameter, never hide one.
+//
+// `prompt` is deliberately absent: it is the preview script, and this studio
+// treats a script as a primary input in every mode.
+export const ADVANCED_CLONE_SETTING_KEYS = Object.freeze([
+  "need_noise_reduction",
+  "need_volume_normalization",
+  "accuracy",
+]);
+
+/** The advanced keys the given model actually declares, in catalog order. */
+export function advancedCloneSettingKeys(model, modeId) {
+  if (!model || modeId !== AUDIO_MODE_IDS.CLONE) return [];
+  const inputs = model.inputs || {};
+  return ADVANCED_CLONE_SETTING_KEYS.filter((key) => inputs[key] !== undefined);
+}
+
+/**
+ * True when a secondary setting holds something other than its catalog default.
+ * The disclosure is forced open in that case, so a value the creator set can
+ * never end up hidden behind a collapsed header.
+ */
+export function hasNonDefaultAdvancedValue(model, keys, params) {
+  const inputs = model?.inputs || {};
+  return keys.some((key) => {
+    const value = params ? params[key] : undefined;
+    if (value === undefined || value === null) return false;
+    const schema = inputs[key] || {};
+    if (schema.default !== undefined) return value !== schema.default;
+    return (
+      value === true ||
+      (typeof value === "number" && value !== 0) ||
+      (typeof value === "string" && value.trim() !== "")
+    );
+  });
+}
+
+/**
+ * The configuration form as groups: the open primary inputs first, then — only
+ * for a model and mode that declare them — the collapsible secondary settings.
+ * Each entry keeps its catalog key and schema, so the exact same control still
+ * renders it.
+ */
+export function parameterGroupsForModel(model, modeId) {
+  const entries = Object.entries(model?.inputs || {}).filter(([key]) => key !== "model");
+  const advanced = new Set(advancedCloneSettingKeys(model, modeId));
+  const groups = [
+    {
+      id: "primary",
+      collapsible: false,
+      entries: entries.filter(([key]) => !advanced.has(key)),
+    },
+  ];
+  const secondary = entries.filter(([key]) => advanced.has(key));
+  if (secondary.length > 0) {
+    groups.push({ id: "advanced", collapsible: true, entries: secondary });
+  }
+  return groups;
+}
+
+const SettingsChevronIcon = ({ open = false }) => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+    aria-hidden="true"
+  >
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+
+/**
+ * One labelled disclosure for the grouped knobs. It reports how many settings
+ * it holds and whether any of them is active, so a collapsed header never hides
+ * the fact that the group is doing something.
+ */
+function AdvancedSettingsDisclosure({ label, count, open, active, onToggle }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="w-full flex items-center justify-between gap-2 bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-3 py-2.5 text-left transition-all"
+    >
+      <span className="flex items-center gap-2 min-w-0">
+        <SettingsChevronIcon open={open} />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[#A3A3A3]">
+          {label}
+        </span>
+        {active && !open && (
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-[#D4A858]">
+            Active
+          </span>
+        )}
+      </span>
+      <span className="text-[10px] font-semibold text-[#8C8C8C] shrink-0">
+        {count} {count === 1 ? "setting" : "settings"}
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Audio Studio Component
 // ---------------------------------------------------------------------------
 export default function AudioStudio({
@@ -756,6 +874,17 @@ export default function AudioStudio({
   const activeMode = audioModeById(audioMode);
   // The catalog is only ever *filtered* — no model is removed by a mode.
   const modeModels = modelsForMode(audioMode, audioModels);
+
+  // ── Advanced Settings (Voice Cloner) ──────────────────────────────────
+  // Collapsed by default, and forced open whenever one of the grouped knobs
+  // holds a non-default value, so a setting the creator chose is never hidden.
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const advancedSettingKeys = advancedCloneSettingKeys(selectedModel, audioMode);
+  const advancedSettingsActive =
+    advancedSettingKeys.length > 0 &&
+    hasNonDefaultAdvancedValue(selectedModel, advancedSettingKeys, params);
+  const advancedSettingsOpen = showAdvancedSettings || advancedSettingsActive;
+  const parameterGroups = parameterGroupsForModel(selectedModel, audioMode);
 
   // ── Initialize params when model changes ──────────────────────────────
   useEffect(() => {
@@ -1152,9 +1281,22 @@ export default function AudioStudio({
             </div>
           )}
 
-          {/* Dynamic Configuration Form */}
+          {/* Dynamic Configuration Form. The primary inputs stay in the open; a
+              clone model's processing knobs are grouped behind one labelled
+              disclosure so the clone flow reads as two steps, not ten. */}
           <div className="space-y-5">
-            {selectedModel && Object.entries(selectedModel.inputs || {}).map(([key, schema]) => {
+            {selectedModel && parameterGroups.map((group) => (
+              <div key={group.id} className={group.id === "advanced" ? "space-y-3 pt-1" : "space-y-5"}>
+                {group.collapsible && (
+                  <AdvancedSettingsDisclosure
+                    label="Advanced Settings"
+                    count={group.entries.length}
+                    open={advancedSettingsOpen}
+                    active={advancedSettingsActive}
+                    onToggle={() => setShowAdvancedSettings((prev) => !prev)}
+                  />
+                )}
+                {(!group.collapsible || advancedSettingsOpen) && group.entries.map(([key, schema]) => {
               // Skip model switcher itself (if it's in schemas)
               if (key === 'model') return null;
               // Audio URL file upload (single)
@@ -1442,7 +1584,9 @@ export default function AudioStudio({
                   )}
                 </div>
               );
-            })}
+                })}
+              </div>
+            ))}
           </div>
 
         </div>
@@ -1451,11 +1595,12 @@ export default function AudioStudio({
         <div className="p-4 py-3 border-t border-[#2C2C2C] bg-[#0B0B0B]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end">
           <MavenButton
             variant="primaryPink"
-            size="lg"
+            size="sm"
             type="button"
             onClick={handleGenerate}
             disabled={!selectedModel}
             isLoading={isGenerating}
+            className="min-h-9 w-full sm:w-auto uppercase tracking-[0.1em]"
             leftIcon={!isGenerating ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                 <path d="M5 3l14 9-14 9V3z" />

@@ -778,12 +778,26 @@ export default function LipSyncStudio({
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-app-bg relative overflow-hidden">
       
-      {/* ── CENTRAL GALLERY AREA ── */}
-      <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
+      {/* ── WORKSPACE ──
+          The screen is the workspace, not a hero: one compact header line, the
+          results of earlier syncs, then the input panel itself. The panel sits
+          in the flow instead of floating over the results, so the container no
+          longer needs oversized bottom padding to keep clear of it. */}
+      {/* A flex column so the panel can take the free space below the results:
+          each row is `shrink-0`, so a short viewport scrolls the workspace
+          instead of squashing the panel or the gallery. */}
+      <div className="flex flex-1 flex-col w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar px-3 sm:px-4 pt-3 sm:pt-4 pb-4">
+        <header className="mb-3 shrink-0 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">Lip Sync</h1>
+          <p className="text-[11px] sm:text-xs font-medium text-white/40">
+            Add a face or a portrait, add an audio track, then sync them.
+          </p>
+        </header>
+
         {history.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full pt-4 animate-fade-in-up">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full pt-4 shrink-0 animate-fade-in-up">
             {history.map((entry, idx) => (
               <div
                 key={entry.id || idx}
@@ -893,52 +907,24 @@ export default function LipSyncStudio({
             ))}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh] pb-28 md:pb-24">
-            {/* Overlapping floating cards */}
-            <div className="relative flex items-center justify-center gap-1.5 md:gap-3 mb-10 select-none scale-90 sm:scale-100">
-              <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-48 sm:w-96 sm:h-64 rounded-full bg-[#D4A858]/[0.16] blur-[70px]" />
-              <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] flex-shrink-0">
-                <img
-                  src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/sdxl-image.avif"
-                  alt="Creative asset 1"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl -rotate-[4deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] -ml-3 sm:-ml-4 flex-shrink-0">
-                <img
-                  src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/chroma-image.avif"
-                  alt="Creative asset 2"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="w-18 h-18 sm:w-24 sm:h-24 rounded-full border border-white/10 shadow-2xl rotate-[6deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] -ml-3 sm:-ml-4 flex-shrink-0">
-                <img
-                  src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/neta-lumina.avif"
-                  alt="Creative asset 3"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="w-18 h-22 sm:w-24 sm:h-28 rounded-2xl border border-white/10 shadow-2xl rotate-[12deg] transform hover:rotate-0 hover:scale-110 hover:z-20 transition-all duration-300 overflow-hidden bg-white/[0.01] -ml-3 sm:-ml-4 flex-shrink-0">
-                <img
-                  src="https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/perfect-pony-xl.avif"
-                  alt="Creative asset 4"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            </div>
-
-            <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-center px-4 flex flex-col items-center">
-              <span className="text-white font-black uppercase tracking-wide mb-1 opacity-90">Create a lip sync video.</span>
-            </h1>
-            <p className="text-white/40 text-xs sm:text-sm font-medium tracking-wide text-center max-w-lg leading-relaxed px-4">
-              Add a face video and audio track, then sync them with the controls below.
-            </p>
-          </div>
+          <p className="shrink-0 rounded-xl border border-dashed border-white/[0.08] px-4 py-6 text-center text-xs text-white/35">
+            Your synced videos appear here. The workspace below takes a portrait
+            image or a face video plus an audio track.
+          </p>
         )}
-      </div>
 
-      {/* ── BOTTOM PROMPT BAR ── */}
-      <PromptComposer>
+        {/* ── WORKSPACE PANEL ──
+            Docked in the flow instead of floating over the results, and split
+            into what the sync is made of (source media and its audio) and how
+            it should sound (direction, model, quality). */}
+        <PromptComposer compact className="mt-auto pt-3">
+          <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
+            {/* ── Source media ── */}
+            <section className="flex flex-col gap-2.5 lg:border-r lg:border-white/[0.06] lg:pr-3">
+              <h2 className="text-[10px] font-bold uppercase tracking-widest text-white/40">
+                Source media
+              </h2>
+
           {/* Mode toggle row */}
           <div className="flex items-center flex-wrap gap-1 px-1">
             <PromptSegmentedControl>
@@ -1114,21 +1100,24 @@ export default function LipSyncStudio({
                 </div>
               )}
             </div>
-
-            {/* Prompt textarea */}
-            <div className="flex-1 flex flex-col">
-              <PromptTextarea
-                ref={textareaRef}
-                value={prompt}
-                onChange={handlePromptInput}
-                placeholder="Describe speech style..."
-              />
-            </div>
           </div>
+            </section>
 
-          {/* Bottom controls row */}
-          <PromptFooter>
-            <PromptControls>
+            {/* ── Direction & settings ── */}
+            <section className="flex flex-col gap-2.5">
+              <h2 className="text-[10px] font-bold uppercase tracking-widest text-white/40">
+                Speech direction
+              </h2>
+              <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1">
+                <PromptTextarea
+                  ref={textareaRef}
+                  value={prompt}
+                  onChange={handlePromptInput}
+                  placeholder="Describe speech style..."
+                />
+              </div>
+
+              <PromptControls>
               {/* Model selector */}
               <div className="relative">
                 <button
@@ -1198,9 +1187,13 @@ export default function LipSyncStudio({
                   />
                 </div>
               )}
-            </PromptControls>
+              </PromptControls>
+            </section>
+          </div>
 
-            {/* Generate button */}
+          {/* One action for the whole workspace, aligned to the end on desktop. */}
+          <PromptFooter>
+            <div className="w-full sm:ml-auto sm:w-auto">
             <PromptAction
               onClick={handleGenerate}
               disabled={isGenerating}
@@ -1220,8 +1213,10 @@ export default function LipSyncStudio({
                 </>
               )}
             </PromptAction>
+            </div>
           </PromptFooter>
-      </PromptComposer>
+        </PromptComposer>
+      </div>
 
       {/* ── FULLSCREEN MEDIA MODAL ── */}
       {fullscreenUrl && (
