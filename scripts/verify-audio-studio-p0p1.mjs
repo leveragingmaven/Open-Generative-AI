@@ -178,6 +178,12 @@ check("Audio Studio mounts on Voice Generator and renders the mode controls", ()
   // proving it is the control wired to the voice field.
   assert.match(html, /Select a voice/);
   assert.match(html, /472 built-in voices/);
+  // The voice model's text field reads as a script and carries the model's own
+  // ceiling from the catalog (10000 for MiniMax speech), with a live count.
+  assert.match(html, />Script<\/label>/);
+  assert.match(html, /aria-describedby="prompt-count"/);
+  assert.match(html, /0 \/ 10000 characters/);
+  assert.match(html, /Type or paste the words you want spoken/);
   // The old music-first copy is gone.
   assert.doesNotMatch(html, /Generate Track/);
   assert.doesNotMatch(html, /Craft your next high-fidelity track/);

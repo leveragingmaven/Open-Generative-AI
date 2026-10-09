@@ -25,6 +25,13 @@ import {
   structuredItemLabel,
   validateModelStructuredInputs,
 } from "../lib/audio/structuredInput.js";
+import {
+  declaredScriptLimit,
+  invalidScriptField,
+  scriptFieldLabel,
+  scriptFieldPlaceholder,
+  scriptLengthState,
+} from "../lib/audio/scriptInput.js";
 import { MavenButton } from "./mavensync/MavenButton.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
 import PresetVoicePicker from "./audio/PresetVoicePicker.jsx";
@@ -899,6 +906,13 @@ export default function AudioStudio({
       return;
     }
 
+    // So must a script the model has already declared too long for itself.
+    const scriptCheck = invalidScriptField(selectedModel, params);
+    if (scriptCheck) {
+      alert(`${scriptCheck.title}: ${scriptCheck.error}`);
+      return;
+    }
+
     setIsGenerating(true);
     setGenerateError(null);
 
@@ -1345,17 +1359,48 @@ export default function AudioStudio({
 
               // Prompt / Textarea Input
               if (key === "prompt") {
+                const scriptLimit = declaredScriptLimit(selectedModel);
+                const scriptState = scriptLengthState({ text: params[key], limit: scriptLimit });
+                const scriptCountId = `${key}-count`;
                 return (
                   <div key={key} className="space-y-2">
-                    <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
-                      {schema.title || "Lyrics / Prompt"}
-                    </label>
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                        {scriptFieldLabel(selectedModel, schema)}
+                      </label>
+                      {/* A voiceover is written to a length, so the count sits on
+                          the field instead of arriving as a provider error. */}
+                      <span
+                        id={scriptCountId}
+                        className={`text-[10px] font-semibold tabular-nums ${
+                          scriptState.overLimit ? "text-[#F87171]" : "text-[#8C8C8C]"
+                        }`}
+                      >
+                        {scriptState.count}
+                        {scriptLimit ? ` / ${scriptLimit}` : ""} characters
+                      </span>
+                    </div>
                     <textarea
                       value={params[key] || ""}
                       onChange={(e) => setParams(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full bg-[#161616] border border-[#2C2C2C] focus:border-[#E82070]/70 rounded-lg p-3 text-xs text-[#FAFAFA] placeholder:text-[#8C8C8C] focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner"
-                      placeholder={schema.description || "Enter what you want generated..."}
+                      aria-invalid={scriptState.overLimit || undefined}
+                      aria-describedby={scriptCountId}
+                      className={`w-full bg-[#161616] border rounded-lg p-3 text-xs text-[#FAFAFA] placeholder:text-[#8C8C8C] focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner ${
+                        scriptState.overLimit
+                          ? "border-[#F87171]/60 focus:border-[#F87171]"
+                          : "border-[#2C2C2C] focus:border-[#E82070]/70"
+                      }`}
+                      placeholder={scriptFieldPlaceholder(selectedModel, schema)}
                     />
+                    {scriptState.message && (
+                      <span
+                        className={`block text-[11px] leading-normal ${
+                          scriptState.overLimit ? "text-[#F87171] font-semibold" : "text-[#D4A858]"
+                        }`}
+                      >
+                        {scriptState.message}
+                      </span>
+                    )}
                     {schema.examples && Array.isArray(schema.examples) && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {schema.examples.map((ex, idx) => (
