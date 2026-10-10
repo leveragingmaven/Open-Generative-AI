@@ -26,6 +26,13 @@ import {
 } from "./experience/ExperienceComponents.jsx";
 
 function assetUrl(asset) { return asset?.generatedFiles?.[0] || asset?.url || null; }
+function assetThumbnailUrl(asset) {
+  const url = assetUrl(asset);
+  if (!url?.startsWith('/api/creative-assets/media?')) return null;
+  const params = new URLSearchParams(url.split('?')[1]);
+  params.set('variant', 'thumbnail');
+  return `/api/creative-assets/media?${params}`;
+}
 function assetType(asset) { return asset?.metadata?.assetType || asset?.kind || asset?.type || asset?.metadata?.studio || "creative"; }
 function assetTitle(asset) { return asset?.title || asset?.prompt || "Untitled Creative Asset"; }
 
@@ -146,13 +153,20 @@ function Icon({ type, size = 18 }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
 }
 
-function AssetMedia({ asset, className = "" }) {
+function AssetMedia({ asset, className = "", fullSize = false, eager = false }) {
   const [failedSources, setFailedSources] = useState([]);
+  const [loadedSource, setLoadedSource] = useState(null);
   const kind = assetPreviewKind(asset) || assetType(asset).toLowerCase();
   const primaryUrl = assetUrl(asset);
   const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
-  const imageUrl = [thumbnail, primaryUrl].find((source) => source && !failedSources.includes(source));
-  if (imageUrl && kind.includes("image")) return <img src={imageUrl} alt={assetTitle(asset)} onError={() => setFailedSources((sources) => [...sources, imageUrl])} className={`h-full w-full object-cover ${className}`} />;
+  const imageUrl = [fullSize ? null : thumbnail, fullSize ? null : assetThumbnailUrl(asset), primaryUrl]
+    .find((source) => source && !failedSources.includes(source));
+  if (imageUrl && kind.includes("image")) return <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[var(--ms-color-background)]">
+    {loadedSource !== imageUrl ? <span role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">Loading image…</span> : null}
+    <img src={imageUrl} alt={assetTitle(asset)} loading={eager ? "eager" : "lazy"} decoding="async"
+      onLoad={() => setLoadedSource(imageUrl)} onError={() => setFailedSources((sources) => [...sources, imageUrl])}
+      className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${loadedSource === imageUrl ? "opacity-100" : "opacity-0"} ${className}`} />
+  </div>;
   if (primaryUrl && !failedSources.includes(primaryUrl) && kind.includes("video")) return <video src={primaryUrl} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, primaryUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
   if (primaryUrl && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={primaryUrl} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
   return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={25} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em]">{kind}</span></div>;
@@ -162,7 +176,7 @@ function AssetCard({ asset, selected, onSelect }) {
   const studioKey = assetStudioKey(asset);
   return (
     <WorkspaceCard as="button" type="button" interactive onClick={onSelect} aria-pressed={selected} className={`group overflow-hidden p-0 text-left ${selected ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
-      <div className="aspect-[4/3] bg-black/20"><AssetMedia asset={asset} /></div>
+      <div className="aspect-[4/3] overflow-hidden bg-[var(--ms-color-background)]"><AssetMedia asset={asset} /></div>
       <div className="p-3.5">
         <div className="flex items-start justify-between gap-2"><h3 className="min-w-0 flex-1 truncate text-xs font-semibold">{assetTitle(asset)}</h3>{asset.favorite ? <span className="text-[var(--ms-color-gold-primary)]"><Icon type="favorite" size={13} /></span> : null}</div>
         <p className="mt-1.5 truncate text-[9px] text-[var(--ms-color-text-muted)]">{STUDIO_LABELS[studioKey] || assetType(asset)}{asset.model ? ` · ${asset.model}` : ""}</p>
@@ -189,6 +203,8 @@ export default function AssetLibraryStudio() {
   const [favoriteFilter, setFavoriteFilter] = useState(false);
   const [archiveFilter, setArchiveFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
+  const [previewAsset, setPreviewAsset] = useState(null);
+  const [downloadError, setDownloadError] = useState(null);
   const [allAssets, setAllAssets] = useState([]);
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -333,10 +349,20 @@ export default function AssetLibraryStudio() {
     router.push(suffix ? `${target}?${suffix}` : target);
   };
 
-  const downloadSelected = () => {
-    if (!selected || !assetUrl(selected)) return;
-    downloadAsset(assetUrl(selected), { id: selected.id, kind: assetType(selected), prefix: assetTitle(selected) });
+  const downloadSelected = async (asset = selected) => {
+    if (!asset || !assetUrl(asset)) return;
+    setDownloadError(null);
+    const result = await downloadAsset(assetUrl(asset), { id: asset.id, kind: assetType(asset), prefix: assetTitle(asset) });
+    if (!result.ok) setDownloadError("This media could not be downloaded. Please try again.");
   };
+
+  useEffect(() => {
+    if (!previewAsset) return;
+    setDownloadError(null);
+    const onKeyDown = (event) => { if (event.key === "Escape") setPreviewAsset(null); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewAsset]);
 
   const createPublishingDraft = (asset) => {
     if (!asset) return;
@@ -375,6 +401,7 @@ export default function AssetLibraryStudio() {
 
       {publishingNotice ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{publishingNotice}</div> : null}
       {assetActionError ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{assetActionError}</div> : null}
+      {downloadError ? <div role="alert" className="mt-5 rounded-[var(--ms-radius-card-small)] border border-[rgba(239,107,114,0.35)] bg-[rgba(239,107,114,0.08)] px-4 py-3 text-xs text-[var(--ms-color-error)]">{downloadError}</div> : null}
 
       {activeCampaign && (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[rgba(212,168,88,0.06)] px-4 py-3">
@@ -431,14 +458,14 @@ export default function AssetLibraryStudio() {
 
       <WorkspaceSection title="Asset Grid" description={publishingSelectMode ? `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} available for publishing selection.` : `${scopedAssets.length} ${scopedAssets.length === 1 ? "asset" : "assets"} match this library view.`}>
         {serverWarning ? <p className="mb-3 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] px-3 py-2 text-[10px] text-[var(--ms-color-text-muted)]">{serverWarning}</p> : null}
-        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <div key={asset.id} className="relative"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} />{(localIds.has(asset.id) || durableIds.has(asset.id)) && <button type="button" onClick={() => void handleRemove(asset)} disabled={removingId === asset.id} title="Remove from library" aria-label={`Remove ${assetTitle(asset)} from your library`} className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 transition-colors hover:border-[rgba(239,107,114,0.5)] hover:bg-[rgba(239,107,114,0.25)] hover:text-[var(--ms-color-error)] disabled:opacity-50"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}</div>)}</div>}
+        {loading ? <LoadingState title="Loading Creative Library" description="Gathering your saved assets..." /> : loadError ? <ErrorState title="Creative Library unavailable" description={loadError} /> : scopedAssets.length === 0 ? <EmptyState title={libraryAssets.length ? "No assets match these filters" : "No creative assets yet"} description={libraryAssets.length ? "Adjust search or filters to see more of your existing library." : "Assets saved from your studios will appear here with their existing metadata."} icon={<Icon type="library" />} action={libraryAssets.length ? <SecondaryButton type="button" onClick={() => { setQuery(""); setTypeFilter("all"); setFavoriteFilter(false); setArchiveFilter("all"); }} className="min-h-9 px-4 py-2 text-xs">Clear filters</SecondaryButton> : <PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Create an asset</PrimaryButton>} /> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{scopedAssets.map((asset) => publishingSelectMode ? <div key={asset.id} className="space-y-2"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => setSelectedId(asset.id)} /><PrimaryButton type="button" onClick={() => createPublishingDraft(asset)} className="min-h-9 w-full px-4 py-2 text-xs">Use for Publishing</PrimaryButton></div> : <div key={asset.id} className="relative"><AssetCard asset={asset} selected={selectedId === asset.id} onSelect={() => { setSelectedId(asset.id); setPreviewAsset(asset); }} />{(localIds.has(asset.id) || durableIds.has(asset.id)) && <button type="button" onClick={() => void handleRemove(asset)} disabled={removingId === asset.id} title="Remove from library" aria-label={`Remove ${assetTitle(asset)} from your library`} className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white/70 transition-colors hover:border-[rgba(239,107,114,0.5)] hover:bg-[rgba(239,107,114,0.25)] hover:text-[var(--ms-color-error)] disabled:opacity-50"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></button>}</div>)}</div>}
       </WorkspaceSection>
 
       {selected && (
         <WorkspaceSection title="Asset Details" description="Existing metadata for the selected asset." actions={<button type="button" onClick={() => setSelectedId(null)} className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--ms-color-text-muted)] hover:text-white">Close details</button>}>
           <WorkspaceCard className="overflow-hidden p-0">
             <div className="grid lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
-              <div className="min-h-64 bg-black/20 lg:min-h-[360px]"><AssetMedia asset={selected} /></div>
+              <div className="h-72 overflow-hidden bg-[var(--ms-color-background)] sm:h-96 lg:h-[30rem]"><AssetMedia asset={selected} eager /></div>
               <div className="p-5 sm:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><StatusBadge tone="gold">{assetType(selected)}</StatusBadge><h3 className="mt-3 text-xl font-semibold tracking-[-0.025em]">{assetTitle(selected)}</h3>{selected.description ? <p className="mt-2 text-xs leading-5 text-[var(--ms-color-text-secondary)]">{selected.description}</p> : null}</div>{selectedStatus ? <StatusBadge tone={selectedStatus === "failed" ? "error" : "neutral"}>{selectedStatus}</StatusBadge> : null}</div>
                 <dl className="mt-6 grid gap-x-5 gap-y-4 sm:grid-cols-2">
@@ -451,7 +478,7 @@ export default function AssetLibraryStudio() {
                 </dl>
                 {!durableIds.has(selected.id) && localIds.has(selected.id) ? <div className="mt-5 flex flex-wrap items-end gap-2"><label className="min-w-[180px] flex-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title<input aria-label="Asset title" value={renameTitle || selected.title || ""} onChange={(event) => setRenameTitle(event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white" /></label><SecondaryButton type="button" disabled={!renameTitle.trim() || renameTitle.trim() === selected.title || assetActionBusy} onClick={() => handleRename(selected)} className="min-h-10 px-4 py-2 text-xs">{assetActionBusy ? "Saving…" : "Save Title"}</SecondaryButton></div> : null}
                 <div className="mt-7 flex flex-wrap gap-2">
-                  {assetUrl(selected) ? <PrimaryButton type="button" onClick={downloadSelected} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</PrimaryButton> : null}
+                  {assetUrl(selected) ? <><PrimaryButton type="button" onClick={() => setPreviewAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Preview full size</PrimaryButton><SecondaryButton type="button" onClick={() => void downloadSelected()} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</SecondaryButton></> : null}
                   <SecondaryButton type="button" onClick={toggleFavorite} className="min-h-10 px-4 py-2 text-xs"><Icon type="favorite" size={14} /> {selected.favorite ? "Remove favorite" : "Add favorite"}</SecondaryButton>
                   <SecondaryButton type="button" onClick={() => openStudioWithAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Open Studio</SecondaryButton>
                   {publishingSelectMode ? <PrimaryButton type="button" onClick={() => createPublishingDraft(selected)} className="min-h-10 px-4 py-2 text-xs">Create Publishing Draft</PrimaryButton> : null}
@@ -462,6 +489,14 @@ export default function AssetLibraryStudio() {
           </WorkspaceCard>
         </WorkspaceSection>
       )}
+      {previewAsset && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-3 sm:p-6" onClick={() => setPreviewAsset(null)}>
+        <div role="dialog" aria-modal="true" aria-label={`Preview ${assetTitle(previewAsset)}`} onClick={(event) => event.stopPropagation()} className="flex max-h-full w-full max-w-6xl flex-col gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[var(--ms-color-panel)] p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-3"><h2 className="min-w-0 truncate text-sm font-semibold">{assetTitle(previewAsset)}</h2><button type="button" autoFocus onClick={() => setPreviewAsset(null)} aria-label="Close preview" className="rounded-full border border-white/20 px-3 py-1 text-xs">Close</button></div>
+          <div className="h-[min(75vh,760px)] min-h-48 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-[var(--ms-color-background)]"><AssetMedia asset={previewAsset} fullSize eager /></div>
+          {downloadError ? <p role="alert" className="text-xs text-[var(--ms-color-error)]">{downloadError}</p> : null}
+          <div className="flex justify-end"><SecondaryButton type="button" onClick={() => void downloadSelected(previewAsset)} className="min-h-9 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</SecondaryButton></div>
+        </div>
+      </div>}
     </ExperiencePage>
   );
 }

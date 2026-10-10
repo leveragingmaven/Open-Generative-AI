@@ -50,3 +50,15 @@ test("Saved image cards fall back to the stored thumbnail reference and survive 
   assert.match(librarySource, /const thumbnail = asset\?\.thumbnail \|\| asset\?\.thumbnails\?\.\[0\]/);
   assert.match(librarySource, /onError=\{\(\) => setFailedSources\(\(sources\) => \[\.\.\.sources, imageUrl\]\)\}/);
 });
+
+test("Creative Library image cards reserve their frame and open a full-size preview", () => {
+  assert.match(librarySource, /params\.set\('variant', 'thumbnail'\)/);
+  assert.match(librarySource, /loading=\{eager \? "eager" : "lazy"\}/);
+  assert.match(librarySource, /object-contain/);
+  assert.match(librarySource, /loadedSource === imageUrl \? "opacity-100" : "opacity-0"/);
+  assert.match(librarySource, /h-72 overflow-hidden.*sm:h-96 lg:h-\[30rem\]/);
+  assert.match(librarySource, /setPreviewAsset\(asset\)/);
+  assert.match(librarySource, /role="dialog" aria-modal="true"/);
+  assert.match(librarySource, /<AssetMedia asset=\{previewAsset\} fullSize eager \/>/);
+  assert.match(librarySource, /downloadSelected\(previewAsset\)/);
+});
