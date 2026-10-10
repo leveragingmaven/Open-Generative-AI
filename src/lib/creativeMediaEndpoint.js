@@ -8,7 +8,7 @@ import { getR2MediaStorage } from './r2MediaStorage.js';
 const RANGE = /^bytes=(?:\d+-\d*|-\d+)$/;
 const THUMBNAIL_SIZE = 480;
 const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
-const MAX_THUMBNAIL_SOURCE_BYTES = 25 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MEDIA_TYPES = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif',
   'video/mp4', 'video/webm', 'video/quicktime', 'video/mpeg',
@@ -38,6 +38,27 @@ async function imageThumbnail(body) {
   return Buffer.concat(chunks, size);
 }
 
+async function completeImage(body, expectedLength, signal) {
+  const source = body instanceof Readable ? body : Readable.fromWeb(body);
+  const abort = () => source.destroy(new Error('creative_media_aborted'));
+  const data = Buffer.allocUnsafe(expectedLength);
+  let size = 0;
+  try {
+    if (signal?.aborted) throw new Error('creative_media_aborted');
+    signal?.addEventListener('abort', abort, { once: true });
+    for await (const chunk of source) {
+      size += chunk.length;
+      if (size > expectedLength) throw new Error('creative_media_length_mismatch');
+      data.set(chunk, size - chunk.length);
+    }
+    if (size !== expectedLength) throw new Error('creative_media_length_mismatch');
+    return data;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    source.destroy();
+  }
+}
+
 export async function handleCreativeMedia(request, { identity, repository = new MySqlCreativeAssetRepository(), storage = null } = {}) {
   if (!identity?.accountId) return failure(401);
   const url = new URL(request.url);
@@ -61,7 +82,7 @@ export async function handleCreativeMedia(request, { identity, repository = new 
     if (thumbnail) {
       if (!type.startsWith('image/')) { object.Body?.destroy?.(); return failure(415); }
       if (!Number.isSafeInteger(Number(object.ContentLength)) || Number(object.ContentLength) <= 0
-        || Number(object.ContentLength) > MAX_THUMBNAIL_SOURCE_BYTES) {
+        || Number(object.ContentLength) > MAX_IMAGE_BYTES) {
         object.Body?.destroy?.();
         return failure(413);
       }
@@ -72,6 +93,17 @@ export async function handleCreativeMedia(request, { identity, repository = new 
     if (object.ContentLength != null || object.sizeBytes != null) headers.set('Content-Length', String(object.ContentLength ?? object.sizeBytes));
     if (object.ContentRange) headers.set('Content-Range', object.ContentRange);
     if (request.method === 'HEAD') return new Response(null, { status: object.ContentRange ? 206 : 200, headers });
+    if (type.startsWith('image/')) {
+      const length = Number(object.ContentLength);
+      if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_IMAGE_BYTES) {
+        object.Body?.destroy?.();
+        return failure(413);
+      }
+      if (!object.Body) return failure(503);
+      const data = await completeImage(object.Body, length, request.signal);
+      headers.set('Content-Length', String(data.length));
+      return new Response(data, { status: object.ContentRange ? 206 : 200, headers });
+    }
     const body = object.Body?.transformToWebStream?.() || (object.Body instanceof Readable ? Readable.toWeb(object.Body) : object.Body);
     if (!body) return failure(503);
     return new Response(body, { status: object.ContentRange ? 206 : 200, headers });

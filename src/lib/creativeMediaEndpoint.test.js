@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import sharp from 'sharp';
 import { creativeObjectKey } from './creativeMediaStorage.js';
 import { handleCreativeMedia, handleCreativeMediaRoute } from './creativeMediaEndpoint.js';
@@ -96,4 +96,74 @@ test('thumbnail rejects non-images and oversized sources before decoding', async
   const unknownLength = makeOptions('image/jpeg', undefined);
   assert.equal((await handleCreativeMedia(thumbRequest, unknownLength.options)).status, 413);
   assert.equal(unknownLength.body.destroyed, true);
+});
+
+test('original image completes from an SDK-style R2 stream before returning an exact-length response', async () => {
+  const bytes = Buffer.from('complete-image');
+  const body = Readable.from([bytes.subarray(0, 5), bytes.subarray(5)]);
+  body.transformToWebStream = () => { throw new Error('unbounded_stream_bridge_used'); };
+  const response = await handleCreativeMedia(request(), {
+    identity,
+    repository: { async get() { return asset; } },
+    storage: { async getObject() { return { Body: body, ContentType: 'image/jpeg', ContentLength: bytes.length }; } },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  assert.equal(response.headers.get('content-length'), String(bytes.length));
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  assert.equal(body.readableEnded, true);
+});
+
+test('aborted original image requests close the R2 stream and return no partial media', async () => {
+  const controller = new AbortController();
+  const body = new PassThrough();
+  body.write('partial');
+  const pending = handleCreativeMedia(new Request(request().url, { signal: controller.signal }), {
+    identity,
+    repository: { async get() { return asset; } },
+    storage: { async getObject() { return { Body: body, ContentType: 'image/jpeg', ContentLength: 100 }; } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  const response = await pending;
+  assert.equal(response.status, 503);
+  assert.equal(body.destroyed, true);
+});
+
+test('R2 image stream errors and length mismatches never send a partial success response', async () => {
+  for (const stream of [
+    Readable.from((async function* () { yield Buffer.from('short'); throw new Error('r2_read_failed'); })()),
+    Readable.from([Buffer.from('short')]),
+  ]) {
+    const response = await handleCreativeMedia(request(), {
+      identity,
+      repository: { async get() { return asset; } },
+      storage: { async getObject() { return { Body: stream, ContentType: 'image/jpeg', ContentLength: 100 }; } },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(stream.destroyed, true);
+  }
+});
+
+test('oversized original images are rejected before reading and video keeps its streaming path', async () => {
+  const imageBody = Readable.from([Buffer.from('unread')]);
+  const image = await handleCreativeMedia(request(), {
+    identity,
+    repository: { async get() { return asset; } },
+    storage: { async getObject() { return { Body: imageBody, ContentType: 'image/jpeg', ContentLength: 25 * 1024 * 1024 + 1 }; } },
+  });
+  assert.equal(image.status, 413);
+  assert.equal(imageBody.destroyed, true);
+
+  const videoBody = Readable.from([Buffer.from('video')]);
+  let streamed = false;
+  videoBody.transformToWebStream = () => { streamed = true; return Readable.toWeb(videoBody); };
+  const video = await handleCreativeMedia(request(), {
+    identity,
+    repository: { async get() { return asset; } },
+    storage: { async getObject() { return { Body: videoBody, ContentType: 'video/mp4', ContentLength: 5 }; } },
+  });
+  assert.equal(video.status, 200);
+  assert.equal(streamed, true);
+  assert.equal(await video.text(), 'video');
 });
