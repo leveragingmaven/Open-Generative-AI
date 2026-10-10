@@ -222,6 +222,33 @@ test("scheduleDraft accepts an explicit future time and cancellation uses the pr
   assert.equal(calls.some(({ url }) => url.endsWith("/jobs/provider-job-1/cancel")), true);
 });
 
+test("simultaneous Schedule clicks submit an existing draft only once", async () => {
+  let releaseSchedule;
+  const pendingSchedule = new Promise((resolve) => { releaseSchedule = resolve; });
+  let submissions = 0;
+  const provider = new MuApiPublishingProvider({
+    fetchFn: async (_url, options = {}) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      if (body?.action === "schedule") {
+        submissions += 1;
+        await pendingSchedule;
+        return { ok: true, json: async () => ({ id: "job-once", status: "scheduled", request_id: "job-once" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    },
+    mavenSyncClient: { isEnabled: () => false },
+  });
+  const center = new PublishingCenterMVP({ storage: createMemoryStorage(), publishingProvider: provider });
+  const draft = center.createDraft({ caption: "Ready", assets: [{ id: "asset-once", url: "https://cdn.test/image.jpg", type: "image" }], platforms: ["instagram"], accountIds: { instagram: "account-1" } });
+  const first = center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
+  const second = center.scheduleDraft(draft.id, "2035-01-01T10:00:00.000Z", "UTC");
+  releaseSchedule();
+  await Promise.all([first, second]);
+  assert.equal(submissions, 1);
+  assert.equal(center.getDrafts().length, 1);
+  assert.equal(center.getDrafts()[0].providerJobId, "job-once");
+});
+
 test("MuAPI scheduled reconciliation keeps pending jobs in Queue and Calendar, then moves published jobs to History", async () => {
   let remoteStatus = { job_id: "mu-job-1", post_id: "mu-post-1", request_id: "mu-request-1", platform: "facebook", status: "pending", scheduled_at: "2035-01-01T10:00:00.000Z" };
   const provider = new MuApiPublishingProvider({

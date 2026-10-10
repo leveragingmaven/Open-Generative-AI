@@ -18,6 +18,7 @@ export class PublishingCenterMVP {
     this.storage = options.storage || localStorage;
     this.publishingProviderRegistry = options.publishingProviderRegistry || publishingProviderRegistry;
     this.publishingProvider = options.publishingProvider || this.publishingProviderRegistry.getActiveProvider();
+    this.scheduleInFlight = new Map();
   }
 
   providerForDraft(draft = {}, options = {}) {
@@ -132,6 +133,17 @@ export class PublishingCenterMVP {
    * Schedule a draft for publishing
    */
   async scheduleDraft(draftId, scheduledAt, timezone = "UTC") {
+    if (this.scheduleInFlight.has(draftId)) return this.scheduleInFlight.get(draftId);
+    const pending = this.submitScheduleDraft(draftId, scheduledAt, timezone);
+    this.scheduleInFlight.set(draftId, pending);
+    try {
+      return await pending;
+    } finally {
+      this.scheduleInFlight.delete(draftId);
+    }
+  }
+
+  async submitScheduleDraft(draftId, scheduledAt, timezone) {
     const drafts = readPublishingDrafts(this.storage);
     const draft = drafts.find(d => d.id === draftId);
     

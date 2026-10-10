@@ -54,6 +54,21 @@ export function publishingComposerValues(draft, edits = {}) {
   };
 }
 
+export function publishingScheduleIssue(draft, accounts = [], platformForAccount = (platform) => platform, edits = {}) {
+  const values = publishingComposerValues(draft, edits);
+  if (!values.platforms.length) return "Choose at least one connected account before scheduling.";
+  for (const platform of values.platforms) {
+    const accountId = values.accountIds?.[platform] || values.platformOverrides?.[platform]?.accountId;
+    const account = accounts.find((item) => String(item.id) === String(accountId)
+      && item.platform === platformForAccount(platform) && item.connected !== false);
+    if (!accountId || !account) return `Choose a connected ${platform} account before scheduling.`;
+  }
+  if (!String(values.caption || "").trim() && !values.assets.length && !values.assetIds.length) {
+    return "Add a caption or media before scheduling.";
+  }
+  return null;
+}
+
 export function publishingDraftUpdateFromComposer(draft, edits = {}) {
   const updates = {
     title: edits.title ?? draft.title ?? "",

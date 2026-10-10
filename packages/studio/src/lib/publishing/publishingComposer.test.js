@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MuApiPublishingProvider } from "./MuApiPublishingProvider.js";
 import { PublishingCenterMVP } from "./PublishingCenterMVP.js";
-import { captionWithHashtags, publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "./publishingComposer.js";
+import { captionWithHashtags, publishingComposerValues, publishingDraftUpdateFromComposer, publishingScheduleIssue, queueEditSelection } from "./publishingComposer.js";
 
 function memoryStorage() {
   const values = new Map();
@@ -69,6 +69,24 @@ test("selected provider, destination, account, and scheduled time remain availab
   assert.equal(values.platformOverrides.instagram.accountName, "Brand Page");
   assert.equal(values.scheduledAt, "2035-01-02T10:00:00.000Z");
   assert.equal(values.timezone, "America/Chicago");
+});
+
+test("Schedule explains missing destinations and content before submission", () => {
+  const account = { id: "ig-account-1", platform: "instagram", connected: true };
+  const draft = savedDraft();
+  assert.match(publishingScheduleIssue({ ...draft, platforms: [] }, [account]), /connected account/);
+  assert.match(publishingScheduleIssue({ ...draft, accountIds: {}, platformOverrides: {} }, [account]), /instagram account/);
+  assert.match(publishingScheduleIssue(draft, [{ ...account, connected: false }]), /instagram account/);
+  assert.match(publishingScheduleIssue({ ...draft, caption: "", assets: [], assetIds: [] }, [account]), /caption or media/);
+  assert.equal(publishingScheduleIssue(draft, [account]), null);
+});
+
+test("Schedule validates the destination platform and unsaved composer content", () => {
+  const draft = { ...savedDraft(), provider: "zernio", platforms: ["x"], accountIds: { x: "x-account" }, platformOverrides: {} };
+  const accounts = [{ id: "x-account", platform: "twitter", connected: true }];
+  assert.equal(publishingScheduleIssue(draft, accounts, (platform) => platform === "x" ? "twitter" : platform), null);
+  assert.match(publishingScheduleIssue(draft, [{ ...accounts[0], platform: "instagram" }], (platform) => platform === "x" ? "twitter" : platform), /x account/);
+  assert.equal(publishingScheduleIssue({ ...draft, caption: "", assets: [], assetIds: [] }, accounts, (platform) => platform === "x" ? "twitter" : platform, { caption: "Ready to post" }), null);
 });
 
 test("composer edits build a patch for current text fields without losing saved destination", () => {
