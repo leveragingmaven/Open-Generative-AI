@@ -17,11 +17,23 @@ const DEFAULT_POSITION_CLASS =
 const DEFAULT_PANEL_CLASS =
   "w-full bg-gradient-to-b from-[#18181c]/90 via-[#0f0f12]/90 to-[#0c0c0e]/95 backdrop-blur-2xl rounded-[2rem] border border-white/[0.08] p-4 flex flex-col gap-3 shadow-[0_15px_50px_rgba(0,0,0,0.8)]";
 
+// The `compact` variant is for a composer that is docked in the page flow
+// rather than floating over the content: it drops the heavy drop shadow and the
+// 2rem radius, tightens the padding, and lets a caller take the width it needs.
+const COMPACT_POSITION_CLASS = "relative w-full";
+
+const COMPACT_PANEL_CLASS =
+  "w-full bg-[#101014]/95 backdrop-blur-2xl rounded-2xl border border-white/[0.08] p-3 sm:p-4 flex flex-col gap-3 shadow-[0_4px_20px_rgba(0,0,0,0.5)]";
+
 const DEFAULT_TEXTAREA_CLASS =
   "w-full bg-transparent border-none text-white text-sm placeholder:text-white/20 focus:outline-none resize-none pt-1 leading-relaxed min-h-[40px] max-h-[150px] md:max-h-[250px] overflow-y-auto custom-scrollbar disabled:opacity-40";
 
+// The generate action is a control in a row, not the screen's headline: it
+// uses the same compact sizing as the studio's other buttons (min-h-9, rounded
+// corners, xs type) instead of the oversized pill that used to dominate the
+// composer. Full width only where the viewport is narrow.
 const DEFAULT_ACTION_CLASS =
-  "bg-[#E82070] text-white px-7 py-3 rounded-full font-bold text-sm hover:opacity-95 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 w-full sm:w-auto shadow-lg shadow-[#E82070]/25 hover:shadow-[#E82070]/40 border border-[#E82070]/20 z-10 disabled:opacity-50 disabled:cursor-not-allowed";
+  "bg-[#E82070] text-white min-h-9 px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-[0.1em] hover:bg-[#F03A8B] active:scale-[0.98] transition-all flex items-center justify-center gap-2 w-full sm:w-auto shadow-sm disabled:opacity-50 disabled:cursor-not-allowed";
 
 const CONTROL_LAYOUT_CLASS =
   "h-[38px] flex items-center gap-2 rounded-md transition-all border group whitespace-nowrap shadow-inner focus:outline-none focus-visible:border-[#D4A858]/45 focus-visible:ring-1 focus-visible:ring-[#D4A858]/30";
@@ -366,12 +378,18 @@ export function PromptComposer({
   children,
   className = "",
   panelClassName = "",
-  positionClassName = DEFAULT_POSITION_CLASS,
+  // Defaulted from `compact` rather than pinned to the floating constants, so a
+  // docked composer can be requested without losing the floating default every
+  // other studio relies on.
+  positionClassName,
+  compact = false,
   style = { animationDelay: "0.2s" },
 }) {
+  const position = positionClassName ?? (compact ? COMPACT_POSITION_CLASS : DEFAULT_POSITION_CLASS);
+  const panel = compact ? COMPACT_PANEL_CLASS : DEFAULT_PANEL_CLASS;
   return (
-    <div className={joinClasses(positionClassName, className)} style={style}>
-      <div className={joinClasses(DEFAULT_PANEL_CLASS, panelClassName)}>
+    <div className={joinClasses(position, className)} style={style}>
+      <div className={joinClasses(panel, panelClassName)}>
         <CampaignChip className="self-start" />
         {children}
       </div>

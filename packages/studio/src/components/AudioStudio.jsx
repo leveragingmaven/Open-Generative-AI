@@ -25,8 +25,28 @@ import {
   structuredItemLabel,
   validateModelStructuredInputs,
 } from "../lib/audio/structuredInput.js";
+import {
+  declaredScriptLimit,
+  invalidScriptField,
+  scriptFieldLabel,
+  scriptFieldPlaceholder,
+  scriptLengthState,
+} from "../lib/audio/scriptInput.js";
 import { MavenButton } from "./mavensync/MavenButton.jsx";
 import { MavenBadge } from "./mavensync/MavenBadge.jsx";
+import PresetVoicePicker from "./audio/PresetVoicePicker.jsx";
+import {
+  AUDIO_MODE_IDS,
+  AUDIO_MODES,
+  DEFAULT_AUDIO_MODE_ID,
+  audioModeById,
+  modeDefaultModel,
+  modelKindLabel,
+  modelSupportsMode,
+  modelsForMode,
+  primaryModeForModel,
+  resolveModeForModel,
+} from "../lib/audio/audioModes.js";
 
 // ---------------------------------------------------------------------------
 // Upload button states
@@ -75,6 +95,39 @@ const MusicIcon = ({ className = "text-[#E82070]" }) => (
     <circle cx="18" cy="16" r="3" />
   </svg>
 );
+
+const VoiceWaveIcon = ({ className = "" }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+    <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+    <line x1="12" y1="18" x2="12" y2="22" />
+    <line x1="8" y1="22" x2="16" y2="22" />
+  </svg>
+);
+
+const SoundWaveIcon = ({ className = "" }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+    <line x1="3" y1="10" x2="3" y2="14" />
+    <line x1="7" y1="7" x2="7" y2="17" />
+    <line x1="11" y1="4" x2="11" y2="20" />
+    <line x1="15" y1="8" x2="15" y2="16" />
+    <line x1="19" y1="11" x2="19" y2="13" />
+  </svg>
+);
+
+// The studio's own icon follows the mode, so a voice task never reads as music.
+const MODE_ICONS = {
+  voice: VoiceWaveIcon,
+  clone: VoiceWaveIcon,
+  music: MusicIcon,
+  sfx: SoundWaveIcon,
+  all: MusicIcon,
+};
+
+const ModeIcon = ({ modeId, className }) => {
+  const Icon = MODE_ICONS[modeId] || MusicIcon;
+  return <Icon className={className} />;
+};
 
 const TrashIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -648,6 +701,123 @@ function ClonedVoiceCard({ voiceId }) {
 }
 
 // ---------------------------------------------------------------------------
+// Advanced Settings
+// ---------------------------------------------------------------------------
+// A voice-clone model declares its tuning knobs next to the inputs that define
+// the clone itself. Three of them only change how the submitted sample is
+// processed, and a creator reaches for them *after* the first clone works, so
+// they belong behind one labelled disclosure rather than in the primary flow.
+//
+// The keys are the provider's own parameter names in the catalog — the unit
+// test checks them against `models.js` — so this list cannot drift away from
+// the payload it writes. Every key the list does not name stays in the open
+// flow: grouping can move a parameter, never hide one.
+//
+// `prompt` is deliberately absent: it is the preview script, and this studio
+// treats a script as a primary input in every mode.
+export const ADVANCED_CLONE_SETTING_KEYS = Object.freeze([
+  "need_noise_reduction",
+  "need_volume_normalization",
+  "accuracy",
+]);
+
+/** The advanced keys the given model actually declares, in catalog order. */
+export function advancedCloneSettingKeys(model, modeId) {
+  if (!model || modeId !== AUDIO_MODE_IDS.CLONE) return [];
+  const inputs = model.inputs || {};
+  return ADVANCED_CLONE_SETTING_KEYS.filter((key) => inputs[key] !== undefined);
+}
+
+/**
+ * True when a secondary setting holds something other than its catalog default.
+ * The disclosure is forced open in that case, so a value the creator set can
+ * never end up hidden behind a collapsed header.
+ */
+export function hasNonDefaultAdvancedValue(model, keys, params) {
+  const inputs = model?.inputs || {};
+  return keys.some((key) => {
+    const value = params ? params[key] : undefined;
+    if (value === undefined || value === null) return false;
+    const schema = inputs[key] || {};
+    if (schema.default !== undefined) return value !== schema.default;
+    return (
+      value === true ||
+      (typeof value === "number" && value !== 0) ||
+      (typeof value === "string" && value.trim() !== "")
+    );
+  });
+}
+
+/**
+ * The configuration form as groups: the open primary inputs first, then — only
+ * for a model and mode that declare them — the collapsible secondary settings.
+ * Each entry keeps its catalog key and schema, so the exact same control still
+ * renders it.
+ */
+export function parameterGroupsForModel(model, modeId) {
+  const entries = Object.entries(model?.inputs || {}).filter(([key]) => key !== "model");
+  const advanced = new Set(advancedCloneSettingKeys(model, modeId));
+  const groups = [
+    {
+      id: "primary",
+      collapsible: false,
+      entries: entries.filter(([key]) => !advanced.has(key)),
+    },
+  ];
+  const secondary = entries.filter(([key]) => advanced.has(key));
+  if (secondary.length > 0) {
+    groups.push({ id: "advanced", collapsible: true, entries: secondary });
+  }
+  return groups;
+}
+
+const SettingsChevronIcon = ({ open = false }) => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+    aria-hidden="true"
+  >
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+
+/**
+ * One labelled disclosure for the grouped knobs. It reports how many settings
+ * it holds and whether any of them is active, so a collapsed header never hides
+ * the fact that the group is doing something.
+ */
+function AdvancedSettingsDisclosure({ label, count, open, active, onToggle }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="w-full flex items-center justify-between gap-2 bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-3 py-2.5 text-left transition-all"
+    >
+      <span className="flex items-center gap-2 min-w-0">
+        <SettingsChevronIcon open={open} />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[#A3A3A3]">
+          {label}
+        </span>
+        {active && !open && (
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-[#D4A858]">
+            Active
+          </span>
+        )}
+      </span>
+      <span className="text-[10px] font-semibold text-[#8C8C8C] shrink-0">
+        {count} {count === 1 ? "setting" : "settings"}
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Audio Studio Component
 // ---------------------------------------------------------------------------
 export default function AudioStudio({
@@ -661,12 +831,20 @@ export default function AudioStudio({
   const PERSIST_KEY = "hg_audio_studio_persistent";
 
   // ── Mode & model state ──────────────────────────────────────────────────
-  const [selectedModelId, setSelectedModelId] = useState(audioModels[0]?.id ?? "");
+  // The studio opens on Voice Generator, so the model the operator first sees
+  // is that mode's default rather than the catalog's first entry (a music model).
+  const [audioMode, setAudioMode] = useState(DEFAULT_AUDIO_MODE_ID);
+  const [selectedModelId, setSelectedModelId] = useState(
+    modeDefaultModel(DEFAULT_AUDIO_MODE_ID, audioModels)?.id ?? audioModels[0]?.id ?? ""
+  );
   const [params, setParams] = useState({});
   const [openDropdown, setOpenDropdown] = useState(false);
   const [openParamDropdown, setOpenParamDropdown] = useState(null);
   const modelBtnRef = useRef(null);
   const sidebarRef = useRef(null);
+  // The model each mode was last left on, so returning to a mode restores the
+  // operator's own choice instead of that mode's default.
+  const modelByModeRef = useRef({});
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -697,6 +875,27 @@ export default function AudioStudio({
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
   const selectedModel = getAudioModelById(selectedModelId);
+  const activeMode = audioModeById(audioMode);
+  // The catalog is only ever *filtered* — no model is removed by a mode.
+  const modeModels = modelsForMode(audioMode, audioModels);
+
+  // ── Advanced Settings (Voice Cloner) ──────────────────────────────────
+  // Collapsed by default, and forced open whenever one of the grouped knobs
+  // holds a non-default value, so a setting the creator chose is never hidden.
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const advancedSettingKeys = advancedCloneSettingKeys(selectedModel, audioMode);
+  const advancedSettingsActive =
+    advancedSettingKeys.length > 0 &&
+    hasNonDefaultAdvancedValue(selectedModel, advancedSettingKeys, params);
+  const advancedSettingsOpen = showAdvancedSettings || advancedSettingsActive;
+  const parameterGroups = parameterGroupsForModel(selectedModel, audioMode);
+
+  // ── Script gate ────────────────────────────────────────────────────────
+  // The same gate `handleGenerate` enforces, evaluated in render as well, so the
+  // action can be disabled instead of letting a paid call be refused after the
+  // fact. One function decides, so the button and the handler cannot drift. A
+  // model that declares no limit never trips it.
+  const scriptGate = invalidScriptField(selectedModel, params);
 
   // ── Initialize params when model changes ──────────────────────────────
   useEffect(() => {
@@ -717,13 +916,33 @@ export default function AudioStudio({
     setParams(initial);
   }, [selectedModelId]); // Only reset when model ID changes
 
+  // Remember the selected model against the mode that owns it. A pick, a session
+  // restored from storage and a mode's own default all land here, so switching
+  // away from a mode and back restores the operator's choice rather than
+  // replacing it with the default.
+  useEffect(() => {
+    if (!selectedModelId) return;
+    const ownerMode = primaryModeForModel(selectedModelId) || audioMode;
+    modelByModeRef.current[ownerMode] = selectedModelId;
+  }, [selectedModelId, audioMode]);
+
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
     try {
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
-        if (data.selectedModelId) setSelectedModelId(data.selectedModelId);
+        // A restored model is never silently swapped for a mode default: the
+        // mode moves to match the stored model, so the operator's last choice
+        // stays visible (including specialised utilities, which open in All
+        // Models).
+        const storedMode = data.audioMode || DEFAULT_AUDIO_MODE_ID;
+        if (data.selectedModelId) {
+          setSelectedModelId(data.selectedModelId);
+          setAudioMode(resolveModeForModel(data.selectedModelId, storedMode, audioModels));
+        } else if (data.audioMode) {
+          setAudioMode(resolveModeForModel("", storedMode, audioModels));
+        }
         if (data.params) setParams(data.params);
         if (data.internalHistory) setInternalHistory(data.internalHistory);
         if (data.activeResultUrl) setActiveResultUrl(data.activeResultUrl);
@@ -741,6 +960,7 @@ export default function AudioStudio({
     const timer = setTimeout(() => {
       try {
         const state = {
+          audioMode,
           selectedModelId,
           params,
           internalHistory,
@@ -755,7 +975,7 @@ export default function AudioStudio({
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, activeResultVoiceId, view]);
+  }, [audioMode, selectedModelId, params, internalHistory, activeResultUrl, activeResultTitle, activeResultVoiceId, view]);
 
   // ── Handle Dropped Files ────────────────────────────────────────────────
   useEffect(() => {
@@ -833,6 +1053,13 @@ export default function AudioStudio({
     const voiceCheck = invalidCustomVoiceField(selectedModel, params);
     if (voiceCheck) {
       alert(`${voiceCheck.title}: ${voiceCheck.error}`);
+      return;
+    }
+
+    // So must a script the model has already declared too long for itself.
+    const scriptCheck = invalidScriptField(selectedModel, params);
+    if (scriptCheck) {
+      alert(`${scriptCheck.title}: ${scriptCheck.error}`);
       return;
     }
 
@@ -924,6 +1151,26 @@ export default function AudioStudio({
     }
   };
 
+  // Switching mode filters the model list and relabels the studio. The current
+  // model is kept whenever the new mode still lists it, so a mode change never
+  // discards a form the operator has already filled in. Otherwise the mode opens
+  // on the model the operator last used there — including one restored from
+  // storage — and only falls back to the mode's own default for the first visit
+  // (Voice Cloner opens on its speech clone, not the singing clone).
+  const handleModeSelect = (modeId) => {
+    setAudioMode(modeId);
+    setOpenDropdown(false);
+    setOpenParamDropdown(null);
+    if (!modelSupportsMode(selectedModelId, modeId)) {
+      const remembered = modelByModeRef.current[modeId];
+      const next =
+        (remembered && modelSupportsMode(remembered, modeId)
+          ? getAudioModelById(remembered)
+          : null) || modeDefaultModel(modeId, audioModels);
+      if (next) setSelectedModelId(next.id);
+    }
+  };
+
   const handleNew = () => {
     setView("input");
     setActiveResultUrl(null);
@@ -947,7 +1194,60 @@ export default function AudioStudio({
       {/* ─── LEFT CONFIGURATION SIDEBAR ─── */}
       <div ref={sidebarRef} className="w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] border-r border-[#2C2C2C] flex flex-col bg-[#101010]/95 flex-shrink-0 min-h-0 z-30">
         <div className="p-6 overflow-y-auto flex-1 min-h-0 custom-scrollbar space-y-6 pb-24">
-          
+
+          {/* Mode selector — a filter over the same audio catalog, not a
+              separate studio. Every model stays reachable via All Models. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                Studio
+              </label>
+              <span className="text-[10px] font-semibold text-[#8C8C8C]">
+                {modeModels.length} {activeMode.filterLabel.toLowerCase()}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {AUDIO_MODES.filter((mode) => mode.id !== "all").map((mode) => {
+                const isActive = audioMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => handleModeSelect(mode.id)}
+                    className={`px-3 py-2 rounded-md border text-left transition-all ${
+                      isActive
+                        ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/40"
+                        : "text-[#A3A3A3] bg-[#0B0B0B]/60 border-[#2C2C2C] hover:text-[#FAFAFA] hover:bg-[#2C2C2C]"
+                    }`}
+                  >
+                    <span className="block text-[11px] font-bold tracking-tight truncate">{mode.label}</span>
+                    <span className="block text-[9px] font-semibold uppercase tracking-wider opacity-60">
+                      {modelsForMode(mode.id, audioModels).length} models
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              aria-pressed={audioMode === "all"}
+              onClick={() => handleModeSelect("all")}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                audioMode === "all"
+                  ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/40"
+                  : "text-[#8C8C8C] bg-transparent border-[#2C2C2C] hover:text-[#FAFAFA] hover:bg-[#2C2C2C]"
+              }`}
+            >
+              <span>Advanced · All Models</span>
+              <span className="opacity-70">{modelsForMode("all", audioModels).length}</span>
+            </button>
+            <p className="text-[11px] text-[#8C8C8C] leading-relaxed">{activeMode.blurb}</p>
+            {activeMode.note && (
+              <p className="text-[11px] text-[#D4A858] leading-relaxed">{activeMode.note}</p>
+            )}
+          </div>
+
           {/* Model Selector */}
           <div className="space-y-2 relative">
             <label className="text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest block">
@@ -967,7 +1267,10 @@ export default function AudioStudio({
 
             {openDropdown && (
               <div className="absolute left-0 right-0 mt-2 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1.5">
-                {audioModels.map((model) => (
+                {modeModels.length === 0 && (
+                  <p className="px-4 py-3 text-[11px] text-[#8C8C8C]">{activeMode.emptyModel}</p>
+                )}
+                {modeModels.map((model) => (
                   <button
                     key={model.id}
                     type="button"
@@ -979,7 +1282,14 @@ export default function AudioStudio({
                       model.id === selectedModelId ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30" : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
                     }`}
                   >
-                    <span>{model.name}</span>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate">{model.name}</span>
+                      {modelKindLabel(model.id) && (
+                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider opacity-60">
+                          {modelKindLabel(model.id)}
+                        </span>
+                      )}
+                    </span>
                     {model.description && (
                       <span className="text-[10px] text-[#8C8C8C] truncate max-w-[320px] font-normal">
                         {model.description}
@@ -999,9 +1309,22 @@ export default function AudioStudio({
             </div>
           )}
 
-          {/* Dynamic Configuration Form */}
+          {/* Dynamic Configuration Form. The primary inputs stay in the open; a
+              clone model's processing knobs are grouped behind one labelled
+              disclosure so the clone flow reads as two steps, not ten. */}
           <div className="space-y-5">
-            {selectedModel && Object.entries(selectedModel.inputs || {}).map(([key, schema]) => {
+            {selectedModel && parameterGroups.map((group) => (
+              <div key={group.id} className={group.id === "advanced" ? "space-y-3 pt-1" : "space-y-5"}>
+                {group.collapsible && (
+                  <AdvancedSettingsDisclosure
+                    label="Advanced Settings"
+                    count={group.entries.length}
+                    open={advancedSettingsOpen}
+                    active={advancedSettingsActive}
+                    onToggle={() => setShowAdvancedSettings((prev) => !prev)}
+                  />
+                )}
+                {(!group.collapsible || advancedSettingsOpen) && group.entries.map(([key, schema]) => {
               // Skip model switcher itself (if it's in schemas)
               if (key === 'model') return null;
               // Audio URL file upload (single)
@@ -1087,43 +1410,57 @@ export default function AudioStudio({
                   : null;
                 return (
                   <div key={key} className="space-y-2 relative">
-                    <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
-                      {schema.title || key}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenDropdown(false);
-                        setOpenParamDropdown(isOpen ? null : key);
-                      }}
-                      className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#FAFAFA] flex items-center justify-between transition-all cursor-pointer"
-                    >
-                      <span className="truncate" title={selection || undefined}>{selection || "Select option"}</span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </button>
+                    {/* A voice enum is a library, not a list of IDs: a typed
+                        enum gets a searchable, grouped picker. Every other enum
+                        keeps the plain list it has always had. */}
+                    {typedField ? (
+                      <PresetVoicePicker
+                        schema={schema}
+                        value={selection}
+                        onChange={(next) => setParams(prev => ({ ...prev, [key]: next }))}
+                        label={schema.title || key}
+                      />
+                    ) : (
+                      <>
+                        <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                          {schema.title || key}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenDropdown(false);
+                            setOpenParamDropdown(isOpen ? null : key);
+                          }}
+                          className="w-full bg-[#161616] border border-[#2C2C2C] hover:border-[#404040] rounded-lg px-4 py-3.5 text-xs text-left font-semibold text-[#FAFAFA] flex items-center justify-between transition-all cursor-pointer"
+                        >
+                          <span className="truncate" title={selection || undefined}>{selection || "Select option"}</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform duration-200 ${isOpen ? 'rotate-185' : ''}`}>
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
 
-                    {isOpen && (
-                      <div className="absolute left-0 right-0 mt-1 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1">
-                        {schema.enum.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setParams(prev => ({ ...prev, [key]: opt }));
-                              setOpenParamDropdown(null);
-                            }}
-                            className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all border ${
-                              params[key] === opt
-                                ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30"
-                                : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
+                        {isOpen && (
+                          <div className="absolute left-0 right-0 mt-1 z-50 bg-[#1E1E1E] border border-[#404040] rounded-lg shadow-2xl max-h-60 overflow-y-auto custom-scrollbar p-1">
+                            {schema.enum.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => {
+                                  setParams(prev => ({ ...prev, [key]: opt }));
+                                  setOpenParamDropdown(null);
+                                }}
+                                className={`w-full text-left px-4 py-2.5 rounded text-xs font-bold transition-all border ${
+                                  params[key] === opt
+                                    ? "text-[#E82070] bg-[#E82070]/10 border-[#E82070]/30"
+                                    : "text-[#A3A3A3] border-transparent hover:bg-[#2C2C2C] hover:text-[#FAFAFA]"
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                     {schema.description && (
                       <span className="block text-[11px] text-[#8C8C8C] leading-normal">
@@ -1192,17 +1529,48 @@ export default function AudioStudio({
 
               // Prompt / Textarea Input
               if (key === "prompt") {
+                const scriptLimit = declaredScriptLimit(selectedModel);
+                const scriptState = scriptLengthState({ text: params[key], limit: scriptLimit });
+                const scriptCountId = `${key}-count`;
                 return (
                   <div key={key} className="space-y-2">
-                    <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
-                      {schema.title || "Lyrics / Prompt"}
-                    </label>
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="block text-[11px] font-semibold text-[#A3A3A3] uppercase tracking-widest">
+                        {scriptFieldLabel(selectedModel, schema)}
+                      </label>
+                      {/* A voiceover is written to a length, so the count sits on
+                          the field instead of arriving as a provider error. */}
+                      <span
+                        id={scriptCountId}
+                        className={`text-[10px] font-semibold tabular-nums ${
+                          scriptState.overLimit ? "text-[#F87171]" : "text-[#8C8C8C]"
+                        }`}
+                      >
+                        {scriptState.count}
+                        {scriptLimit ? ` / ${scriptLimit}` : ""} characters
+                      </span>
+                    </div>
                     <textarea
                       value={params[key] || ""}
                       onChange={(e) => setParams(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="w-full bg-[#161616] border border-[#2C2C2C] focus:border-[#E82070]/70 rounded-lg p-3 text-xs text-[#FAFAFA] placeholder:text-[#8C8C8C] focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner"
-                      placeholder={schema.description || "Enter what you want generated..."}
+                      aria-invalid={scriptState.overLimit || undefined}
+                      aria-describedby={scriptCountId}
+                      className={`w-full bg-[#161616] border rounded-lg p-3 text-xs text-[#FAFAFA] placeholder:text-[#8C8C8C] focus:outline-none transition-all min-h-[100px] resize-none leading-relaxed shadow-inner ${
+                        scriptState.overLimit
+                          ? "border-[#F87171]/60 focus:border-[#F87171]"
+                          : "border-[#2C2C2C] focus:border-[#E82070]/70"
+                      }`}
+                      placeholder={scriptFieldPlaceholder(selectedModel, schema)}
                     />
+                    {scriptState.message && (
+                      <span
+                        className={`block text-[11px] leading-normal ${
+                          scriptState.overLimit ? "text-[#F87171] font-semibold" : "text-[#D4A858]"
+                        }`}
+                      >
+                        {scriptState.message}
+                      </span>
+                    )}
                     {schema.examples && Array.isArray(schema.examples) && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {schema.examples.map((ex, idx) => (
@@ -1244,27 +1612,37 @@ export default function AudioStudio({
                   )}
                 </div>
               );
-            })}
+                })}
+              </div>
+            ))}
           </div>
 
         </div>
 
         {/* Dynamic Cost & Generate Section */}
-        <div className="p-4 py-3 border-t border-[#2C2C2C] bg-[#0B0B0B]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end">
+        <div className="p-4 py-3 border-t border-[#2C2C2C] bg-[#0B0B0B]/90 backdrop-blur-xl absolute bottom-0 left-0 w-full lg:w-[35%] lg:min-w-[300px] xl:max-w-[440px] z-40 flex items-center justify-end gap-3">
+          {/* Why the action is unavailable, stated next to it — the field's own
+              counter can be scrolled out of view. */}
+          {scriptGate && (
+            <span className="min-w-0 flex-1 text-right text-[11px] font-semibold leading-snug text-[#F87171]">
+              {scriptGate.error}
+            </span>
+          )}
           <MavenButton
             variant="primaryPink"
-            size="lg"
+            size="sm"
             type="button"
             onClick={handleGenerate}
-            disabled={!selectedModel}
+            disabled={!selectedModel || Boolean(scriptGate)}
             isLoading={isGenerating}
+            className="min-h-9 w-full sm:w-auto uppercase tracking-[0.1em]"
             leftIcon={!isGenerating ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                 <path d="M5 3l14 9-14 9V3z" />
               </svg>
             ) : undefined}
           >
-            {isGenerating ? "Generating Audio..." : "Generate Track"}
+            {isGenerating ? `${activeMode.busy}…` : activeMode.cta}
           </MavenButton>
         </div>
       </div>
@@ -1303,15 +1681,15 @@ export default function AudioStudio({
                 <div className="relative">
                   <div className="w-24 h-24 border-[3px] border-[#2C2C2C] border-t-[#E82070] rounded-full animate-spin shadow-[0_0_20px_rgba(232,32,112,0.15)]" />
                   <div className="absolute inset-0 flex items-center justify-center text-[#E82070]">
-                    <MusicIcon className="animate-pulse text-[#E82070]" />
+                    <ModeIcon modeId={audioMode} className="animate-pulse text-[#E82070]" />
                   </div>
                 </div>
                 <div className="text-center space-y-2">
                   <div className="text-xs font-semibold text-[#A3A3A3] uppercase tracking-[0.3em] animate-pulse">
-                    Generating Soundtrack
+                    {activeMode.busy}
                   </div>
                   <div className="text-sm text-[#A3A3A3] font-semibold">
-                    Rendering audio waveforms and vocals...
+                    {activeMode.busyDetail}
                   </div>
                 </div>
               </div>
@@ -1321,11 +1699,11 @@ export default function AudioStudio({
             {view === "input" && !isGenerating && !generateError && (
               <div className="flex flex-col items-center gap-3.5 text-center animate-fade-in-up">
                 <div className="w-14 h-14 rounded-xl bg-[#1E1E1E] border border-[#D4A858]/25 flex items-center justify-center shadow-[0_4px_16px_rgba(0,0,0,0.2)]">
-                  <MusicIcon className="text-[#D4A858] w-7 h-7" />
+                  <ModeIcon modeId={audioMode} className="text-[#D4A858] w-7 h-7" />
                 </div>
-                <h3 className="text-[#FAFAFA] font-semibold text-lg tracking-tight">Audio Studio</h3>
+                <h3 className="text-[#FAFAFA] font-semibold text-lg tracking-tight">{activeMode.label}</h3>
                 <p className="max-w-xs text-sm text-[#A3A3A3] leading-relaxed">
-                  Craft your next high-fidelity track with an AI music model, voice clone, or sound generator.
+                  {activeMode.blurb}
                 </p>
               </div>
             )}
