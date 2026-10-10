@@ -17,6 +17,7 @@ import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryServ
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
 import { publishingDraftMediaAsset, publishingQueueCard, publishingQueueMedia, publishingSaveAvailability } from "../lib/publishing/publishingQueueCard.js";
+import { publishingDuplicateSource, publishingNextAvailableSlot, publishingScheduleConfirmation, publishingSlotLabel, publishingSlotReservation, publishingTakenSlotKeys, publishingUpcomingSlots, publishingWeekScheduleSummary } from "../lib/publishing/publishingWeeklySlots.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -31,6 +32,12 @@ import {
   WorkspaceHero,
   WorkspaceSection,
 } from "./experience/ExperienceComponents.jsx";
+
+/**
+ * Slot suggestions are derived from the schedules this browser has loaded, so they must never read as a
+ * guarantee about every device or the provider.
+ */
+const WEEKLY_SLOT_NOTE = "Based on the schedules this browser has loaded. Posts created on another device appear after the Calendar refreshes.";
 
 const LEGACY_PLATFORM_OPTIONS = [
   { id: "instagram", label: "Instagram", enabled: true },
@@ -114,6 +121,23 @@ function ScheduleControls({ date, time, timezone, onDateChange, onTimeChange, on
     <fieldset className="block"><legend className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Time</legend><div className="mt-2 flex items-center gap-1"><select aria-label={`${labelPrefix} hour`} value={clock.hour} onChange={(event) => onTimeChange(timeFromClockParts(event.target.value, clock.minute, clock.period))} className={inputClass}>{Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")).map((hour) => <option key={hour} value={hour}>{hour}</option>)}</select><span>:</span><select aria-label={`${labelPrefix} minute`} value={clock.minute} onChange={(event) => onTimeChange(timeFromClockParts(clock.hour, event.target.value, clock.period))} className={inputClass}>{Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0")).map((minute) => <option key={minute} value={minute}>{minute}</option>)}</select><select aria-label={`${labelPrefix} AM or PM`} value={clock.period} onChange={(event) => onTimeChange(timeFromClockParts(clock.hour, clock.minute, event.target.value))} className={inputClass}><option value="AM">AM</option><option value="PM">PM</option></select></div></fieldset>
     <label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Timezone</span><select aria-label={`${labelPrefix} timezone`} value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} className={inputClass}>{timezones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
   </>;
+}
+
+/**
+ * The next unused publishing slots, offered as one-tap suggestions.
+ *
+ * Choosing a suggestion only fills the date, time, and timezone controls. The schedule is still sent by
+ * Confirm Schedule, so looking at a suggestion can never book it.
+ */
+function SlotSuggestions({ slots, onPick, labelPrefix, note }) {
+  if (!slots.length) return null;
+  return <div className="w-full">
+    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{labelPrefix || "Next free slots"}</p>
+    <div className="mt-2 flex flex-wrap gap-2">
+      {slots.map((slot) => <button key={slot.key} type="button" onClick={() => onPick(slot)} title={`Fill in ${publishingSlotLabel(slot)}`} className="rounded-full border border-[var(--ms-color-border-subtle)] bg-black/10 px-3 py-1.5 text-[10px] font-semibold text-[var(--ms-color-text-secondary)] transition-colors hover:border-[var(--ms-color-gold-primary)] hover:text-white">{publishingSlotLabel(slot)}</button>)}
+    </div>
+    {note ? <p className="mt-2 text-[9px] leading-4 text-[var(--ms-color-text-muted)]">{note}</p> : null}
+  </div>;
 }
 
 function calendarDateKey(value, timezone) {
@@ -601,6 +625,12 @@ export default function PublishingStudio() {
   const focusedAttachment = focusedDraft ? draftAttachmentAvailability(focusedComposerValues, assets, { authoritative: !libraryDegraded }) : null;
   const nextScheduled = useMemo(() => scheduled.filter((draft) => draft.scheduledAt)
     .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0] || null, [scheduled]);
+  // Weekly planning stays read-only: the summary and the suggestions are derived from the drafts this browser
+  // already knows about, and nothing here can schedule a post.
+  const weekSummary = useMemo(() => publishingWeekScheduleSummary(drafts, { timezone: resolvedScheduleTimeZone() }), [drafts]);
+  const composerWeekSummary = useMemo(() => publishingWeekScheduleSummary(drafts, { timezone: scheduleTimezone }), [drafts, scheduleTimezone]);
+  const weeklySlots = useMemo(() => nextSlots(4), [drafts, scheduleDraftId, scheduleDate, scheduleTime, scheduleTimezone]);
+  const nextFreeSlot = weeklySlots[0] || null;
   const pickerEntries = useMemo(() => libraryPickerEntries(assets, { query: libraryQuery }), [assets, libraryQuery]);
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
@@ -923,6 +953,103 @@ export default function PublishingStudio() {
       : null);
   };
 
+  /** Choosing a suggested slot only fills the controls; Confirm Schedule is still the single sending action. */
+  const applySlot = (slot) => {
+    if (!slot) return;
+    setScheduleDate(slot.date);
+    setScheduleTime(slot.time);
+    setScheduleTimezone(slot.timezone);
+  };
+
+  /**
+   * The next free publishing slots in the selected timezone.
+   *
+   * The slot currently shown in the schedule controls is reserved while it is still unscheduled, so the same
+   * time is never suggested for two different drafts.
+   */
+  function nextSlots(limit = 4) {
+    const timezone = scheduleTimezone;
+    const displayed = scheduleDraftId ? scheduledForFromFields(scheduleDate, scheduleTime, timezone) : null;
+    const taken = displayed ? publishingTakenSlotKeys(drafts, timezone) : null;
+    const displayedFields = displayed ? scheduleFieldsForInstant(displayed, timezone) : null;
+    const reserved = displayed && taken && displayedFields?.date && !taken.has(`${displayedFields.date}T${displayedFields.time}`)
+      ? publishingSlotReservation(displayed, timezone)
+      : null;
+    return publishingUpcomingSlots([...drafts, ...(reserved ? [reserved] : [])], { timezone, limit });
+  }
+
+  /** Fill the schedule controls with the next free slot, leaving the sending step to Confirm Schedule. */
+  const applyNextSlot = (draft) => {
+    const slot = nextSlots(1)[0] || null;
+    if (!slot) {
+      setNotice({ tone: "error", text: "No free publishing slot was found in the next seven days. Choose a date and time manually." });
+      return;
+    }
+    openSchedule(draft);
+    applySlot(slot);
+    // openSchedule reports a missing destination; keep that message instead of hiding it behind the slot notice.
+    if (draft.platforms?.length) {
+      setNotice({ tone: "neutral", text: `Next free slot ${publishingSlotLabel(slot)} is filled in. Choose Confirm Schedule to send it.` });
+    }
+  };
+
+  /**
+   * Duplicate this post into a fresh, unscheduled draft with the next free slot filled in.
+   *
+   * The copy is created locally and still needs an explicit Confirm Schedule, so this can never schedule or
+   * publish anything by itself. Unsaved edits travel into the copy; only a local draft is persisted first (a
+   * local write), while a post the provider holds scheduled is copied from the composed view without sending a
+   * provider update, so a duplicate click can never write to the provider.
+   */
+  const duplicateForNextSlot = async (source) => {
+    if (!source || busyId) return;
+    const prepared = publishingDuplicateSource(source, draftEdits[source.id] || null, scheduledEditPolicy(source));
+    const slot = nextSlots(1)[0] || null;
+    if (!slot) {
+      setNotice({ tone: "error", text: "No free publishing slot was found in the next seven days. Choose a date and time manually." });
+      return;
+    }
+    setBusyId(source.id);
+    try {
+      const saved = prepared.writeLocalFirst ? await saveDraftEdits(source, { silent: true }) : prepared.source;
+      if (!saved) return;
+      const copy = centerRef.current.duplicateDraft(saved);
+      setFocusedDraftId(copy.id);
+      setActiveView("create");
+      openSchedule(copy);
+      applySlot(slot);
+      const needsDestination = !(copy.platforms || []).length;
+      setNotice({
+        tone: needsDestination ? "warning" : "success",
+        text: `${saved.title || "Draft"} duplicated as a new unscheduled draft with ${publishingSlotLabel(slot)} filled in. ${needsDestination ? "Choose a connected destination, then" : "Review it, then"} choose Confirm Schedule — nothing is scheduled yet.`,
+      });
+      await reload();
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message || "Unable to duplicate this post." });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /**
+   * Leaving the composer keeps unsaved edits only in this browser, so every exit path says so first.
+   * Nothing is discarded here: the edits stay pending on the post until they are saved or the page reloads.
+   */
+  const switchView = (view) => {
+    if (view !== "create" && activeView === "create" && focusedHasPendingEdits
+      && !window.confirm("You have unsaved changes to this post. Leave the composer without saving them?")) return;
+    setActiveView(view);
+  };
+
+  const goToQueue = () => switchView("queue");
+
+  const destinationLabelsFor = (draft) => publishingCalendarDetails(draft, {
+    accounts,
+    accountsProviderId: providerId,
+    platforms: draft.provider === PUBLISHING_PROVIDER_IDS.ZERNIO ? ZERNIO_CONNECTION_CATALOG : LEGACY_PLATFORM_OPTIONS,
+    providerName: publishingProviderRegistry.get(draft.provider).name,
+  }).destinations.map((destination) => destination.label);
+
   const openCalendarReschedule = (draft) => {
     setSelectedCalendarDraftId(draft.id);
     openSchedule(draft);
@@ -946,7 +1073,7 @@ export default function PublishingStudio() {
       setScheduleDraftId(null);
       setCalendarRescheduleDraftId(null);
       setSelectedCalendarDraftId(draft.id);
-      setNotice({ tone: "success", text: `${draft.title || "Draft"} rescheduled for ${readableDate(scheduledFor, true)} (${scheduleTimezone}).` });
+      setNotice({ tone: "success", text: publishingScheduleConfirmation({ title: draft.title, scheduledFor, timezone: scheduleTimezone, destinations: destinationLabelsFor(draft), status: "rescheduled" }) });
     } catch (error) {
       setNotice({ tone: error.code === "unsupported_capability" ? "neutral" : "error", text: error.message || "Unable to reschedule draft." });
     } finally {
@@ -984,7 +1111,13 @@ export default function PublishingStudio() {
       if (!savedDraft) return;
       await centerRef.current.scheduleDraft(savedDraft.id, scheduledFor, scheduleTimezone);
       setScheduleDraftId(null);
-      setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} scheduled for ${readableDate(scheduledFor, true)} (${scheduleTimezone}).` });
+      // The confirmation states the destination, date, time, timezone, and status, and points at the next free
+      // slot so preparing the following post needs no extra navigation.
+      const nextSlot = publishingNextAvailableSlot([
+        ...drafts.filter((item) => item.id !== savedDraft.id),
+        { ...savedDraft, scheduledAt: scheduledFor, status: PUBLISHING_STATUS.SCHEDULED },
+      ], { timezone: scheduleTimezone });
+      setNotice({ tone: "success", text: publishingScheduleConfirmation({ title: savedDraft.title, scheduledFor, timezone: scheduleTimezone, destinations: destinationLabelsFor(savedDraft), status: PUBLISHING_STATUS.SCHEDULED, nextSlot }) });
     } catch (error) {
       setNotice({
         tone: error.code === "unsupported_capability" ? "neutral" : "error",
@@ -1124,7 +1257,7 @@ export default function PublishingStudio() {
             <button
               key={view.id}
               type="button"
-              onClick={() => setActiveView(view.id)}
+              onClick={() => switchView(view.id)}
               aria-current={activeView === view.id ? "page" : undefined}
               className={`rounded-[var(--ms-radius-button)] px-4 py-2.5 text-left transition-colors ${activeView === view.id ? "bg-[var(--ms-color-pink-primary)] text-black" : "text-[var(--ms-color-text-secondary)] hover:bg-white/[0.05] hover:text-white"}`}
             >
@@ -1259,11 +1392,28 @@ export default function PublishingStudio() {
                 <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend>{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <p className="mb-2 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">{scheduledEditPolicy(focusedDraft).canEditContent ? "This post is already scheduled. Saving sends the change to your provider, and destinations stay locked while it is scheduled." : "This post is already scheduled and cannot be edited in place. Cancel the schedule to change it."}</p> : null}<div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !scheduledEditPolicy(focusedDraft).canChangeDestinations || !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} disabled={!scheduledEditPolicy(focusedDraft).canChangeDestinations} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
                  <div className="border-t border-[var(--ms-color-border-subtle)] pt-4">
+                   <div className="mb-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3">
+                     <div className="flex flex-wrap items-center justify-between gap-3">
+                       <div>
+                         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">This week</p>
+                         <p className="mt-1 text-xs font-semibold">{composerWeekSummary.scheduledCount} {composerWeekSummary.scheduledCount === 1 ? "post" : "posts"} scheduled in the next 7 days</p>
+                       </div>
+                       <div className="flex items-center gap-1" aria-label="Scheduled posts per day for the next seven days">
+                         {composerWeekSummary.perDay.map((day) => <span key={day.date} title={`${day.date} · ${day.count} scheduled`} className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[9px] font-semibold ${day.count ? "bg-[var(--ms-color-gold-primary)] text-black" : "border border-[var(--ms-color-border-subtle)] text-[var(--ms-color-text-muted)]"}`}>{day.count || "·"}</span>)}
+                       </div>
+                     </div>
+                     {scheduledEditPolicy(focusedDraft).scheduledOnProvider
+                       ? <p className="mt-2 text-[10px] text-[var(--ms-color-text-muted)]">This post already holds an existing schedule. Use Reschedule to move it.</p>
+                       : nextFreeSlot
+                         ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[10px] text-[var(--ms-color-text-muted)]">Next free slot</span><button type="button" onClick={() => applyNextSlot(focusedDraft)} title="Fills the schedule controls with this slot. Nothing is sent until you confirm." className="rounded-full border border-[var(--ms-color-border-subtle)] px-3 py-1.5 text-[10px] font-semibold text-[var(--ms-color-text-secondary)] hover:border-[var(--ms-color-gold-primary)] hover:text-white">{publishingSlotLabel(nextFreeSlot)}</button></div>
+                         : <p className="mt-2 text-[10px] text-[var(--ms-color-warning)]">No free slot in the next seven days. Choose a date and time manually.</p>}
+                     <p className="mt-2 text-[9px] leading-4 text-[var(--ms-color-text-muted)]">{WEEKLY_SLOT_NOTE} A suggested slot is not a reservation until you confirm it.</p>
+                   </div>
                    {scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-3 py-2"><StatusBadge tone="gold">Scheduled {readableDate(focusedDraft.scheduledAt, true)}{focusedDraft.timezone ? ` · ${focusedDraft.timezone}` : ""}</StatusBadge>{isScheduledPublishingStatus(draftStatus(focusedDraft)) && focusedDraft.providerJobId ? <><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-8 px-3 py-2 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">Reschedule</SecondaryButton><SecondaryButton type="button" disabled={busyId === `cancel:${focusedDraft.id}` || busyId === `delete:${focusedDraft.id}`} onClick={() => void cancelScheduledDraft(focusedDraft)} className="min-h-8 px-3 py-2 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${focusedDraft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton></> : null}</div> : null}
-                   <div className="flex flex-wrap gap-2"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0 || !scheduledEditPolicy(focusedDraft).canPublishNow} title={!scheduledEditPolicy(focusedDraft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" disabled={focusedSaveAction.disabled || busyId === focusedDraft.id} title={focusedSaveAction.reason} onClick={() => void saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{focusedSaveAction.label}</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton><SecondaryButton type="button" onClick={() => setActiveView("queue")} className="min-h-10 px-4 py-2 text-xs">Back to Queue</SecondaryButton><button type="button" disabled={busyId === `delete:${focusedDraft.id}` || busyId === `cancel:${focusedDraft.id}`} title={focusedDraft.providerJobId && isScheduledPublishingStatus(draftStatus(focusedDraft)) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(focusedDraft)} className="min-h-10 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${focusedDraft.id}` ? "Deleting..." : "Delete Draft"}</button></div>
+                   <div className="flex flex-wrap gap-2"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0 || !scheduledEditPolicy(focusedDraft).canPublishNow} title={!scheduledEditPolicy(focusedDraft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" disabled={focusedSaveAction.disabled || busyId === focusedDraft.id} title={focusedSaveAction.reason} onClick={() => void saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{focusedSaveAction.label}</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || !publishingProviderRegistry.get(focusedDraft.provider).supportsCapability("schedulePost")} title="Creates a fresh unscheduled copy with the next free slot filled in. Nothing is scheduled until you confirm." onClick={() => void duplicateForNextSlot(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Duplicate for Next Slot</SecondaryButton><SecondaryButton type="button" onClick={goToQueue} className="min-h-10 px-4 py-2 text-xs">Back to Queue</SecondaryButton><button type="button" disabled={busyId === `delete:${focusedDraft.id}` || busyId === `cancel:${focusedDraft.id}`} title={focusedDraft.providerJobId && isScheduledPublishingStatus(draftStatus(focusedDraft)) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(focusedDraft)} className="min-h-10 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${focusedDraft.id}` ? "Deleting..." : "Delete Draft"}</button></div>
                    <p className="mt-2 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">{focusedHasPendingEdits ? "You have unsaved changes. " : "No unsaved changes. "}{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? `Update Scheduled Post sends your changes to ${publishingProviderRegistry.get(focusedDraft.provider).name}; Reschedule or Cancel Scheduled Post change the delivery itself.` : "Save Draft keeps this post editable for later, Schedule sends it to your provider at the time you choose, and Publish Now posts it immediately."}</p>
                  </div>
-                 {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3">{scheduleIssueForDraft(focusedDraft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(focusedDraft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">{busyId === focusedDraft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
+                 {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3">{scheduleIssueForDraft(focusedDraft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(focusedDraft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SlotSuggestions slots={weeklySlots} onPick={applySlot} labelPrefix="Next free slots in this timezone" note={WEEKLY_SLOT_NOTE} /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">{busyId === focusedDraft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
              ) : <EmptyState title="Start a new post" description="Write a post, upload an image or video, or choose existing creative work." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} />}
@@ -1443,7 +1593,7 @@ export default function PublishingStudio() {
       {activeView === "queue" && <WorkspaceSection title="Queue" description="Every saved post with its media, caption, destination, schedule, and status." actions={<div className="flex flex-wrap items-center gap-2">{nextScheduled ? <StatusBadge tone="gold">Next {readableDate(nextScheduled.scheduledAt, true)}</StatusBadge> : null}<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge></div>}>
         {queueDrafts.length ? (
           <div className="space-y-3">
-            <p className="text-[10px] text-[var(--ms-color-text-muted)]">{queueDrafts.length} {queueDrafts.length === 1 ? "post" : "posts"} in Queue · {scheduled.length} scheduled · {published.length} published. Edit opens a post in the composer.</p>
+            <p className="text-[10px] text-[var(--ms-color-text-muted)]">{queueDrafts.length} {queueDrafts.length === 1 ? "post" : "posts"} in Queue · {scheduled.length} scheduled · {published.length} published · {weekSummary.scheduledCount} in the next 7 days{weekSummary.nextAvailableSlot ? ` · next free ${publishingSlotLabel(weekSummary.nextAvailableSlot)}` : ""}. Edit opens a post in the composer.</p>
             {queueDrafts.map((draft) => {
               const provider = publishingProviderRegistry.get(draft.provider);
               const canEditDraft = provider.supportsCapability("updateDraft");
@@ -1477,14 +1627,14 @@ export default function PublishingStudio() {
                       <SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
                       <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0 || !scheduledEditPolicy(draft).canPublishNow} title={!scheduledEditPolicy(draft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => void publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                       {(editingInline || draftEdits[draft.id]) ? <SecondaryButton type="button" disabled={saveAction.disabled || busyId === draft.id} title={saveAction.reason} onClick={() => void saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{saveAction.label}</SecondaryButton> : null}
-                      <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
+                      <SecondaryButton type="button" disabled={busyId === draft.id || !provider.supportsCapability("schedulePost")} title="Creates a fresh unscheduled copy with the next free slot filled in and opens it for editing. Nothing is scheduled until you confirm." onClick={() => void duplicateForNextSlot(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Duplicate for Next Slot</SecondaryButton>
                       {isScheduledPublishingStatus(card.status) && draft.providerJobId ? <SecondaryButton type="button" disabled={busyId === `cancel:${draft.id}` || busyId === `delete:${draft.id}`} title="Cancels the scheduled delivery in Maven Social and keeps this draft for editing" onClick={() => void cancelScheduledDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${draft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton> : null}
                       <button type="button" disabled={busyId === `delete:${draft.id}` || busyId === `cancel:${draft.id}`} title={draft.providerJobId && isScheduledPublishingStatus(card.status) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${draft.id}` ? "Deleting..." : "Delete Draft"}</button>
                     </div>
                   </div>
                 </div>
 
-                {scheduleDraftId === draft.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4">{scheduleIssueForDraft(draft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(draft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Schedule ${draft.title || "draft"}`} /><SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => scheduleDraft(draft)} className="min-h-10 px-4 py-2 text-xs">{busyId === draft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
+                {scheduleDraftId === draft.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4">{scheduleIssueForDraft(draft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(draft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Schedule ${draft.title || "draft"}`} /><SlotSuggestions slots={weeklySlots} onPick={applySlot} labelPrefix="Next free slots" note={WEEKLY_SLOT_NOTE} /><SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => scheduleDraft(draft)} className="min-h-10 px-4 py-2 text-xs">{busyId === draft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
 
                 {editingInline && <div className="mt-5 grid gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4 lg:grid-cols-[minmax(180px,0.4fr)_minmax(0,0.6fr)]">
                   <label className="block">
