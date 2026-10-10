@@ -19,7 +19,7 @@ import {
   publishZernioNow,
   scheduleZernioPost,
   listTenantZernioScheduledPosts,
-  rescheduleTenantZernioPost,
+  updateTenantZernioScheduledPost,
   cancelTenantZernioScheduledPost,
   disconnectTenantZernioAccount,
   getZernioEngagementEntitlement,
@@ -293,16 +293,21 @@ export async function handleZernioPublishingRequest(request, {
   if (request.method === 'PUT' && key === 'posts/:postId') {
     try {
       const input = await body(request);
-      return NextResponse.json(await rescheduleTenantZernioPost({
+      const assetIds = Array.isArray(input.assetIds) ? input.assetIds : undefined;
+      return NextResponse.json(await updateTenantZernioScheduledPost({
         identity: auth.identity,
         postId: resolvedParams.path[1],
-        scheduledFor: input.scheduledFor,
+        content: typeof input.content === 'string' ? input.content : undefined,
+        firstComment: typeof input.firstComment === 'string' ? input.firstComment : undefined,
+        assetIds,
+        scheduledFor: input.scheduledFor ?? null,
         timezone: input.timezone || 'UTC',
         repository,
         client,
+        assetRepository: assetRepository || (assetIds?.length ? new MySqlCreativeAssetRepository() : undefined),
       }));
     } catch (error) {
-      return jsonError(error, 'Unable to reschedule this Maven Social post.');
+      return jsonError(error, 'Unable to update this Maven Social post.');
     }
   }
 

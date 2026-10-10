@@ -105,6 +105,10 @@ export function normalizePublishingDraft(input = {}) {
     updatedAt: input.updatedAt || now,
     publishedAt: input.publishedAt || null,
     error: input.error || null,
+    // True when the calendar learned about this post from the provider instead of from this browser.
+    // Provider-originated drafts keep the schedule visible across sessions and must never be submitted
+    // to the provider again as if they were local drafts.
+    importedFromProvider: Boolean(input.importedFromProvider),
   };
 }
 

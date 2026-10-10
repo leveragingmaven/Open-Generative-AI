@@ -214,18 +214,46 @@ export class ZernioPublishingProvider extends PublishingProvider {
     if (!scheduledFor || !Number.isFinite(new Date(scheduledFor).getTime()) || new Date(scheduledFor).getTime() <= Date.now()) {
       throw new PublishingError('Choose a future Maven Social publishing time.', { code: 'zernio_schedule_invalid', status: 400 });
     }
-    const response = await this.request(`/posts/${encodeURIComponent(String(postId))}`, {
-      method: 'PUT',
-      body: { isDraft: false, scheduledFor: new Date(scheduledFor).toISOString(), timezone: schedule.timezone || 'UTC' },
-    });
+    return this.updateScheduledPost(postId, { scheduledAt: scheduledFor, timezone: schedule.timezone || 'UTC' });
+  }
+
+  /**
+   * Update the provider-owned copy of a scheduled post.
+   *
+   * Maven Social's update endpoint accepts content, media, first comment, and the schedule itself, so a
+   * scheduled post is edited in place instead of being cancelled and recreated (which would risk a duplicate).
+   * Only the fields the caller actually supplies are sent; everything else stays as the provider stored it.
+   */
+  async updateScheduledPost(postId, update = {}) {
+    const id = String(postId || '').trim();
+    if (!id) throw new PublishingError('A scheduled Maven Social post is required.', { code: 'zernio_post_id_required', status: 400 });
+    const scheduledFor = update.scheduledAt || update.scheduledFor || update.scheduled_at || null;
+    if (scheduledFor && (!Number.isFinite(new Date(scheduledFor).getTime()) || new Date(scheduledFor).getTime() <= Date.now())) {
+      throw new PublishingError('Choose a future Maven Social publishing time.', { code: 'zernio_schedule_invalid', status: 400 });
+    }
+    const body = {
+      ...(typeof update.content === 'string' ? { content: update.content } : {}),
+      ...(typeof update.firstComment === 'string' ? { firstComment: update.firstComment } : {}),
+      ...(Array.isArray(update.assetIds) ? { assetIds: update.assetIds } : {}),
+      // The updated post stays a scheduled post rather than becoming a draft.
+      isDraft: false,
+      ...(scheduledFor ? { scheduledFor: new Date(scheduledFor).toISOString(), timezone: update.timezone || 'UTC' } : {}),
+    };
+    const response = await this.request(`/posts/${encodeURIComponent(id)}`, { method: 'PUT', body });
+    const updated = response.post || response;
+    const updatedId = updated._id || updated.id || id;
     return normalizePublishingJob({
-      ...(response.post || response),
-      id: response.post?._id || response.post?.id || postId,
-      providerJobId: response.post?._id || response.post?.id || postId,
+      id: updatedId,
+      draftId: updated.draftId || null,
       provider: this.id,
-      status: response.post?.status || response.status || PUBLISHING_STATUS.SCHEDULED,
-      scheduledAt: response.post?.scheduledFor || response.scheduledFor || new Date(scheduledFor).toISOString(),
-      timezone: response.post?.timezone || response.timezone || schedule.timezone || 'UTC',
+      providerJobId: updatedId,
+      providerPostId: updatedId,
+      platforms: Array.isArray(updated.platforms)
+        ? updated.platforms.map((platform) => (typeof platform === 'string' ? platform : platform.platform)).filter(Boolean)
+        : [],
+      status: updated.status || response.status || PUBLISHING_STATUS.SCHEDULED,
+      scheduledAt: updated.scheduledFor || response.scheduledFor || (scheduledFor ? new Date(scheduledFor).toISOString() : null),
+      timezone: updated.timezone || response.timezone || update.timezone || 'UTC',
     });
   }
 
@@ -234,7 +262,7 @@ export class ZernioPublishingProvider extends PublishingProvider {
   }
 
   supportsCapability(methodName) {
-    if (['schedulePost', 'getScheduledPosts', 'reschedulePost', 'cancelScheduledPost'].includes(methodName)) return true;
+    if (['schedulePost', 'getScheduledPosts', 'reschedulePost', 'cancelScheduledPost', 'updateScheduledPost'].includes(methodName)) return true;
     return super.supportsCapability(methodName);
   }
 }

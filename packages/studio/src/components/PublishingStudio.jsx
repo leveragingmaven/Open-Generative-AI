@@ -8,7 +8,7 @@ import { publishingProviderRegistry } from "../lib/publishing/PublishingProvider
 import { effectivePublishingDraftStatus, isActivePublishingQueueDraft, isPublishingDraftNeedsAttention, isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { zernioEngagementEntitlement } from "../lib/publishing/zernioEntitlements.js";
 import { publishingComposerValues, publishingDraftUpdateFromComposer, queueEditSelection } from "../lib/publishing/publishingComposer.js";
-import { publishingCalendarActions, publishingCalendarDateTime, publishingCalendarDetails } from "../lib/publishing/publishingCalendar.js";
+import { publishingCalendarActions, publishingCalendarDateTime, publishingCalendarDetails, publishingScheduledEditPolicy } from "../lib/publishing/publishingCalendar.js";
 import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
@@ -76,6 +76,10 @@ function draftStatus(draft) {
   const provider = publishingProviderRegistry.get(draft.provider);
   return effectivePublishingDraftStatus(draft, provider.supportsCapability("schedulePost"));
 }
+function scheduledEditPolicy(draft) {
+  return publishingScheduledEditPolicy(draft, publishingProviderRegistry.get(draft?.provider || undefined));
+}
+
 const PUBLISHING_OAUTH_RETURN_KEY = "creator_os_publishing_oauth_return";
 function hashtagsToText(value) { return Array.isArray(value) ? value.join(", ") : ""; }
 
@@ -224,6 +228,7 @@ export default function PublishingStudio() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [remoteHistoryError, setRemoteHistoryError] = useState(null);
+  const [scheduleSyncedAt, setScheduleSyncedAt] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [notice, setNotice] = useState(null);
   const [draftEdits, setDraftEdits] = useState({});
@@ -281,8 +286,9 @@ export default function PublishingStudio() {
       try {
         remoteHistory = await center.getRemoteHistory();
         setRemoteHistoryError(null);
+        setScheduleSyncedAt(new Date().toISOString());
       } catch (error) {
-        setRemoteHistoryError(error.message || "MuAPI publishing history is unavailable; showing local history.");
+        setRemoteHistoryError(error.message || "Maven Social scheduled posts are unavailable; showing the schedule saved in this browser.");
       }
       setDrafts(center.getDrafts());
       const localHistory = center.getHistory();
@@ -641,21 +647,41 @@ export default function PublishingStudio() {
     }));
   };
 
-  const saveDraftEdits = (draft, options = {}) => {
+  const saveDraftEdits = async (draft, options = {}) => {
     const updates = publishingDraftUpdateFromComposer(draft, draftEdits[draft.id] || {});
-    const updated = centerRef.current.updateDraft(draft.id, updates);
-    setDraftEdits((current) => {
-      const next = { ...current };
-      delete next[draft.id];
-      return next;
-    });
-    setDrafts(centerRef.current.getDrafts());
-    if (!options.silent) {
-      setNotice({ tone: "success", text: "Draft saved." });
-      if (options.returnToQueue) setActiveView("queue");
+    const center = centerRef.current;
+    const policy = scheduledEditPolicy(draft);
+    const scheduledOnProvider = policy.contentUpdatesProvider;
+    try {
+      // A scheduled post belongs to the provider, so the edit is submitted there first and only reported as saved
+      // after the provider confirms it. Nothing is written locally that the provider never accepted.
+      if (policy.scheduledOnProvider && !policy.canEditContent) {
+        throw new Error("this post is already scheduled and cannot be edited in place. Cancel the schedule to change it.");
+      }
+      const updated = scheduledOnProvider
+        ? await center.updateScheduledDraft(draft.id, updates)
+        : center.updateDraft(draft.id, updates);
+      setDraftEdits((current) => {
+        const next = { ...current };
+        delete next[draft.id];
+        return next;
+      });
+      setDrafts(center.getDrafts());
+      if (!options.silent) {
+        setNotice({ tone: "success", text: scheduledOnProvider ? "Scheduled post updated in Maven Social." : "Draft saved." });
+        if (options.returnToQueue) setActiveView("queue");
+      }
+      await reload();
+      return updated;
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text: `Nothing was saved: ${error.message || "the provider did not accept this change."}`,
+      });
+      // The pending edits stay on screen so the creator can retry instead of believing they were stored.
+      setDrafts(center.getDrafts());
+      return null;
     }
-    void reload();
-    return updated;
   };
 
   const togglePlatform = (draft, platform) => {
@@ -864,7 +890,8 @@ export default function PublishingStudio() {
     setBusyId(draft.id);
     setNotice(null);
     try {
-      const savedDraft = saveDraftEdits(draft, { silent: true });
+      const savedDraft = await saveDraftEdits(draft, { silent: true });
+      if (!savedDraft) return;
       await centerRef.current.scheduleDraft(savedDraft.id, scheduledFor, scheduleTimezone);
       setScheduleDraftId(null);
       setNotice({ tone: "success", text: `${savedDraft.title || "Draft"} scheduled for ${readableDate(scheduledFor, true)} (${scheduleTimezone}).` });
@@ -914,8 +941,10 @@ export default function PublishingStudio() {
     setBusyId(draft.id);
     setNotice(null);
     try {
-      const savedDraft = saveDraftEdits(draft, { silent: true });
-      const result = await centerRef.current.publishDraft(savedDraft.id);
+      // A post the provider already holds scheduled is never resubmitted; the provider guard reports it instead.
+      const savedDraft = scheduledEditPolicy(draft).scheduledOnProvider ? draft : await saveDraftEdits(draft, { silent: true });
+      if (!savedDraft) return;
+      const result = await centerRef.current.publishDraft(draft.id);
       if (result.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED) {
         setNotice({ tone: "warning", text: `${savedDraft.title || "Draft"} was partially published. Review the platform results.` });
       } else if (result.status === PUBLISHING_STATUS.FAILED) {
@@ -1090,9 +1119,9 @@ export default function PublishingStudio() {
                   <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
                   <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedComposerValues.assets.length} {focusedComposerValues.assets.length === 1 ? "asset" : "assets"}</span>{focusedComposerValues.assets.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
                 </div>
-                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend><div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
+                <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend>{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <p className="mb-2 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">{scheduledEditPolicy(focusedDraft).canEditContent ? "This post is already scheduled. Saving sends the change to your provider, and destinations stay locked while it is scheduled." : "This post is already scheduled and cannot be edited in place. Cancel the schedule to change it."}</p> : null}<div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !scheduledEditPolicy(focusedDraft).canChangeDestinations || !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} disabled={!scheduledEditPolicy(focusedDraft).canChangeDestinations} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
-                 <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
+                 <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0 || !scheduledEditPolicy(focusedDraft).canPublishNow} title={!scheduledEditPolicy(focusedDraft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => void saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Confirm Schedule</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
@@ -1171,7 +1200,8 @@ export default function PublishingStudio() {
               </div>
             </div>
           </div>
-          {!calendarMonthHasScheduled ? <p role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">Nothing scheduled</p> : null}
+          <p role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">{scheduleSyncedAt ? `Maven Social schedule last refreshed ${readableDate(scheduleSyncedAt, true)}.` : "Maven Social scheduled posts have not been refreshed in this browser yet."}</p>
+          {remoteHistoryError ? <p role="status" className="rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-3 py-2 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">Scheduled posts from Maven Social could not be refreshed, so this calendar shows only the schedule saved in this browser: {remoteHistoryError}</p> : !calendarMonthHasScheduled ? <p role="status" className="text-[10px] text-[var(--ms-color-text-muted)]">No scheduled posts in this month.</p> : null}
           {selectedCalendarDraft ? (() => {
             const provider = publishingProviderRegistry.get(selectedCalendarDraft.provider);
             const draftPlatforms = selectedCalendarDraft.provider === PUBLISHING_PROVIDER_IDS.ZERNIO ? ZERNIO_CONNECTION_CATALOG : LEGACY_PLATFORM_OPTIONS;
@@ -1279,6 +1309,7 @@ export default function PublishingStudio() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge tone={statusTone(draftStatus(draft))}>{isPublishingDraftNeedsAttention(draft) ? "Needs Attention" : draftStatus(draft)}</StatusBadge>
+                      {draft.importedFromProvider ? <StatusBadge tone="neutral">Scheduled in Maven Social</StatusBadge> : null}
                       {draft.campaignName ? <StatusBadge tone="gold">{draft.campaignName}</StatusBadge> : null}
                     </div>
                     <h3 className="mt-3 text-sm font-semibold">{draft.title || "Untitled Draft"}</h3>
@@ -1288,10 +1319,10 @@ export default function PublishingStudio() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {canEditDraft ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Edit</SecondaryButton> : null}
-                    <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
+                    <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0 || !scheduledEditPolicy(draft).canPublishNow} title={!scheduledEditPolicy(draft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => void publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                     <SecondaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
                     {isScheduledPublishingStatus(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
-                    <SecondaryButton type="button" onClick={() => saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
+                    <SecondaryButton type="button" onClick={() => void saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
                     <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
                     <button type="button" onClick={() => deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)]">Delete</button>
                   </div>
@@ -1324,7 +1355,7 @@ export default function PublishingStudio() {
                     {platformOptions.map((platform) => {
                       const checked = draft.platforms.includes(platform.id);
                       const account = accountForPlatform(accounts, platform.id);
-                      const disabled = !platform.enabled || (!checked && !account);
+                      const disabled = !scheduledEditPolicy(draft).canChangeDestinations || !platform.enabled || (!checked && !account);
                       return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-gold-primary)] bg-[rgba(212,168,88,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} requires capability flag validation.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(draft, platform.id)} className="sr-only" />{platform.label}</label>;
                     })}
                   </div>
@@ -1337,7 +1368,7 @@ export default function PublishingStudio() {
                         return (
                           <label key={platform} className="block">
                             <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span>
-                            <select value={selectedAccount} onChange={(event) => selectAccount(draft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]">
+                            <select value={selectedAccount} disabled={!scheduledEditPolicy(draft).canChangeDestinations} onChange={(event) => selectAccount(draft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]">
                               <option value="">Choose connected account</option>
                               {platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}
                             </select>

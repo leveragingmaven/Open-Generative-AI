@@ -5,6 +5,7 @@ import { AssetLibraryService } from "../intelligence/AssetLibraryService.js";
 import { InMemoryAssetIndexer } from "../intelligence/AssetIndexer.js";
 import { localAssetManager } from "../intelligence/AssetManager.js";
 import { PublishingError, PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
+import { captionWithHashtags } from "./publishingComposer.js";
 import { isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
 
 function freshDraftId() {
@@ -215,11 +216,74 @@ export class PublishingCenterMVP {
       throw new Error("Draft not found");
     }
 
-    const result = await this.providerForDraft(draft).publishNow(draft, { storage: this.storage });
+    const publishingProvider = this.providerForDraft(draft);
+    // A post the provider already has scheduled must never be published a second time: that would create a
+    // duplicate live post while the scheduled delivery stays queued. Reschedule or cancel it instead.
+    if (draft.providerJobId && isScheduledPublishingStatus(effectivePublishingDraftStatus(draft, publishingProvider.supportsCapability("schedulePost")))) {
+      throw new PublishingValidationError(
+        "This post is already scheduled with the provider. Reschedule or cancel it instead of publishing another copy.",
+        { field: "status" },
+      );
+    }
+
+    const result = await publishingProvider.publishNow(draft, { storage: this.storage });
     
     // Save the job using the publishing history abstraction
     savePublishingJob(result, this.storage);
     return result;
+  }
+
+  /**
+   * Persist composer edits for a draft the provider already has scheduled.
+   *
+   * The provider owns the scheduled post, so the edit is submitted there first and the local draft is only
+   * written after the provider confirms it. "Saved" therefore never means "saved in this browser only".
+   */
+  async updateScheduledDraft(draftId, updates = {}) {
+    const drafts = readPublishingDrafts(this.storage);
+    const draft = drafts.find((item) => item.id === draftId);
+    if (!draft) throw new Error("Draft not found");
+
+    const provider = this.providerForDraft(draft);
+    if (!provider.supportsCapability("updateScheduledPost")) {
+      throw new UnsupportedPublishingCapabilityError("updateScheduledPost", provider.id);
+    }
+    const providerJobId = draft.providerJobId || draft.providerPostIds?.[draft.platforms?.[0]];
+    if (!providerJobId) {
+      throw new PublishingValidationError("This draft has no provider post to update.", { field: "providerJobId" });
+    }
+
+    const requestedTime = new Date(updates.scheduledAt || draft.scheduledAt).getTime();
+    const requestedSchedule = Number.isFinite(requestedTime) && requestedTime > Date.now();
+    const scheduledAt = requestedSchedule ? new Date(requestedTime).toISOString() : draft.scheduledAt;
+
+    const result = await provider.updateScheduledPost(providerJobId, {
+      // The caption that publishes is the caption with hashtags folded in, exactly like a new schedule.
+      content: captionWithHashtags(updates.caption ?? draft.caption ?? draft.description ?? "", updates.hashtags ?? draft.hashtags),
+      firstComment: updates.firstComment ?? draft.firstComment ?? "",
+      // Media is only replaced when the caller supplied an asset list; otherwise the provider keeps its own copy.
+      assetIds: Array.isArray(updates.assetIds) ? updates.assetIds : undefined,
+      // Only an explicit schedule change is sent, so the provider keeps the delivery time it already stored.
+      scheduledAt: updates.scheduledAt && requestedSchedule ? scheduledAt : null,
+      timezone: updates.timezone || draft.timezone || "UTC",
+    });
+
+    const savedDraft = this.providerForDraft(draft).updateDraft({
+      ...draft,
+      ...updates,
+      id: draft.id,
+      status: effectivePublishingDraftStatus({
+        ...draft,
+        scheduledAt: result?.scheduledAt || scheduledAt,
+        status: result?.status || PUBLISHING_STATUS.SCHEDULED,
+      }),
+      scheduledAt: result?.scheduledAt || scheduledAt,
+      timezone: result?.timezone || updates.timezone || draft.timezone,
+      providerJobId: result?.providerJobId || providerJobId,
+      error: null,
+    }, { storage: this.storage });
+    savePublishingDraft(savedDraft, this.storage);
+    return savedDraft;
   }
 
   async cancelScheduledDraft(draftId) {
@@ -262,7 +326,7 @@ export class PublishingCenterMVP {
     const drafts = readPublishingDrafts(this.storage);
     const sourceDraft = typeof source === "string" ? drafts.find((draft) => draft.id === source) : source;
     if (!sourceDraft) throw new Error("Draft not found");
-    const { providerPostIds, providerJobId, providerRequestIds, publishedAt, error, status, scheduledAt, createdAt, updatedAt, id, ...copy } = sourceDraft;
+    const { providerPostIds, providerJobId, providerRequestIds, publishedAt, error, status, scheduledAt, createdAt, updatedAt, importedFromProvider, id, ...copy } = sourceDraft;
     return this.createDraft({
       ...copy,
       id: freshDraftId(),
@@ -363,7 +427,7 @@ export class PublishingCenterMVP {
   async getRemoteHistory() {
     if (!this.publishingProvider.supportsCapability("getScheduledPosts")) return [];
     const remoteJobs = await this.publishingProvider.getScheduledPosts();
-    if (this.publishingProvider.id !== PUBLISHING_PROVIDER_IDS.MUAPI) return remoteJobs;
+    if (this.publishingProvider.id !== PUBLISHING_PROVIDER_IDS.MUAPI) return this.reconcileProviderScheduledPosts(remoteJobs);
 
     const drafts = readPublishingDrafts(this.storage);
     const history = readPublishingHistory(this.storage);
@@ -424,6 +488,107 @@ export class PublishingCenterMVP {
       savePublishingJob(reconciledJob, this.storage);
       return reconciledJob;
     });
+  }
+
+  /** Every provider-issued identifier a draft is known by, so a provider post can never be joined to a draft by guesswork. */
+  providerIdentifiersForDraft(draft = {}) {
+    return [draft.providerJobId, ...Object.values(draft.providerPostIds || {}), ...Object.values(draft.providerRequestIds || {})]
+      .filter(Boolean)
+      .map((value) => String(value));
+  }
+
+  /**
+   * Join provider-side scheduled posts to local drafts for any provider that can list scheduled posts.
+   *
+   * Joining is by provider-issued identifier first, so repeated syncs (and several browsers) converge on one
+   * draft per provider post instead of duplicating it. A scheduled post this browser has never seen is
+   * materialized as a provider-originated draft, which keeps the real schedule visible in later sessions
+   * instead of showing an empty calendar. Only drafts belonging to the active provider are matched.
+   */
+  reconcileProviderScheduledPosts(remoteJobs = []) {
+    const providerId = this.publishingProvider.id;
+    const drafts = readPublishingDrafts(this.storage);
+    const byIdentifier = new Map();
+    const indexDraft = (draft) => {
+      if (!draft || draft.provider !== providerId) return;
+      this.providerIdentifiersForDraft(draft).forEach((identifier) => {
+        if (!byIdentifier.has(identifier)) byIdentifier.set(identifier, draft);
+      });
+    };
+    drafts.forEach(indexDraft);
+
+    return (Array.isArray(remoteJobs) ? remoteJobs : []).map((remoteJob) => {
+      if (!remoteJob) return remoteJob;
+      const identifiers = [remoteJob.providerJobId, remoteJob.providerPostId, remoteJob.providerRequestId, remoteJob.id]
+        .filter(Boolean)
+        .map((value) => String(value));
+      let draft = identifiers.map((identifier) => byIdentifier.get(identifier)).find(Boolean) || null;
+      if (!draft && remoteJob.draftId) {
+        draft = drafts.find((item) => item.provider === providerId && item.id === String(remoteJob.draftId)) || null;
+      }
+      draft = draft
+        ? this.mergeProviderScheduleIntoDraft(draft, remoteJob)
+        : this.importProviderScheduledDraft(remoteJob);
+      if (!draft) return remoteJob;
+      indexDraft(draft);
+      return {
+        ...remoteJob,
+        draftId: draft.id,
+        provider: providerId,
+        providerJobId: remoteJob.providerJobId || remoteJob.providerPostId || draft.providerJobId || null,
+        platforms: (remoteJob.platforms || []).length ? remoteJob.platforms : draft.platforms,
+        scheduledAt: draft.scheduledAt || remoteJob.scheduledAt || null,
+        timezone: remoteJob.timezone || draft.timezone || "UTC",
+      };
+    });
+  }
+
+  /** Refresh a local draft that the provider already knows about, taking the provider's schedule as the truth. */
+  mergeProviderScheduleIntoDraft(draft, remoteJob = {}) {
+    const providerPostId = remoteJob.providerPostId || remoteJob.providerJobId || null;
+    const platforms = (remoteJob.platforms || []).length ? remoteJob.platforms : draft.platforms;
+    const scheduledAt = remoteJob.scheduledAt || draft.scheduledAt || null;
+    const updatedDraft = this.providerForDraft(draft).updateDraft({
+      ...draft,
+      status: isScheduledPublishingStatus(remoteJob.status) ? PUBLISHING_STATUS.SCHEDULED : draft.status,
+      providerJobId: remoteJob.providerJobId || remoteJob.providerPostId || draft.providerJobId,
+      providerPostIds: {
+        ...(draft.providerPostIds || {}),
+        ...(remoteJob.providerPostIds || {}),
+        ...(providerPostId && platforms.length === 1 ? { [platforms[0]]: String(providerPostId) } : {}),
+      },
+      scheduledAt,
+      timezone: remoteJob.timezone || draft.timezone,
+    }, { storage: this.storage });
+    savePublishingDraft(updatedDraft, this.storage);
+    return updatedDraft;
+  }
+
+  /** Materialize a provider-side scheduled post so it survives the browser session that discovered it. */
+  importProviderScheduledDraft(remoteJob = {}) {
+    const provider = this.publishingProvider;
+    const providerPostId = remoteJob.providerPostId || remoteJob.providerJobId || remoteJob.id;
+    const scheduledAt = remoteJob.scheduledAt || null;
+    // A scheduled post without a provider id or a time cannot be joined, cancelled, or placed on a calendar.
+    if (!providerPostId || !scheduledAt) return null;
+    const draft = provider.createDraft({
+      id: `${provider.id}-provider-${providerPostId}`,
+      title: "",
+      caption: typeof remoteJob.content === "string" ? remoteJob.content : "",
+      assets: [],
+      assetIds: [],
+      platforms: Array.isArray(remoteJob.platforms) ? remoteJob.platforms : [],
+      accountIds: {},
+      scheduledAt,
+      timezone: remoteJob.timezone || "UTC",
+      status: PUBLISHING_STATUS.SCHEDULED,
+      providerJobId: String(providerPostId),
+      providerPostIds: {},
+      providerRequestIds: {},
+      importedFromProvider: true,
+    }, { storage: this.storage });
+    savePublishingDraft(draft, this.storage);
+    return draft;
   }
 
   /**

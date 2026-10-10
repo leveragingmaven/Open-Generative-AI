@@ -1,4 +1,4 @@
-import { PUBLISHING_STATUS } from "./publishingTypes.js";
+import { effectivePublishingDraftStatus, PUBLISHING_STATUS } from "./publishingTypes.js";
 
 function selectedAccountName(draft, platform, accounts, accountsProviderId) {
   const override = draft.platformOverrides?.[platform] || {};
@@ -62,6 +62,30 @@ export function publishingCalendarDateTime(value, timezone) {
       minute: "2-digit",
     }).format(date);
   }
+}
+
+/**
+ * What a creator may safely change once the provider holds the scheduled post.
+ *
+ * The provider owns the scheduled delivery, so an edit that the provider cannot accept must be blocked in the
+ * interface instead of being stored locally and silently lost. Destinations are never changed in place: the
+ * provider keeps the targets it already stored, so they stay locked unless the post is cancelled.
+ */
+export function publishingScheduledEditPolicy(draft = {}, provider = null) {
+  const scheduledOnProvider = Boolean(draft.providerJobId)
+    && [PUBLISHING_STATUS.SCHEDULED, PUBLISHING_STATUS.QUEUED]
+      .includes(effectivePublishingDraftStatus(draft, Boolean(provider?.supportsCapability?.("schedulePost"))));
+  const providerCanUpdate = Boolean(provider?.supportsCapability?.("updateScheduledPost"));
+  return {
+    scheduledOnProvider,
+    provider: draft.provider || null,
+    canEditContent: !scheduledOnProvider || providerCanUpdate,
+    contentUpdatesProvider: scheduledOnProvider && providerCanUpdate,
+    canChangeDestinations: !scheduledOnProvider,
+    canPublishNow: !scheduledOnProvider,
+    canReschedule: !scheduledOnProvider || Boolean(provider?.supportsCapability?.("reschedulePost")),
+    canCancel: scheduledOnProvider && Boolean(provider?.supportsCapability?.("cancelScheduledPost")),
+  };
 }
 
 export function publishingCalendarActions(draft, provider) {

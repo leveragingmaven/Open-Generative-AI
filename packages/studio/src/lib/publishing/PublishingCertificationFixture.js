@@ -65,7 +65,12 @@ export async function runPublishingCertification() {
   assert.equal(scheduled.status, PUBLISHING_STATUS.SCHEDULED);
   assert.equal(scheduled.platforms[0], "youtube");
   assert.equal(center.getDrafts()[0].scheduledAt, "2030-01-01T10:00:00.000Z");
-  const published = await center.publishDraft(configured.id);
+  // A post the provider already has scheduled must never be published a second time.
+  await assert.rejects(() => center.publishDraft(configured.id), (error) => error.code === "validation_error");
+
+  const directDraft = center.createDraftFromAsset(asset);
+  center.updateDraftPlatforms(directDraft.id, ["youtube"], { accountIds: { youtube: "yt-1" } });
+  const published = await center.publishDraft(directDraft.id);
   assert.equal(published.status, PUBLISHING_STATUS.PUBLISHED);
   assert.equal(published.provider, "muapi");
 

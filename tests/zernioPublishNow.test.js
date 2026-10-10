@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolveZernioMedia } from '../src/lib/zernioMediaResolver.js';
 import { InMemoryZernioRepository } from '../src/lib/zernioRepository.js';
-import { cancelTenantZernioScheduledPost, ensureZernioProfile, listTenantZernioScheduledPosts, publishZernioNow, rescheduleTenantZernioPost } from '../src/lib/zernioSocialService.js';
+import { cancelTenantZernioScheduledPost, ensureZernioProfile, listTenantZernioScheduledPosts, publishZernioNow, rescheduleTenantZernioPost, updateTenantZernioScheduledPost } from '../src/lib/zernioSocialService.js';
 import { handleZernioPublishingRequest } from '../app/api/publishing/zernio/[[...path]]/route.js';
 
 const tenantA = { accountId: 'account-a', identityKey: 'creator-a' };
@@ -305,4 +305,89 @@ test('first comment participates in the idempotency request identity', async () 
   const base = { identity: tenantA, draftId: 'draft', content: 'Hello', assetIds: [], platforms: ['instagram'], accountIds: { instagram: 'z1' } };
   assert.notEqual(stablePublishRequestId({ ...base, firstComment: 'a' }), stablePublishRequestId({ ...base, firstComment: 'b' }));
   assert.equal(stablePublishRequestId({ ...base, firstComment: '' }), stablePublishRequestId(base));
+});
+
+test('editing a scheduled post updates content, first comment, and media in place without recreating it', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{
+    _id: 'owned-post',
+    content: 'Original caption',
+    mediaItems: [{ url: 'https://media.zernio.test/old.jpg', type: 'image' }],
+    status: 'scheduled',
+    scheduledFor: '2035-01-01T10:00:00.000Z',
+    platforms: [{ platform: 'instagram', accountId: 'z-account-1', platformSpecificData: { firstComment: 'Old first comment', shareToStory: true } }],
+  }] } });
+  const assetRepository = repositoryFor({ id: 'asset-b', accountId: tenantA.accountId, creatorIdentityKey: tenantA.identityKey, providerOutputReference: 'https://cdn.example.test/b.jpg', title: 'New media' });
+
+  const result = await updateTenantZernioScheduledPost({
+    identity: tenantA,
+    postId: 'owned-post',
+    content: 'Edited caption',
+    firstComment: 'New first comment',
+    assetIds: ['asset-b'],
+    repository,
+    client,
+    assetRepository,
+    mediaAllowlist: ['cdn.example.test'],
+    lookup: safeLookup,
+    fetcher: async (_url, options) => options.method === 'HEAD' ? response(200, { 'content-type': 'image/jpeg', 'content-length': '3' }) : response(200, { 'content-type': 'image/jpeg' }),
+  });
+
+  const update = client.calls.find((call) => call.method === 'updatePost').input;
+  assert.equal(update.path.postId, 'owned-post');
+  assert.equal(update.body.content, 'Edited caption');
+  assert.deepEqual(update.body.mediaItems, [{ url: 'https://cdn.example.test/b.jpg', type: 'image' }]);
+  assert.equal(update.body.isDraft, false);
+  // The whole platform namespace is replaced, so unrelated platform settings must survive the edit.
+  assert.deepEqual(update.body.platforms, [{ platform: 'instagram', accountId: 'z-account-1', platformSpecificData: { firstComment: 'New first comment', shareToStory: true } }]);
+  // Editing must never create a second post.
+  assert.equal(client.calls.some((call) => call.method === 'post'), false);
+  assert.equal(result.postId, 'owned-post');
+  assert.equal(result.status, 'scheduled');
+  assert.deepEqual(result.platforms, ['instagram']);
+});
+
+test('an update with nothing to change, and an update that empties the post, are both refused', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'owned-post', content: 'Existing', mediaItems: [], status: 'scheduled', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+
+  await assert.rejects(() => updateTenantZernioScheduledPost({ identity: tenantA, postId: 'owned-post', repository, client }), (error) => error.code === 'zernio_update_invalid');
+  await assert.rejects(
+    () => updateTenantZernioScheduledPost({ identity: tenantA, postId: 'owned-post', content: '   ', assetIds: [], repository, client }),
+    (error) => error.code === 'zernio_publish_invalid',
+  );
+  assert.equal(client.calls.some((call) => call.method === 'updatePost'), false);
+});
+
+test('foreign, missing, and non-scheduled posts cannot be edited or cancelled through the tenant proxy', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'not-scheduled', status: 'published', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+  const request = new Request('https://creator.test/api/publishing/zernio/posts/not-scheduled', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Hijack', assetIds: [] }) });
+  const result = await handleZernioPublishingRequest(request, { params: { path: ['posts', 'not-scheduled'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  assert.equal(result.status, 403);
+  assert.equal(client.calls.some((call) => call.method === 'updatePost'), false);
+});
+
+test('the update route passes caption, first comment, and media edits through the authenticated proxy', async () => {
+  const repository = await zernioRepository();
+  const client = clientFor();
+  client.posts.listPosts = async () => ({ data: { posts: [{ _id: 'owned-post', content: 'Original', mediaItems: [], status: 'scheduled', scheduledFor: '2035-04-01T10:00:00.000Z', platforms: [{ platform: 'instagram', accountId: 'z-account-1' }] }] } });
+  const request = new Request('https://creator.test/api/publishing/zernio/posts/owned-post', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'Edited through the route', firstComment: 'Route comment' }),
+  });
+  const result = await handleZernioPublishingRequest(request, { params: { path: ['posts', 'owned-post'] }, authenticate: async () => ({ identity: tenantA }), rateLimit: () => null, repository, client });
+  assert.equal(result.status, 200);
+  const payload = await result.json();
+  assert.equal(payload.content, 'Edited through the route');
+
+  const update = client.calls.find((call) => call.method === 'updatePost').input;
+  assert.equal(update.body.content, 'Edited through the route');
+  assert.equal(update.body.platforms[0].platformSpecificData.firstComment, 'Route comment');
+  // A caption-only edit keeps the schedule the provider already stored.
+  assert.equal(update.body.scheduledFor, '2035-04-01T10:00:00.000Z');
 });

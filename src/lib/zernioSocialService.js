@@ -799,13 +799,16 @@ function sanitizePublishResponse(data, platforms, httpStatus, schedule = null) {
   return { status, postId: responsePostId, platformResults, publishedUrls: returned.filter((item) => item.platformPostUrl).map((item) => item.platformPostUrl), httpStatus: status === 'partially_published' ? 207 : status === 'published' ? (httpStatus || 201) : 502 };
 }
 
-export async function publishZernioNow({ identity, draftId, content = '', firstComment = '', assetIds = [], platforms = [], accountIds = {}, scheduledFor = null, timezone = 'UTC', repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
-  const owner = requiredIdentity(identity);
-  const selectedPlatforms = [...new Set(platforms.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
-  if (!selectedPlatforms.length) throw Object.assign(new Error('Choose at least one Maven Social destination.'), { code: 'zernio_publish_invalid', status: 400 });
+/**
+ * Resolve stored Creator OS assets into Maven Social media items.
+ *
+ * Shared by scheduling, publishing, and updating a scheduled post so all three paths verify ownership, media
+ * type, size, and approved hosts exactly the same way.
+ */
+async function resolveZernioMediaItems({ identity, assetIds = [], assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
   const mediaItems = [];
   for (const assetId of assetIds) {
-    const media = await resolveZernioMedia({ identity: owner, assetId, assetRepository: assetRepository || new MySqlCreativeAssetRepository(), fetcher, lookup, allowlist: mediaAllowlist });
+    const media = await resolveZernioMedia({ identity, assetId, assetRepository: assetRepository || new MySqlCreativeAssetRepository(), fetcher, lookup, allowlist: mediaAllowlist });
     if (media.mode === 'publicUrl') mediaItems.push({ url: media.url, type: media.contentType.startsWith('video/') ? 'video' : media.contentType === 'application/pdf' ? 'document' : 'image' });
     else {
       const presigned = unwrapResponse(await client.media.getMediaPresignedUrl({ body: { filename: media.filename, contentType: media.contentType, size: media.sizeBytes } }), 'Unable to prepare Maven Social media.');
@@ -816,6 +819,14 @@ export async function publishZernioNow({ identity, draftId, content = '', firstC
       mediaItems.push({ url: presigned.publicUrl, type: media.contentType.startsWith('video/') ? 'video' : media.contentType === 'application/pdf' ? 'document' : 'image' });
     }
   }
+  return mediaItems;
+}
+
+export async function publishZernioNow({ identity, draftId, content = '', firstComment = '', assetIds = [], platforms = [], accountIds = {}, scheduledFor = null, timezone = 'UTC', repository = new MySqlZernioRepository(), assetRepository = null, client = getZernioClient(), fetcher = globalThis.fetch, lookup, mediaAllowlist } = {}) {
+  const owner = requiredIdentity(identity);
+  const selectedPlatforms = [...new Set(platforms.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
+  if (!selectedPlatforms.length) throw Object.assign(new Error('Choose at least one Maven Social destination.'), { code: 'zernio_publish_invalid', status: 400 });
+  const mediaItems = await resolveZernioMediaItems({ identity: owner, assetIds, assetRepository, client, fetcher, lookup, mediaAllowlist });
   const targets = [];
   for (const platform of selectedPlatforms) {
     const option = getZernioConnectionOption(platform);
@@ -930,29 +941,91 @@ async function ownedZernioScheduledPost({ identity, postId, repository, client }
   return { post, id };
 }
 
-export async function rescheduleTenantZernioPost({ identity, postId, scheduledFor, timezone = 'UTC', repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
-  const { post, id } = await ownedZernioScheduledPost({ identity, postId, repository, client });
-  const timestamp = new Date(scheduledFor).getTime();
-  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) throw Object.assign(new Error('Choose a future Maven Social publishing time.'), { code: 'zernio_schedule_invalid', status: 400 });
-  const normalizedScheduledFor = new Date(timestamp).toISOString();
+function zernioTargetPlatform(target) {
+  const value = typeof target?.platform === 'object' ? target.platform?.platform : target?.platform;
+  return value ? String(value) : null;
+}
+
+function zernioTargetAccountId(target) {
+  const value = typeof target?.accountId === 'object' ? target.accountId?._id || target.accountId?.id : target?.accountId;
+  return value ? String(value) : null;
+}
+
+/**
+ * Update the provider-owned copy of a scheduled post.
+ *
+ * Maven Social's post update endpoint accepts content, media, per-platform first comments, and the schedule
+ * itself, so an already-scheduled post is edited in place. Only the fields the caller supplies are replaced;
+ * stored content, media, per-platform configuration, and every destination target are preserved otherwise, and
+ * the post is never recreated (which is what would risk a duplicate delivery).
+ */
+export async function updateTenantZernioScheduledPost({
+  identity, postId, content, firstComment, assetIds, scheduledFor = null, timezone = 'UTC',
+  repository = new MySqlZernioRepository(), client = getZernioClient(),
+  assetRepository = null, fetcher = globalThis.fetch, lookup, mediaAllowlist,
+} = {}) {
+  const owner = requiredIdentity(identity);
+  const { post, id } = await ownedZernioScheduledPost({ identity: owner, postId, repository, client });
+  const hasContent = typeof content === 'string';
+  const hasComment = typeof firstComment === 'string';
+  const hasMedia = Array.isArray(assetIds);
+  const hasSchedule = scheduledFor !== null && scheduledFor !== undefined && scheduledFor !== '';
+  if (!hasContent && !hasComment && !hasMedia && !hasSchedule) {
+    throw Object.assign(new Error('Choose something to change before updating this scheduled post.'), { code: 'zernio_update_invalid', status: 400 });
+  }
+  let normalizedScheduledFor = null;
+  if (hasSchedule) {
+    const timestamp = new Date(scheduledFor).getTime();
+    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) throw Object.assign(new Error('Choose a future Maven Social publishing time.'), { code: 'zernio_schedule_invalid', status: 400 });
+    normalizedScheduledFor = new Date(timestamp).toISOString();
+  }
+
+  const mediaItems = hasMedia ? await resolveZernioMediaItems({ identity: owner, assetIds, assetRepository, client, fetcher, lookup, mediaAllowlist }) : null;
+  const nextContent = hasContent ? String(content) : (typeof post.content === 'string' ? post.content : '');
+  const nextMedia = hasMedia ? mediaItems : (Array.isArray(post.mediaItems) ? post.mediaItems : []);
+  if (!nextContent.trim() && !nextMedia.length) {
+    throw Object.assign(new Error('Add text or creative media before updating this scheduled post.'), { code: 'zernio_publish_invalid', status: 400 });
+  }
+
+  const targets = [];
+  for (const target of Array.isArray(post.platforms) ? post.platforms : []) {
+    if (!zernioTargetPlatform(target) || !zernioTargetAccountId(target)) continue;
+    if (!hasComment) { targets.push(target); continue; }
+    const comment = String(firstComment || '').trim();
+    const platformSpecificData = { ...(target?.platformSpecificData || {}) };
+    // Sending a platform namespace replaces it, so existing keys are preserved and only firstComment changes.
+    if (comment && FIRST_COMMENT_PLATFORMS.has(zernioTargetPlatform(target))) platformSpecificData.firstComment = comment;
+    else delete platformSpecificData.firstComment;
+    targets.push({ ...target, platformSpecificData });
+  }
+  if (!targets.length) throw Object.assign(new Error('This scheduled post has no destinations to update.'), { code: 'zernio_publish_invalid', status: 400 });
+
   const updated = dataOf(await client.posts.updatePost({
     path: { postId: id },
     body: {
-      ...(typeof post.content === 'string' ? { content: post.content } : {}),
-      ...(Array.isArray(post.mediaItems) ? { mediaItems: post.mediaItems } : {}),
-      ...(Array.isArray(post.platforms) ? { platforms: post.platforms } : {}),
+      content: nextContent,
+      mediaItems: nextMedia,
+      platforms: targets,
       isDraft: false,
-      scheduledFor: normalizedScheduledFor,
-      timezone: String(timezone || 'UTC'),
+      ...(normalizedScheduledFor ? { scheduledFor: normalizedScheduledFor } : (typeof post.scheduledFor === 'string' ? { scheduledFor: post.scheduledFor } : {})),
+      timezone: String(timezone || post.timezone || 'UTC'),
     },
   }));
   const updatedPost = updated?.post || updated;
   return {
     postId: updatedPost?._id || updatedPost?.id || id,
     status: updatedPost?.status || 'scheduled',
-    scheduledFor: updatedPost?.scheduledFor || normalizedScheduledFor,
-    timezone: updatedPost?.timezone || String(timezone || 'UTC'),
+    scheduledFor: updatedPost?.scheduledFor || normalizedScheduledFor || post.scheduledFor || null,
+    timezone: updatedPost?.timezone || String(timezone || post.timezone || 'UTC'),
+    content: nextContent,
+    platforms: targets.map(zernioTargetPlatform).filter(Boolean),
   };
+}
+
+/** Reschedule-only entry point kept for callers that never change post content. */
+export async function rescheduleTenantZernioPost(options = {}) {
+  const result = await updateTenantZernioScheduledPost({ ...options, content: undefined, firstComment: undefined, assetIds: undefined });
+  return { postId: result.postId, status: result.status, scheduledFor: result.scheduledFor, timezone: result.timezone };
 }
 
 export async function cancelTenantZernioScheduledPost({ identity, postId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
@@ -962,7 +1035,7 @@ export async function cancelTenantZernioScheduledPost({ identity, postId, reposi
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_engagement_account_limit', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
+  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_update_invalid', 'zernio_engagement_account_limit', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
   const safe = new Error(safeProviderCode || error?.code === 'zernio_engagement_account_limit' ? error.message : fallback);
   safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';
