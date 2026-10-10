@@ -16,6 +16,7 @@ import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
+import { publishingDraftMediaAsset, publishingQueueCard, publishingQueueMedia, publishingSaveAvailability } from "../lib/publishing/publishingQueueCard.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -213,6 +214,25 @@ function AssetPreview({ asset }) {
   if (imageUrl && type.includes("image")) return <img src={imageUrl} alt={assetTitle(asset)} onError={() => setFailedSources((sources) => [...sources, imageUrl])} className="h-full w-full object-cover" />;
   if (url && !failedSources.includes(url) && type.includes("video")) return <video src={url} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, url])} aria-label={`${assetTitle(asset)} preview`} preload="metadata" className="h-full w-full object-cover" />;
   return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={24} /><span className="text-[9px] font-semibold uppercase tracking-[0.15em]">{type}</span></div>;
+}
+
+/**
+ * The media thumbnail for one Queue card or Calendar detail panel.
+ *
+ * Images are delivered by the already-authenticated Creative Assets endpoint, resized through its
+ * `variant=thumbnail` rendering. A video keeps its own account-authenticated reference at a first-frame
+ * timestamp, because that endpoint only downsizes images. `publishingQueueMedia` refuses a private object
+ * key, so this component can never render a stored R2 reference.
+ */
+function QueueMediaThumbnail({ media }) {
+  const [failedSources, setFailedSources] = useState([]);
+  const fail = (source) => setFailedSources((sources) => (sources.includes(source) ? sources : [...sources, source]));
+  const imageUrl = media?.imageUrl && !failedSources.includes(media.imageUrl) ? media.imageUrl : null;
+  const videoUrl = media?.videoUrl && !failedSources.includes(media.videoUrl) ? media.videoUrl : null;
+  const label = media?.title || "Post media";
+  if (imageUrl) return <img src={imageUrl} alt={label} loading="lazy" decoding="async" onError={() => fail(imageUrl)} className="h-full w-full object-cover" />;
+  if (videoUrl) return <video src={videoUrl.includes("#") ? videoUrl : `${videoUrl}#t=0.1`} poster={media.imageUrl || undefined} muted playsInline preload="metadata" aria-label={`${label} poster`} onError={() => fail(videoUrl)} className="h-full w-full object-cover" />;
+  return <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={22} /><span className="text-[8px] font-semibold uppercase tracking-[0.14em]">{media?.kind || "no media"}</span></div>;
 }
 
 export default function PublishingStudio() {
@@ -566,9 +586,21 @@ export default function PublishingStudio() {
   const draftMap = useMemo(() => new Map(drafts.map((draft) => [draft.id, draft])), [drafts]);
   const focusedDraft = useMemo(() => drafts.find((draft) => draft.id === focusedDraftId) || null, [drafts, focusedDraftId]);
   const focusedComposerValues = focusedDraft ? publishingComposerValues(focusedDraft, draftEdits[focusedDraft.id]) : null;
-  const focusedPreviewAsset = focusedComposerValues?.assets?.[0] || null;
+  // The live Library record is preferred for the preview, so a draft keeps showing its media even when only the
+  // stored asset id survived; the draft's own snapshot remains the fallback.
+  const focusedPreviewAsset = focusedComposerValues ? publishingDraftMediaAsset(focusedComposerValues, assets) : null;
+  // Saving is gated on real changes, so a Queue or composer save can never re-submit an unchanged post to
+  // the provider, and the label states whether the provider or only the local draft is being written.
+  const focusedSaveAction = publishingSaveAvailability(
+    focusedDraft,
+    focusedDraft ? draftEdits[focusedDraft.id] || null : null,
+    focusedDraft ? scheduledEditPolicy(focusedDraft) : {},
+  );
+  const focusedHasPendingEdits = focusedSaveAction.hasPendingEdits;
   const focusedMediaAssetId = String(focusedComposerValues?.assetIds?.[0] || focusedComposerValues?.assets?.[0]?.id || "");
   const focusedAttachment = focusedDraft ? draftAttachmentAvailability(focusedComposerValues, assets, { authoritative: !libraryDegraded }) : null;
+  const nextScheduled = useMemo(() => scheduled.filter((draft) => draft.scheduledAt)
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0] || null, [scheduled]);
   const pickerEntries = useMemo(() => libraryPickerEntries(assets, { query: libraryQuery }), [assets, libraryQuery]);
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
@@ -1032,6 +1064,8 @@ export default function PublishingStudio() {
     setNotice(null);
     try {
       const result = await centerRef.current.deleteDraftSafely(draft.id);
+      // The composer/preview must not keep pointing at a draft that no longer exists.
+      if (focusedDraftId === draft.id) setFocusedDraftId(null);
       setNotice({
         tone: "success",
         text: result?.providerScheduleCancelled
@@ -1219,11 +1253,16 @@ export default function PublishingStudio() {
               <div className="space-y-5">
                 <div className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
                   <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
-                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedComposerValues.assets.length} {focusedComposerValues.assets.length === 1 ? "asset" : "assets"}</span>{focusedComposerValues.assets.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setLibraryPickerOpen(true)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Replace media</button></div>{focusedAttachment?.unavailable ? <p role="alert" className="mt-3 text-[10px] leading-5 text-[var(--ms-color-warning)]">This post's media is no longer in your Creative Library. Choose replacement media before publishing or scheduling.</p> : null}
+                  {focusedPreviewAsset ? <div className="mt-3 h-20 w-32 overflow-hidden rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/20"><QueueMediaThumbnail media={publishingQueueMedia(focusedPreviewAsset)} /></div> : null}
+                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedAttachment?.assetIds?.length ? `${focusedAttachment.assetIds.length} ${focusedAttachment.assetIds.length === 1 ? "media item" : "media items"} attached` : "No media attached"}</span>{focusedAttachment?.assetIds?.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setLibraryPickerOpen(true)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Replace media</button></div>{focusedAttachment?.unavailable ? <p role="alert" className="mt-3 text-[10px] leading-5 text-[var(--ms-color-warning)]">This post's media is no longer in your Creative Library. Choose replacement media before publishing or scheduling.</p> : null}
                 </div>
                 <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend>{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <p className="mb-2 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">{scheduledEditPolicy(focusedDraft).canEditContent ? "This post is already scheduled. Saving sends the change to your provider, and destinations stay locked while it is scheduled." : "This post is already scheduled and cannot be edited in place. Cancel the schedule to change it."}</p> : null}<div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !scheduledEditPolicy(focusedDraft).canChangeDestinations || !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} disabled={!scheduledEditPolicy(focusedDraft).canChangeDestinations} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
-                 <div className="flex flex-wrap gap-2 border-t border-[var(--ms-color-border-subtle)] pt-4"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0 || !scheduledEditPolicy(focusedDraft).canPublishNow} title={!scheduledEditPolicy(focusedDraft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" onClick={() => void saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs">Save Draft</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton></div>
+                 <div className="border-t border-[var(--ms-color-border-subtle)] pt-4">
+                   {scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--ms-radius-card-small)] border border-[rgba(212,168,88,0.24)] bg-[rgba(212,168,88,0.06)] px-3 py-2"><StatusBadge tone="gold">Scheduled {readableDate(focusedDraft.scheduledAt, true)}{focusedDraft.timezone ? ` · ${focusedDraft.timezone}` : ""}</StatusBadge>{isScheduledPublishingStatus(draftStatus(focusedDraft)) && focusedDraft.providerJobId ? <><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-8 px-3 py-2 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">Reschedule</SecondaryButton><SecondaryButton type="button" disabled={busyId === `cancel:${focusedDraft.id}` || busyId === `delete:${focusedDraft.id}`} onClick={() => void cancelScheduledDraft(focusedDraft)} className="min-h-8 px-3 py-2 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${focusedDraft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton></> : null}</div> : null}
+                   <div className="flex flex-wrap gap-2"><PrimaryButton type="button" disabled={busyId === focusedDraft.id || focusedDraft.platforms.length === 0 || !scheduledEditPolicy(focusedDraft).canPublishNow} title={!scheduledEditPolicy(focusedDraft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => publishDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => openSchedule(focusedDraft)} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton><SecondaryButton type="button" disabled={focusedSaveAction.disabled || busyId === focusedDraft.id} title={focusedSaveAction.reason} onClick={() => void saveDraftEdits(focusedDraft, { returnToQueue: true })} className="min-h-10 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{focusedSaveAction.label}</SecondaryButton><SecondaryButton type="button" onClick={() => duplicateDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">Duplicate</SecondaryButton><SecondaryButton type="button" onClick={() => setActiveView("queue")} className="min-h-10 px-4 py-2 text-xs">Back to Queue</SecondaryButton><button type="button" disabled={busyId === `delete:${focusedDraft.id}` || busyId === `cancel:${focusedDraft.id}`} title={focusedDraft.providerJobId && isScheduledPublishingStatus(draftStatus(focusedDraft)) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(focusedDraft)} className="min-h-10 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${focusedDraft.id}` ? "Deleting..." : "Delete Draft"}</button></div>
+                   <p className="mt-2 text-[10px] leading-5 text-[var(--ms-color-text-muted)]">{focusedHasPendingEdits ? "You have unsaved changes. " : "No unsaved changes. "}{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? `Update Scheduled Post sends your changes to ${publishingProviderRegistry.get(focusedDraft.provider).name}; Reschedule or Cancel Scheduled Post change the delivery itself.` : "Save Draft keeps this post editable for later, Schedule sends it to your provider at the time you choose, and Publish Now posts it immediately."}</p>
+                 </div>
                  {scheduleDraftId === focusedDraft.id && <div className="flex flex-wrap items-end gap-3 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-3">{scheduleIssueForDraft(focusedDraft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(focusedDraft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix="Schedule" /><SecondaryButton type="button" disabled={busyId === focusedDraft.id} onClick={() => scheduleDraft(focusedDraft)} className="min-h-10 px-4 py-2 text-xs">{busyId === focusedDraft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
                 {!focusedDraft.platforms.length && <p className="text-[10px] text-[var(--ms-color-warning)]">Choose at least one connected account to publish or schedule.</p>}
               </div>
@@ -1401,38 +1440,53 @@ export default function PublishingStudio() {
         {activePlatforms.length === 0 ? <p className="mt-3 text-[10px] text-[var(--ms-color-text-muted)]">No platforms are active in current drafts, history, or connected-account state yet.</p> : null}
       </WorkspaceSection>}
 
-      {activeView === "queue" && <WorkspaceSection title="Queue" description="Existing drafts and their current destinations, schedule, status, ownership, and actions." actions={<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge>}>
+      {activeView === "queue" && <WorkspaceSection title="Queue" description="Every saved post with its media, caption, destination, schedule, and status." actions={<div className="flex flex-wrap items-center gap-2">{nextScheduled ? <StatusBadge tone="gold">Next {readableDate(nextScheduled.scheduledAt, true)}</StatusBadge> : null}<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge></div>}>
         {queueDrafts.length ? (
           <div className="space-y-3">
+            <p className="text-[10px] text-[var(--ms-color-text-muted)]">{queueDrafts.length} {queueDrafts.length === 1 ? "post" : "posts"} in Queue · {scheduled.length} scheduled · {published.length} published. Edit opens a post in the composer.</p>
             {queueDrafts.map((draft) => {
-              const canEditDraft = publishingProviderRegistry.get(draft.provider).supportsCapability("updateDraft");
-              return <WorkspaceCard key={draft.id} className={`p-5 ${focusedDraftId === draft.id ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
+              const provider = publishingProviderRegistry.get(draft.provider);
+              const canEditDraft = provider.supportsCapability("updateDraft");
+              const card = publishingQueueCard(draft, {
+                accounts,
+                accountsProviderId: providerId,
+                platforms: draft.provider === PUBLISHING_PROVIDER_IDS.ZERNIO ? ZERNIO_CONNECTION_CATALOG : LEGACY_PLATFORM_OPTIONS,
+                providerName: provider.name,
+                supportsScheduling: provider.supportsCapability("schedulePost"),
+                libraryAssets: assets,
+              });
+              const editingInline = focusedDraftId === draft.id;
+              const saveAction = publishingSaveAvailability(draft, draftEdits[draft.id] || null, scheduledEditPolicy(draft));
+              return <WorkspaceCard key={draft.id} className={`p-4 ${editingInline ? "border-[var(--ms-color-gold-primary)]" : ""}`}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  <div className="h-24 w-32 shrink-0 overflow-hidden rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/20 sm:h-28 sm:w-40"><QueueMediaThumbnail media={card.media} /></div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge tone={statusTone(draftStatus(draft))}>{isPublishingDraftNeedsAttention(draft) ? "Needs Attention" : draftStatus(draft)}</StatusBadge>
-                      {draft.importedFromProvider ? <StatusBadge tone="neutral">Scheduled in Maven Social</StatusBadge> : null}
-                      {draft.campaignName ? <StatusBadge tone="gold">{draft.campaignName}</StatusBadge> : null}
+                      <StatusBadge tone={statusTone(card.status)}>{card.needsAttention ? "Needs Attention" : card.status}</StatusBadge>
+                      {card.importedFromProvider ? <StatusBadge tone="neutral">Scheduled in Maven Social</StatusBadge> : null}
+                      {card.campaignName ? <StatusBadge tone="gold">{card.campaignName}</StatusBadge> : null}
                     </div>
-                    <h3 className="mt-3 text-sm font-semibold">{draft.title || "Untitled Draft"}</h3>
-                    <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{draft.assets.length} {draft.assets.length === 1 ? "asset" : "assets"} · Updated {readableDate(draft.updatedAt, true)}</p>
-                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(draft.scheduledAt, true)} · {draft.timezone}</p> : null}
-                    {draft.error ? <p className="mt-2 text-[10px] text-[var(--ms-color-error)]">{draft.error}</p> : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {canEditDraft ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Edit</SecondaryButton> : null}
-                    <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0 || !scheduledEditPolicy(draft).canPublishNow} title={!scheduledEditPolicy(draft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => void publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
-                    <SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
-                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.providerJobId ? <SecondaryButton type="button" disabled={busyId === `cancel:${draft.id}` || busyId === `delete:${draft.id}`} title="Cancels the scheduled delivery in Maven Social and keeps this draft for editing" onClick={() => void cancelScheduledDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${draft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton> : null}
-                    <SecondaryButton type="button" onClick={() => void saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
-                    <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
-                    <button type="button" disabled={busyId === `delete:${draft.id}` || busyId === `cancel:${draft.id}`} title={draft.providerJobId && isScheduledPublishingStatus(draftStatus(draft)) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${draft.id}` ? "Deleting..." : "Delete Draft"}</button>
+                    <h3 className="mt-2 truncate text-sm font-semibold">{card.title}</h3>
+                    {card.hasCaption ? <p className="mt-1 line-clamp-2 text-[10px] leading-5 text-[var(--ms-color-text-secondary)]">{card.captionPreview}</p> : <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">No caption yet.</p>}
+                    <p className="mt-2 truncate text-[10px] text-[var(--ms-color-text-secondary)]">{card.destinationLabel || "No destination selected"}</p>
+                    {isScheduledPublishingStatus(card.status) && card.scheduledAt ? <p className="mt-1 text-[10px] text-[var(--ms-color-gold-muted)]">Scheduled {readableDate(card.scheduledAt, true)}{card.timezone ? ` · ${card.timezone}` : ""}</p> : null}
+                    {card.error ? <p className="mt-2 text-[10px] text-[var(--ms-color-error)]">{card.error}</p> : null}
+                    <p className="mt-1 text-[9px] text-[var(--ms-color-text-muted)]">{card.mediaCount ? `${card.mediaCount} attached ${card.mediaCount === 1 ? "media item" : "media items"} · ` : "No media attached · "}Updated {readableDate(draft.updatedAt, true)}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(canEditDraft || editingInline) ? <SecondaryButton type="button" onClick={() => (editingInline ? setFocusedDraftId(null) : void editQueuedDraft(draft))} className="min-h-9 px-4 py-2 text-xs">{editingInline ? "Close Editor" : "Edit"}</SecondaryButton> : null}
+                      <SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
+                      <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0 || !scheduledEditPolicy(draft).canPublishNow} title={!scheduledEditPolicy(draft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => void publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
+                      {(editingInline || draftEdits[draft.id]) ? <SecondaryButton type="button" disabled={saveAction.disabled || busyId === draft.id} title={saveAction.reason} onClick={() => void saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{saveAction.label}</SecondaryButton> : null}
+                      <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
+                      {isScheduledPublishingStatus(card.status) && draft.providerJobId ? <SecondaryButton type="button" disabled={busyId === `cancel:${draft.id}` || busyId === `delete:${draft.id}`} title="Cancels the scheduled delivery in Maven Social and keeps this draft for editing" onClick={() => void cancelScheduledDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${draft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton> : null}
+                      <button type="button" disabled={busyId === `delete:${draft.id}` || busyId === `cancel:${draft.id}`} title={draft.providerJobId && isScheduledPublishingStatus(card.status) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${draft.id}` ? "Deleting..." : "Delete Draft"}</button>
+                    </div>
                   </div>
                 </div>
 
                 {scheduleDraftId === draft.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4">{scheduleIssueForDraft(draft) && <p role="alert" className="w-full text-[10px] text-[var(--ms-color-warning)]">{scheduleIssueForDraft(draft)}</p>}<ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Schedule ${draft.title || "draft"}`} /><SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => scheduleDraft(draft)} className="min-h-10 px-4 py-2 text-xs">{busyId === draft.id ? "Scheduling..." : "Confirm Schedule"}</SecondaryButton><button type="button" onClick={() => setScheduleDraftId(null)} className="min-h-10 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Cancel</button></div>}
 
-                <div className="mt-5 grid gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4 lg:grid-cols-[minmax(180px,0.4fr)_minmax(0,0.6fr)]">
+                {editingInline && <div className="mt-5 grid gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4 lg:grid-cols-[minmax(180px,0.4fr)_minmax(0,0.6fr)]">
                   <label className="block">
                     <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Optional title</span>
                     <input value={draftField(draft, "title")} onChange={(event) => updateDraftEdit(draft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" placeholder="Title for platforms that use one" />
@@ -1449,9 +1503,9 @@ export default function PublishingStudio() {
                     <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span>
                     <textarea value={draftField(draft, "firstComment")} onChange={(event) => updateDraftEdit(draft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." />
                   </label>
-                </div>
+                </div>}
 
-                <fieldset className="mt-4 border-t border-[var(--ms-color-border-subtle)] pt-4">
+                {editingInline && <fieldset className="mt-4 border-t border-[var(--ms-color-border-subtle)] pt-4">
                   <legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Publishing destinations</legend>
                   <div className="flex flex-wrap gap-2">
                     {platformOptions.map((platform) => {
@@ -1479,7 +1533,7 @@ export default function PublishingStudio() {
                       })}
                     </div>
                   ) : <p className="mt-2 flex items-center gap-1.5 text-[9px] text-[var(--ms-color-warning)]"><Icon type="attention" size={12} /> Connect and select at least one enabled platform before scheduling or publishing.</p>}
-                </fieldset>
+                </fieldset>}
               </WorkspaceCard>;
             })}
           </div>
