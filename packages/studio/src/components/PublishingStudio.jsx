@@ -15,6 +15,7 @@ import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/pub
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
+import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -220,6 +221,9 @@ export default function PublishingStudio() {
   const centerRef = useRef(null);
   const uploadInputRef = useRef(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryDegraded, setLibraryDegraded] = useState(false);
   const [assets, setAssets] = useState([]);
   const [drafts, setDrafts] = useState([]);
   const [history, setHistory] = useState([]);
@@ -286,8 +290,12 @@ export default function PublishingStudio() {
     try {
       const localAssets = center.getAvailableAssets();
       let durableAssets = [];
-      try { durableAssets = await fetchDurableCreativeAssets(); } catch { /* Local assets remain usable during a Library outage. */ }
+      let durableFailed = false;
+      try { durableAssets = await fetchDurableCreativeAssets(); } catch { durableFailed = true; /* Local assets remain usable during a Library outage. */ }
       setAssets(publishingLibraryAssets(localAssets, durableAssets));
+      // Attachment availability is only asserted against a fully loaded account library, so a Library
+      // outage never reads to a creator as "your media is gone".
+      setLibraryDegraded(durableFailed);
       let remoteHistory = [];
       try {
         remoteHistory = await center.getRemoteHistory();
@@ -559,6 +567,9 @@ export default function PublishingStudio() {
   const focusedDraft = useMemo(() => drafts.find((draft) => draft.id === focusedDraftId) || null, [drafts, focusedDraftId]);
   const focusedComposerValues = focusedDraft ? publishingComposerValues(focusedDraft, draftEdits[focusedDraft.id]) : null;
   const focusedPreviewAsset = focusedComposerValues?.assets?.[0] || null;
+  const focusedMediaAssetId = String(focusedComposerValues?.assetIds?.[0] || focusedComposerValues?.assets?.[0]?.id || "");
+  const focusedAttachment = focusedDraft ? draftAttachmentAvailability(focusedComposerValues, assets, { authoritative: !libraryDegraded }) : null;
+  const pickerEntries = useMemo(() => libraryPickerEntries(assets, { query: libraryQuery }), [assets, libraryQuery]);
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
     ...drafts.flatMap((draft) => draft.platforms || []),
@@ -600,11 +611,32 @@ export default function PublishingStudio() {
     setNotice({ tone: "neutral", text: "Editing saved draft. Save Draft to update this queue item." });
   };
 
+  // Selecting Library media replaces this post's existing attachment through a single update, so the stored
+  // asset record and the id the provider resolves can never drift apart, and the same asset is never
+  // attached twice.
   const attachLibraryMedia = (asset) => {
-    if (!focusedDraft || !asset) return;
-    updateDraftEdit(focusedDraft.id, "assets", [asset]);
-    updateDraftEdit(focusedDraft.id, "assetIds", [asset.id]);
-    setNotice({ tone: "success", text: `${assetTitle(asset)} attached to this post.` });
+    if (!asset) return;
+    if (!focusedDraft) {
+      setLibraryPickerOpen(false);
+      createDraft(asset);
+      return;
+    }
+    let attachment;
+    try {
+      attachment = attachmentFromLibraryAsset(asset, { assets: focusedComposerValues?.assets, assetIds: focusedComposerValues?.assetIds });
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message || "Unable to attach this media." });
+      return;
+    }
+    updateDraftEdit(focusedDraft.id, "assets", attachment.assets);
+    updateDraftEdit(focusedDraft.id, "assetIds", attachment.assetIds);
+    setLibraryPickerOpen(false);
+    setNotice({
+      tone: "success",
+      text: attachment.changed
+        ? `${assetTitle(asset)} attached to this post. Save Draft, then schedule or publish to keep it.`
+        : `${assetTitle(asset)} is already attached to this post.`,
+    });
   };
 
   const removeDraftMedia = (draft) => {
@@ -1139,12 +1171,36 @@ export default function PublishingStudio() {
       {activeView === "create" && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] lg:items-start">
           <WorkspaceSection title="Post Composer" description="Write a post, attach an image or video, then choose a destination.">
-            <div className="mb-4 flex flex-wrap gap-2"><input ref={uploadInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/mpeg,video/x-msvideo" onChange={attachLocalMedia} className="sr-only" aria-label="Choose image or video to attach" /><SecondaryButton type="button" disabled={uploadingMedia} onClick={() => uploadInputRef.current?.click()} className="min-h-9 px-4 py-2 text-xs">{uploadingMedia ? "Uploading media..." : "Upload/Attach Media"}</SecondaryButton></div>
+            <div className="mb-4 flex flex-wrap gap-2"><input ref={uploadInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/mpeg,video/x-msvideo" onChange={attachLocalMedia} className="sr-only" aria-label="Choose image or video to attach" /><SecondaryButton type="button" disabled={uploadingMedia} onClick={() => uploadInputRef.current?.click()} className="min-h-9 px-4 py-2 text-xs">{uploadingMedia ? "Uploading media..." : "Upload/Attach Media"}</SecondaryButton><SecondaryButton type="button" aria-expanded={libraryPickerOpen} onClick={() => setLibraryPickerOpen((open) => !open)} className="min-h-9 px-4 py-2 text-xs">Choose from Library</SecondaryButton></div>
+            {libraryPickerOpen && (
+              <div className="mb-4 rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose from Library</p>
+                  <button type="button" onClick={() => setLibraryPickerOpen(false)} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-white">Close</button>
+                </div>
+                <input type="search" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} aria-label="Search Creative Library media" placeholder="Search your saved images and videos" className="mt-3 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" />
+                {pickerEntries.length ? (
+                  <div className="mt-3 grid max-h-80 gap-3 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+                    {pickerEntries.map((entry) => (
+                      <div key={entry.id} className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-2">
+                        <div className="aspect-[16/10] overflow-hidden rounded bg-black/20"><AssetPreview asset={entry.asset} /></div>
+                        <p className="mt-2 truncate text-[10px] font-semibold">{entry.title}</p>
+                        {entry.fileName === entry.title ? null : <p className="mt-0.5 truncate text-[9px] text-[var(--ms-color-text-muted)]">{entry.fileName}</p>}
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <StatusBadge>{entry.mediaType}</StatusBadge>
+                          <SecondaryButton type="button" onClick={() => attachLibraryMedia(entry.asset)} className="min-h-8 px-3 py-2 text-[10px]">{focusedMediaAssetId === entry.id ? "Attached" : focusedDraft ? "Replace" : "Attach"}</SecondaryButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="mt-3 text-xs leading-5 text-[var(--ms-color-text-muted)]">{assets.length ? "No saved library media matches this search." : "No images or videos are saved in your Creative Library yet. Create or upload media first, then choose it here."}</p>}
+              </div>
+            )}
             {focusedDraft ? (
               <div className="space-y-5">
                 <div className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-4">
                   <div className="flex items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Selected creative</p><p className="mt-1 text-sm font-semibold">{assetTitle(focusedPreviewAsset) || focusedDraft.title || "Untitled draft"}</p></div><StatusBadge>{focusedDraft.status}</StatusBadge></div>
-                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedComposerValues.assets.length} {focusedComposerValues.assets.length === 1 ? "asset" : "assets"}</span>{focusedComposerValues.assets.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setFocusedDraftId(null)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Choose another</button></div>
+                  <div className="mt-3 flex items-center gap-3 text-[10px] text-[var(--ms-color-text-muted)]"><span>{focusedComposerValues.assets.length} {focusedComposerValues.assets.length === 1 ? "asset" : "assets"}</span>{focusedComposerValues.assets.length ? <button type="button" onClick={() => removeDraftMedia(focusedDraft)} className="font-semibold text-[var(--ms-color-error)] hover:text-white">Remove media</button> : null}<button type="button" onClick={() => setLibraryPickerOpen(true)} className="font-semibold text-[var(--ms-color-pink-primary)] hover:text-white">Replace media</button></div>{focusedAttachment?.unavailable ? <p role="alert" className="mt-3 text-[10px] leading-5 text-[var(--ms-color-warning)]">This post's media is no longer in your Creative Library. Choose replacement media before publishing or scheduling.</p> : null}
                 </div>
                 <fieldset><legend className="mb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Choose accounts</legend>{scheduledEditPolicy(focusedDraft).scheduledOnProvider ? <p className="mb-2 text-[10px] leading-5 text-[var(--ms-color-gold-muted)]">{scheduledEditPolicy(focusedDraft).canEditContent ? "This post is already scheduled. Saving sends the change to your provider, and destinations stay locked while it is scheduled." : "This post is already scheduled and cannot be edited in place. Cancel the schedule to change it."}</p> : null}<div className="flex flex-wrap gap-2">{platformOptions.map((platform) => { const checked = focusedComposerValues.platforms.includes(platform.id); const account = accountForPlatform(accounts, platform.id); const disabled = !scheduledEditPolicy(focusedDraft).canChangeDestinations || !platform.enabled || (!checked && !account); return <label key={platform.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold transition ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-[var(--ms-color-pink-primary)] bg-[rgba(232,32,112,0.12)] text-white" : "border-[var(--ms-color-border-subtle)] bg-black/10 text-[var(--ms-color-text-secondary)]"}`} title={!platform.enabled ? `${platform.label} is not available yet.` : !account ? `Connect ${platform.label} before selecting.` : ""}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePlatform(focusedDraft, platform.id)} className="sr-only" />{platform.label}</label>; })}</div>{focusedComposerValues.platforms.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">{focusedComposerValues.platforms.map((platform) => { const option = platformOptions.find((item) => item.id === platform); const platformAccounts = accountsForPlatform(accounts, platform); const selectedAccount = focusedComposerValues.accountIds?.[platform] || focusedComposerValues.platformOverrides?.[platform]?.accountId || ""; return <label key={platform} className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">{option?.label || platform} account</span><select value={selectedAccount} disabled={!scheduledEditPolicy(focusedDraft).canChangeDestinations} onChange={(event) => selectAccount(focusedDraft, platform, event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]"><option value="">Choose connected account</option>{platformAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.username || account.id}</option>)}</select></label>; })}</div>}</fieldset>
                 <div className="space-y-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title</span><input value={draftField(focusedDraft, "title")} onChange={(event) => updateDraftEdit(focusedDraft.id, "title", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional post title" /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Caption</span><textarea value={draftField(focusedDraft, "caption")} onChange={(event) => updateDraftEdit(focusedDraft.id, "caption", event.target.value)} className="mt-2 min-h-28 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Write the caption for this post." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">First Comment (optional)</span><textarea value={draftField(focusedDraft, "firstComment")} onChange={(event) => updateDraftEdit(focusedDraft.id, "firstComment", event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 py-3 text-xs leading-5 text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="Optional first comment posted after publishing. Used by Instagram, Facebook, LinkedIn, Threads, and YouTube." /></label><label className="block"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Hashtags</span><input value={draftField(focusedDraft, "hashtags")} onChange={(event) => updateDraftEdit(focusedDraft.id, "hashtags", event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none focus:border-[var(--ms-color-gold-primary)]" placeholder="launch, product, campaign" /></label></div>
