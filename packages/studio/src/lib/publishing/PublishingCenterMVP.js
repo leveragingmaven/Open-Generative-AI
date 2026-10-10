@@ -7,6 +7,7 @@ import { localAssetManager } from "../intelligence/AssetManager.js";
 import { PublishingError, PublishingValidationError, UnsupportedPublishingCapabilityError } from "./publishingErrors.js";
 import { captionWithHashtags } from "./publishingComposer.js";
 import { isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, effectivePublishingDraftStatus } from "./publishingTypes.js";
+import { draftCopyForDuplicate, publishingProviderSchedule } from "./publishingDraftSafety.js";
 
 function freshDraftId() {
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -19,6 +20,9 @@ export class PublishingCenterMVP {
     this.publishingProviderRegistry = options.publishingProviderRegistry || publishingProviderRegistry;
     this.publishingProvider = options.publishingProvider || this.publishingProviderRegistry.getActiveProvider();
     this.scheduleInFlight = new Map();
+    // One in-flight cancel/delete per draft (`{ kind, promise }`), so a double click or a concurrent
+    // Cancel + Delete can never send the provider two cancellation requests for the same post.
+    this.draftActionInFlight = new Map();
   }
 
   providerForDraft(draft = {}, options = {}) {
@@ -299,6 +303,18 @@ export class PublishingCenterMVP {
   }
 
   async cancelScheduledDraft(draftId) {
+    const existing = this.draftActionInFlight.get(draftId);
+    if (existing) return existing.promise;
+    const promise = this.submitCancelScheduledDraft(draftId);
+    this.draftActionInFlight.set(draftId, { kind: "cancel", promise });
+    try {
+      return await promise;
+    } finally {
+      this.draftActionInFlight.delete(draftId);
+    }
+  }
+
+  async submitCancelScheduledDraft(draftId) {
     const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
     if (!draft) throw new Error("Draft not found");
     if (!["scheduled", "queued"].includes(draft.status) && !draft.scheduledAt) {
@@ -334,22 +350,19 @@ export class PublishingCenterMVP {
     return result;
   }
 
+  /**
+   * Duplicate a draft into a new, independent draft.
+   *
+   * Reusable content and destinations are copied, but every provider identifier and the schedule are
+   * dropped so the copy can never inherit the original post's schedule or disturb it. The original draft
+   * and its provider post are left exactly as they were.
+   */
   duplicateDraft(source, options = {}) {
     const drafts = readPublishingDrafts(this.storage);
     const sourceDraft = typeof source === "string" ? drafts.find((draft) => draft.id === source) : source;
     if (!sourceDraft) throw new Error("Draft not found");
-    const { providerPostIds, providerJobId, providerRequestIds, publishedAt, error, status, scheduledAt, createdAt, updatedAt, importedFromProvider, id, ...copy } = sourceDraft;
-    return this.createDraft({
-      ...copy,
-      id: freshDraftId(),
-      status: "draft",
-      scheduledAt: null,
-      providerPostIds: {},
-      providerJobId: null,
-      providerRequestIds: {},
-      publishedAt: null,
-      error: null,
-    }, { providerId: sourceDraft.provider, ...options });
+    const copy = draftCopyForDuplicate(sourceDraft, { id: freshDraftId() });
+    return this.createDraft(copy, { providerId: sourceDraft.provider, ...options });
   }
 
   /**
@@ -604,11 +617,22 @@ export class PublishingCenterMVP {
   }
 
   /**
-   * Delete a draft
+   * Delete a draft that has no live provider schedule.
+   *
+   * A post the provider still holds scheduled is refused here even though a provider draft id is only
+   * local bookkeeping: `ZernioPublishingProvider.deleteDraft` is a no-op, so deleting would silently leave
+   * a post that still publishes. Use `deleteDraftSafely` for provider-scheduled drafts.
    */
   deleteDraft(draftId) {
     const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
     if (!draft) throw new Error("Draft not found");
+    const ownership = this.providerScheduleFor(draft);
+    if (ownership.requiresProviderCancellation) {
+      throw new PublishingError("This post is scheduled in Maven Social. Cancel the schedule before deleting the draft.", {
+        code: "publishing_schedule_must_be_cancelled",
+        field: "providerJobId",
+      });
+    }
     const result = this.providerForDraft(draft).deleteDraft(draftId, {
       storage: this.storage,
       readDrafts: () => readPublishingDrafts(this.storage),
@@ -619,5 +643,55 @@ export class PublishingCenterMVP {
     });
     deletePublishingDraft(draftId, this.storage);
     return result;
+  }
+
+  /**
+   * Delete a draft, cancelling a live provider schedule first.
+   *
+   * Nothing local is removed until the provider confirms the cancellation, so a failed cancellation keeps
+   * the draft record, its provider identifiers, and its Calendar visibility intact.
+   */
+  async deleteDraftSafely(draftId) {
+    const existing = this.draftActionInFlight.get(draftId);
+    if (existing?.kind === "delete") return existing.promise;
+    // A cancellation already running is exactly the safety step this delete needs, so wait for it and
+    // then continue instead of returning the cancellation as if the delete had happened.
+    if (existing) await existing.promise.catch(() => {});
+    const promise = this.submitDeleteDraftSafely(draftId);
+    this.draftActionInFlight.set(draftId, { kind: "delete", promise });
+    try {
+      return await promise;
+    } finally {
+      this.draftActionInFlight.delete(draftId);
+    }
+  }
+
+  async submitDeleteDraftSafely(draftId) {
+    const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
+    if (!draft) throw new Error("Draft not found");
+    const ownership = this.providerScheduleFor(draft);
+    // The provider call is the only proof of cancellation, so it runs first and its failure aborts the delete.
+    if (ownership.requiresProviderCancellation) await this.submitCancelScheduledDraft(draftId);
+    const result = this.providerForDraft(draft).deleteDraft(draftId, {
+      storage: this.storage,
+      readDrafts: () => readPublishingDrafts(this.storage),
+      writeDrafts: (drafts) => {
+        replacePublishingDrafts(drafts, this.storage);
+        return { ok: true, draftId };
+      }
+    });
+    deletePublishingDraft(draftId, this.storage);
+    return {
+      ...(result && typeof result === "object" ? result : {}),
+      ok: true,
+      draftId,
+      providerScheduleCancelled: ownership.requiresProviderCancellation,
+    };
+  }
+
+  /** The provider schedule state of one stored draft, including its publishing-history job. */
+  providerScheduleFor(draft = {}) {
+    const historyJob = readPublishingHistory(this.storage).find((job) => job.draftId === draft.id) || null;
+    return { ...publishingProviderSchedule(draft, historyJob), historyJob };
   }
 }

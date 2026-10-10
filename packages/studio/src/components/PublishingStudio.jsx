@@ -1019,14 +1019,33 @@ export default function PublishingStudio() {
     }
   };
 
-  const deleteDraft = (draft) => {
-    if (!window.confirm(`Delete ${draft.title || "this draft"}?`)) return;
+  // A draft the provider still holds scheduled has its schedule cancelled before the local record is
+  // removed, so a deleted post can never publish behind the creator's back. If the provider refuses, the
+  // draft, its provider identifiers, and its Calendar entry all stay exactly where they were.
+  const deleteDraft = async (draft) => {
+    const ownership = centerRef.current.providerScheduleFor(draft);
+    const confirmation = ownership.requiresProviderCancellation
+      ? `Delete ${draft.title || "this draft"}? This first cancels its Maven Social schedule so it cannot publish.`
+      : `Delete ${draft.title || "this draft"}? This draft has no provider schedule.`;
+    if (!window.confirm(confirmation)) return;
+    setBusyId(`delete:${draft.id}`);
+    setNotice(null);
     try {
-      centerRef.current.deleteDraft(draft.id);
-      setNotice({ tone: "success", text: "Draft deletion requested." });
-      void reload();
+      const result = await centerRef.current.deleteDraftSafely(draft.id);
+      setNotice({
+        tone: "success",
+        text: result?.providerScheduleCancelled
+          ? "Scheduled delivery cancelled, then the draft was deleted."
+          : "Draft deleted. This draft had no provider schedule.",
+      });
     } catch (error) {
-      setNotice({ tone: "error", text: error.message || "Unable to delete draft." });
+      setNotice({
+        tone: "error",
+        text: `Nothing was deleted: ${error.message || "the provider did not confirm the cancellation."} The post may still publish in Maven Social — cancel it before deleting."`,
+      });
+    } finally {
+      setBusyId(null);
+      await reload();
     }
   };
 
@@ -1302,7 +1321,7 @@ export default function PublishingStudio() {
               <div className="mt-4 flex flex-wrap gap-2">
                 {actions.canEdit ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Edit</SecondaryButton> : null}
                 {actions.canReschedule ? <SecondaryButton type="button" onClick={() => openCalendarReschedule(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Reschedule</SecondaryButton> : null}
-                {actions.canCancel ? <SecondaryButton type="button" disabled={busyId === `cancel:${selectedCalendarDraft.id}`} onClick={() => void cancelScheduledDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Cancel</SecondaryButton> : null}
+                {actions.canCancel ? <SecondaryButton type="button" disabled={busyId === `cancel:${selectedCalendarDraft.id}` || busyId === `delete:${selectedCalendarDraft.id}`} title="Cancels the scheduled delivery in Maven Social and keeps this draft for editing" onClick={() => void cancelScheduledDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">{busyId === `cancel:${selectedCalendarDraft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton> : null}
                 <button type="button" onClick={() => setSelectedCalendarDraftId(null)} className="min-h-8 px-3 py-2 text-[10px] font-semibold text-[var(--ms-color-text-muted)]">Close</button>
               </div>
               {calendarRescheduleDraftId === selectedCalendarDraft.id && scheduleDraftId === selectedCalendarDraft.id && actions.canReschedule ? <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--ms-color-border-subtle)] pt-4"><ScheduleControls date={scheduleDate} time={scheduleTime} timezone={scheduleTimezone} onDateChange={setScheduleDate} onTimeChange={setScheduleTime} onTimezoneChange={setScheduleTimezone} labelPrefix={`Reschedule ${details.title}`} /><PrimaryButton type="button" disabled={busyId === selectedCalendarDraft.id} onClick={() => void rescheduleCalendarDraft(selectedCalendarDraft)} className="min-h-9 px-4 py-2 text-xs">Save Reschedule</PrimaryButton><button type="button" onClick={() => { setScheduleDraftId(null); setCalendarRescheduleDraftId(null); }} className="min-h-9 px-2 text-[10px] font-semibold text-[var(--ms-color-text-muted)]">Cancel</button></div> : null}
@@ -1404,10 +1423,10 @@ export default function PublishingStudio() {
                     {canEditDraft ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Edit</SecondaryButton> : null}
                     <PrimaryButton type="button" disabled={busyId === draft.id || draft.platforms.length === 0 || !scheduledEditPolicy(draft).canPublishNow} title={!scheduledEditPolicy(draft).canPublishNow ? "Already scheduled in Maven Social. Reschedule or cancel it instead of publishing another copy." : undefined} onClick={() => void publishDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Publish Now</PrimaryButton>
                     <SecondaryButton type="button" disabled={busyId === draft.id} onClick={() => openSchedule(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Schedule</SecondaryButton>
-                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.providerJobId ? <button type="button" disabled={busyId === `cancel:${draft.id}`} onClick={() => cancelScheduledDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:opacity-40">Cancel</button> : null}
+                    {isScheduledPublishingStatus(draftStatus(draft)) && draft.providerJobId ? <SecondaryButton type="button" disabled={busyId === `cancel:${draft.id}` || busyId === `delete:${draft.id}`} title="Cancels the scheduled delivery in Maven Social and keeps this draft for editing" onClick={() => void cancelScheduledDraft(draft)} className="min-h-9 px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{busyId === `cancel:${draft.id}` ? "Cancelling..." : "Cancel Scheduled Post"}</SecondaryButton> : null}
                     <SecondaryButton type="button" onClick={() => void saveDraftEdits(draft)} className="min-h-9 px-4 py-2 text-xs">Save Draft</SecondaryButton>
                     <SecondaryButton type="button" onClick={() => duplicateDraft(draft)} className="min-h-9 px-4 py-2 text-xs">Duplicate</SecondaryButton>
-                    <button type="button" onClick={() => deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)]">Delete</button>
+                    <button type="button" disabled={busyId === `delete:${draft.id}` || busyId === `cancel:${draft.id}`} title={draft.providerJobId && isScheduledPublishingStatus(draftStatus(draft)) ? "Cancels the Maven Social schedule first, then deletes the draft" : "Deletes this unscheduled draft"} onClick={() => void deleteDraft(draft)} className="min-h-9 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-muted)] hover:text-[var(--ms-color-error)] disabled:cursor-not-allowed disabled:opacity-40">{busyId === `delete:${draft.id}` ? "Deleting..." : "Delete Draft"}</button>
                   </div>
                 </div>
 
