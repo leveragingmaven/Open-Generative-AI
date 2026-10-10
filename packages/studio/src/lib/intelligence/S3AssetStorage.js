@@ -10,8 +10,8 @@ export class S3AssetStorage extends AssetStorage {
     this.signer = signer;
   }
 
-  async putObject({ key, body, contentType, metadata = {} }) {
-    await this.client.putObject({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, Metadata: metadata });
+  async putObject({ key, body, contentType, sizeBytes, metadata = {} }) {
+    await this.client.putObject({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ...(sizeBytes != null ? { ContentLength: sizeBytes } : {}), Metadata: metadata });
     const head = await this.client.headObject({ Bucket: this.bucket, Key: key });
     return { key, contentType: head.ContentType || contentType, sizeBytes: head.ContentLength, checksum: head.ETag || null, metadata: head.Metadata || metadata };
   }
@@ -24,6 +24,7 @@ export class S3AssetStorage extends AssetStorage {
   }
 
   async exists(key) { return Boolean(await this.getMetadata(key)); }
+  async getObject(key, { range } = {}) { return this.client.getObject({ Bucket: this.bucket, Key: key, ...(range ? { Range: range } : {}) }); }
   async deleteObject(key) { await this.client.deleteObject({ Bucket: this.bucket, Key: key }); return true; }
   async createDeliveryReference(key) { return this.publicBaseUrl ? `${this.publicBaseUrl.replace(/\/$/, "")}/${key}` : `storage://${key}`; }
   async createSignedDeliveryReference(key, options = {}) {

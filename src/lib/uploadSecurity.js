@@ -15,7 +15,7 @@ function positiveNumber(name, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
-function maxBytesFor(category) {
+export function maxBytesFor(category) {
   const envName = `CREATOR_OS_UPLOAD_MAX_${category.toUpperCase()}_MB`;
   return positiveNumber(envName, DEFAULT_LIMITS_MB[category]) * 1024 * 1024;
 }
@@ -66,4 +66,3 @@ export function validateMultipartUpload(formData) {
   const validation = validateUploadFile(file);
   return { ...validation, file };
 }
-

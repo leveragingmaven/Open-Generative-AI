@@ -13,6 +13,8 @@ import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant,
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
+import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
+import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import {
   EmptyState,
@@ -281,7 +283,10 @@ export default function PublishingStudio() {
   const reload = async (center = centerRef.current) => {
     if (!center) return;
     try {
-      setAssets(center.getAvailableAssets());
+      const localAssets = center.getAvailableAssets();
+      let durableAssets = [];
+      try { durableAssets = await fetchDurableCreativeAssets(); } catch { /* Local assets remain usable during a Library outage. */ }
+      setAssets(publishingLibraryAssets(localAssets, durableAssets));
       let remoteHistory = [];
       try {
         remoteHistory = await center.getRemoteHistory();

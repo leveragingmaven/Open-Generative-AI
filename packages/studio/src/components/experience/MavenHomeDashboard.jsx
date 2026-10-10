@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { uploadFile } from "../../lib/providers/ProviderRegistry.js";
 import { copyAssistantResponseText } from "../../lib/copyAssistantResponse.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
+import { assetPreviewKind } from "../../lib/assets/assetPreview.js";
+import { fetchDurableCreativeAssets } from "../../lib/intelligence/AssetLibraryService.js";
 import { extractGeneratedImageUrls, isImageEditRequest, isImageGenerationRequest } from "../../lib/mavenImageIntent.js";
 import { extractGeneratedVideoUrls, isImageToVideoRequest, isVideoGenerationRequest } from "../../lib/mavenVideoIntent.js";
 import { extractGeneratedAudioUrls, isAudioGenerationRequest } from "../../lib/mavenAudioIntent.js";
@@ -296,6 +298,9 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const [attachments, setAttachments] = useState([]);
   const [selectedImageReference, setSelectedImageReference] = useState(null);
   const [attachmentError, setAttachmentError] = useState(null);
+  const [libraryChoices, setLibraryChoices] = useState([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryBusy, setLibraryBusy] = useState(false);
   const [draggingImage, setDraggingImage] = useState(false);
   const [chatMenuId, setChatMenuId] = useState(null);
   const [renamingChatId, setRenamingChatId] = useState(null);
@@ -466,8 +471,37 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
 
   const removeAttachment = (localId) => {
     const attachment = attachments.find((item) => item.localId === localId);
-    if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    if (attachment?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl);
     setAttachments((current) => current.filter((item) => item.localId !== localId));
+  };
+
+  const openCreativeLibrary = async () => {
+    if (libraryOpen) { setLibraryOpen(false); return; }
+    setLibraryOpen(true);
+    setLibraryBusy(true);
+    setAttachmentError(null);
+    try {
+      const assets = await fetchDurableCreativeAssets();
+      setLibraryChoices(assets.filter((asset) => {
+        const kind = assetPreviewKind(asset);
+        return ['image', 'video', 'audio'].includes(kind)
+          && /^asset_[A-Za-z0-9_-]{1,190}$/.test(String(asset.mavenReferenceId || ''))
+          && (/^https:\/\//i.test(asset.storageReference || asset.url || '')
+            || /^\/api\/creative-assets\/media\?assetId=/i.test(asset.storageReference || asset.url || ''));
+      }));
+    } catch {
+      setAttachmentError('Creative Library is unavailable right now. Please try again.');
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const attachLibraryAsset = (asset) => {
+    const kind = assetPreviewKind(asset);
+    const url = asset.storageReference || asset.url;
+    setAttachments((current) => current.some((item) => item.attachmentId === asset.mavenReferenceId)
+      ? current : [...current, { localId: asset.mavenReferenceId, attachmentId: asset.mavenReferenceId, filename: asset.title || `Creative Library ${kind}`, kind, url, previewUrl: url, status: 'ready' }]);
+    setLibraryOpen(false);
   };
 
   const submitMavenMessage = async (event, overrideText, explicitReference = null) => {
@@ -552,8 +586,13 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
         return arr;
       });
       // Persist ONLY the server-sanitized persistedMessages from the done event.
-      client.persist(sessionId, result.persistedMessages).catch(() => {});
-      attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      try {
+        const savedTurn = await client.persist(sessionId, result.persistedMessages);
+        if (!savedTurn.ok) throw new Error('conversation_save_failed');
+      } catch {
+        setChatError('The generated media is available, but this chat turn could not be saved. You can reuse saved media from the Creative Library.');
+      }
+      attachments.forEach((attachment) => { if (attachment.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl); });
       setAttachments([]);
       if (reference) setSelectedImageReference(null);
     } catch (error) {
@@ -639,7 +678,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
     setMavenMessage("");
     setChatProjectId(null);
     setProjectError(null);
-    attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    attachments.forEach((attachment) => { if (attachment.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl); });
     setAttachments([]);
     setSelectedImageReference(null);
     setAttachmentError(null);
@@ -777,6 +816,14 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
         </div>)}
       </div> : null}
       {attachmentError ? <p className={styles.attachmentError} role="alert">{attachmentError}</p> : null}
+      {libraryOpen ? <div className={styles.attachmentList} aria-label="Creative Library media">
+        {libraryBusy ? <span>Loading Creative Library…</span> : libraryChoices.length
+          ? libraryChoices.map((asset) => <button key={asset.id} type="button" className={styles.attachmentPreview} onClick={() => attachLibraryAsset(asset)}>
+            {assetPreviewKind(asset) === 'image' ? <img src={asset.storageReference || asset.url} alt="" /> : <Icon type={assetPreviewKind(asset) === 'video' ? 'video' : 'audio'} size={13} />}
+            <span>{asset.title || `Creative Library ${assetPreviewKind(asset)}`}</span>
+          </button>)
+          : <span>No saved media is available yet.</span>}
+      </div> : null}
       <div className={styles.composerInputRow}>
         <label htmlFor="maven-creation-prompt" className="sr-only">Message Maven</label>
         <textarea
@@ -800,6 +847,9 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
         <div className={styles.composerTools}>
           <button type="button" className={styles.attachButton} aria-label="Attach media" title="Attach images, audio, or video" onClick={() => attachmentInputRef.current?.click()} disabled={!mavenReady || mavenBusy}>
             <Icon type="attach" size={17} />
+          </button>
+          <button type="button" className={styles.attachButton} aria-label="Choose from Creative Library" title="Choose saved media" onClick={() => void openCreativeLibrary()} disabled={!mavenReady || mavenBusy}>
+            <Icon type="library" size={17} />
           </button>
           <span className={styles.modelPill} title="Server-managed conversation intelligence"><Icon type="sparkle" size={14} /> Maven Intelligence</span>
         </div>

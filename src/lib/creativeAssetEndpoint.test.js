@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleCreativeAssetsDelete, handleCreativeAssetsGet, handleCreativeAssetsRoute } from './creativeAssetEndpoint.js';
+import { mavenLibraryReferenceId } from './mavenChatCreativeAsset.js';
 
 const identity = { accountId: 'account-1', identityKey: 'creator-1' };
 function request(url = 'http://localhost/api/creative-assets', method = 'GET') { return { url, method }; }
@@ -13,7 +14,7 @@ test('authenticated durable asset listing is account-scoped and supports campaig
   });
   assert.equal(response.status, 200);
   assert.deepEqual(received, { accountId: 'account-1', campaignId: 'campaign-1' });
-  assert.deepEqual((await response.json()).assets, [{ id: 'asset-1', accountId: 'account-1', campaignId: 'campaign-1', generatedFiles: ['https://cdn.example.test/image.png'], metadata: { assetType: 'generated', modality: 'image' } }]);
+  assert.deepEqual((await response.json()).assets, [{ id: 'asset-1', accountId: 'account-1', campaignId: 'campaign-1', generatedFiles: ['https://cdn.example.test/image.png'], metadata: { assetType: 'generated', modality: 'image' }, mavenReferenceId: mavenLibraryReferenceId({ id: 'asset-1', accountId: 'account-1' }) }]);
 });
 
 test('unauthenticated listing is rejected and repository failure is safe', async () => {
@@ -21,6 +22,20 @@ test('unauthenticated listing is rejected and repository failure is safe', async
   const response = await handleCreativeAssetsGet(request(), { identity, repository: { async list() { throw new Error('db_detail'); } } });
   assert.equal(response.status, 503);
   assert.equal(JSON.stringify(await response.json()).includes('db_detail'), false);
+});
+
+test('a storage outage keeps the owned library record without exposing an expired provider URL', async () => {
+  const response = await handleCreativeAssetsGet(request(), {
+    identity,
+    repository: { async list() { return [{ id: 'asset-1', accountId: identity.accountId, url: 'https://provider.test/expired', generatedFiles: ['https://provider.test/expired'], providerOutputReference: 'https://provider.test/expired', storageReference: 'storage://private/key', metadata: { modality: 'image' } }]; } },
+    deliverAsset: async () => { throw new Error('storage unavailable'); },
+  });
+  assert.equal(response.status, 200);
+  const [asset] = (await response.json()).assets;
+  assert.equal(asset.metadata.storageUnavailable, true);
+  assert.equal(asset.url, null);
+  assert.deepEqual(asset.generatedFiles, []);
+  assert.equal(asset.providerOutputReference, null);
 });
 
 test('durable asset delete is account-scoped and succeeds for an owned unreferenced asset', async () => {

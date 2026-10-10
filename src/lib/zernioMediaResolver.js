@@ -1,7 +1,10 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
+import { getR2MediaStorage } from './r2MediaStorage.js';
+import { isStoredCreativeAsset, ownedCreativeObjectKey } from './creativeMediaStorage.js';
 
 const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
 const SUPPORTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg', 'video/x-msvideo', 'application/pdf']);
@@ -80,13 +83,29 @@ async function boundedBytes(response, maxBytes) {
   return { body, sizeBytes: total };
 }
 
-export async function resolveZernioMedia({ identity, assetId, assetRepository = new MySqlCreativeAssetRepository(), fetcher = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts(), maxBytes = DEFAULT_MAX_BYTES } = {}) {
+export async function resolveZernioMedia({ identity, assetId, assetRepository = new MySqlCreativeAssetRepository(), fetcher = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts(), maxBytes = DEFAULT_MAX_BYTES, storage = null } = {}) {
   const accountId = String(identity?.accountId || '').trim(); const creatorIdentityKey = String(identity?.identityKey || identity?.creatorIdentityKey || '').trim(); const id = String(assetId || '').trim();
   if (!accountId || !creatorIdentityKey) throw error('zernio_identity_required', 'Authenticated Creator OS identity is required.', 401);
   if (!id) throw error('zernio_asset_required', 'Select a saved creative asset before publishing.');
   if (typeof fetcher !== 'function') throw error('zernio_media_unavailable', 'Maven Social media acquisition is unavailable.', 503);
   const asset = await assetRepository.get(id, { accountId });
   if (!asset || String(asset.accountId) !== accountId || String(asset.creatorIdentityKey) !== creatorIdentityKey) throw error('zernio_asset_not_owned', 'The selected creative asset is not available to this Creator OS tenant.', 403);
+  if (isStoredCreativeAsset(asset)) {
+    const key = ownedCreativeObjectKey(asset, accountId);
+    if (!key) throw error('zernio_media_unsupported', 'The selected creative asset has an invalid storage reference.');
+    const objectStorage = storage || getR2MediaStorage();
+    const metadata = await objectStorage.getMetadata(key);
+    if (!metadata) throw error('zernio_media_unavailable', 'The stored creative asset is unavailable.', 503);
+    const type = validateType(String(metadata.contentType || '').toLowerCase(), asset);
+    if (!Number.isFinite(metadata.sizeBytes) || metadata.sizeBytes <= 0 || metadata.sizeBytes > maxBytes) throw error('zernio_media_too_large', 'The stored creative asset exceeds the publishing limit.');
+    // Scheduled posts may publish after a short-lived R2 link expires. Transfer
+    // the owned bytes into Maven Social's existing media upload path now.
+    const object = await objectStorage.getObject(key);
+    const stream = object.Body?.transformToWebStream?.() || (object.Body instanceof Readable ? Readable.toWeb(object.Body) : object.Body);
+    if (!stream?.getReader) throw error('zernio_media_unavailable', 'The stored creative asset could not be read.', 503);
+    const { body, sizeBytes } = await boundedBytes({ body: stream, headers: { get: (name) => name === 'content-length' ? String(metadata.sizeBytes) : type } }, maxBytes);
+    return { mode: 'bytes', body, contentType: type, filename: filenameFor(asset, new URL(`https://storage.invalid/${key}`), type), sizeBytes, assetId: id };
+  }
   const references = referencesFor(asset); if (!references.length) throw error('zernio_media_unsupported', 'The selected creative asset has no publishable media reference.');
   let lastFailure = null;
   for (const reference of references) {

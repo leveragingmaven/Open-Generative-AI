@@ -1,5 +1,6 @@
 import { projectConversation } from '../../packages/studio/src/lib/intelligence/ConversationHistoryPolicy.js';
 import { ConversationProposalError } from './conversationProposalBuilder.js';
+import { mavenLibraryReferenceId, mavenMediaKind } from './mavenChatCreativeAsset.js';
 
 const DESIGN_AGENT_ID = 'design-agent';
 const IDENTIFIER_LIMIT = 200;
@@ -217,6 +218,7 @@ export class DesignAgentConversationReader {
   constructor({
     designAgentProvider,
     ownershipService,
+    loadOwnedCreativeAssets = null,
     maxHistoryCharacters = DEFAULT_MAX_HISTORY_CHARACTERS,
   } = {}) {
     if (!designAgentProvider
@@ -229,6 +231,7 @@ export class DesignAgentConversationReader {
     }
     this.designAgentProvider = designAgentProvider;
     this.ownershipService = ownershipService;
+    this.loadOwnedCreativeAssets = loadOwnedCreativeAssets;
     this.maxHistoryCharacters = maxHistoryCharacters;
   }
 
@@ -247,20 +250,60 @@ export class DesignAgentConversationReader {
       await this.designAgentProvider.getSessionAssets(trustedConversationId, context),
       trustedConversationId,
     );
+    let ownedAssets = [];
+    if (this.loadOwnedCreativeAssets) {
+      // The upstream session may drop a generated asset while its account-owned
+      // Creative Library record remains. Restore both its Library id and former
+      // session label, but only after ownership of this session was verified.
+      const owned = await this.loadOwnedCreativeAssets(identity, trustedConversationId);
+      ownedAssets = owned;
+      const seen = new Set(attachments.map((asset) => asset.attachmentId));
+      for (const asset of owned) {
+        const kind = mavenMediaKind(asset);
+        const url = asset.storageReference || asset.url;
+        if (!SUPPORTED_ATTACHMENT_KINDS.has(kind) || !trustedUrl(url)) continue;
+        for (const label of [mavenLibraryReferenceId(asset), asset.agentId === 'design-agent' && asset.conversationId === trustedConversationId ? asset.id : null, asset.agentId === 'design-agent' && asset.conversationId === trustedConversationId ? asset.metadata?.sessionAssetId : null]) {
+          if (typeof label !== 'string' || !/^asset_[A-Za-z0-9_-]{1,190}$/.test(label)) continue;
+          if (seen.has(label)) {
+            const existing = attachments.find((item) => item.attachmentId === label);
+            if (existing && asset.metadata?.storageStatus === 'r2') { existing.url = url; existing.library = true; }
+            continue;
+          }
+          attachments.push({ attachmentId: label, kind, url, library: true });
+          seen.add(label);
+        }
+      }
+    }
     verifyReferencedAssets(rawMessages, attachments);
     const trustedMessages = boundMessages(rawMessages, this.maxHistoryCharacters);
     const byId = new Map(attachments.map((attachment) => [attachment.attachmentId, attachment]));
+    const ownedImageByUrl = new Map(attachments.filter((attachment) => attachment.library && attachment.kind === 'image')
+      .map((attachment) => [attachment.url, attachment]));
+    if (this.loadOwnedCreativeAssets) {
+      for (const asset of ownedAssets) {
+        const original = asset.providerOutputReference;
+        const trusted = attachments.find((item) => item.attachmentId === mavenLibraryReferenceId(asset) && item.kind === 'image');
+        if (trusted && trustedUrl(original)) ownedImageByUrl.set(original, trusted);
+      }
+    }
     const imageReferences = rawMessages.flatMap((rawMessage) => {
       const role = identifier(rawMessage?.role).toLowerCase();
       const content = String(rawMessage?.content || '');
       if (role === 'assistant') {
-        if (!Array.isArray(rawMessage?.attachments)) return [];
-        const trustedAttachments = rawMessage.attachments.flatMap((attachment) => {
+        const trustedAttachments = (Array.isArray(rawMessage?.attachments) ? rawMessage.attachments : []).flatMap((attachment) => {
           const attachmentId = typeof attachment === 'string' ? identifier(attachment) : assetLabel(attachment);
           const trusted = byId.get(attachmentId);
           return trusted?.kind === 'image' ? [{ attachmentId, kind: 'image' }] : [];
         });
-        return trustedAttachments.length && /!\[[^\]]*\]\(https:\/\//.test(content)
+        if (!trustedAttachments.length) {
+          // Some upstream histories retain the rendered image but drop its
+          // attachment label. Recover only an exact match to this owner's
+          // Creative Library record; never trust a URL from transcript text.
+          const renderedUrl = /!\[[^\]]*\]\((https:\/\/[^\s)]+)\)/.exec(content)?.[1];
+          const owned = ownedImageByUrl.get(renderedUrl);
+          if (owned) trustedAttachments.push({ attachmentId: owned.attachmentId, kind: 'image' });
+        }
+        return (trustedAttachments.length || this.loadOwnedCreativeAssets) && /!\[[^\]]*\]\(https:\/\//.test(content)
           ? [{ role, content, attachments: trustedAttachments }]
           : [];
       }

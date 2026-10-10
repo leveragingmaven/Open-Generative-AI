@@ -96,10 +96,11 @@ export class MySqlCreativeAssetRepository extends CreativeAssetRepository {
     return Boolean(result?.affectedRows);
   }
 
-  async list({ accountId, campaignId } = {}) {
+  async list({ accountId, campaignId, conversationId } = {}) {
     const clauses = ['account_id = ?'];
     const params = [accountId];
     if (campaignId) { clauses.push('campaign_id = ?'); params.push(campaignId); }
+    if (conversationId) { clauses.push('conversation_id = ?'); params.push(conversationId); }
     const [rows] = await this.db.query(`SELECT * FROM creative_assets WHERE ${clauses.join(' AND ')} ORDER BY created_at DESC`, params);
     return rows.map(rowToAsset);
   }

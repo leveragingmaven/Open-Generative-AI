@@ -10,6 +10,7 @@ import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
+import { isPublishableCreativeMedia } from "../lib/publishing/publishingLibraryAssets.js";
 import {
   EmptyState,
   ErrorState,
@@ -173,6 +174,12 @@ function AssetCard({ asset, selected, onSelect }) {
 
 export default function AssetLibraryStudio() {
   const router = useRouter();
+  const openStudioWithAsset = (asset) => {
+    if (assetPreviewKind(asset) === 'image' && assetUrl(asset)) {
+      localStorage.setItem('mavensync_image_reference_handoff', JSON.stringify({ urls: [assetUrl(asset)] }));
+    }
+    router.push(studioRouteForAsset(asset));
+  };
   const { activeCampaign, clearActiveCampaign } = useActiveCampaign();
   const service = useMemo(() => new AssetLibraryService({ repository: localAssetManager.adapter, indexer: new InMemoryAssetIndexer() }), []);
   const [prompt, setPrompt] = useState("");
@@ -233,7 +240,7 @@ export default function AssetLibraryStudio() {
     return list.filter((asset) => assetCampaignId(asset) === campaignId);
   };
   const libraryAssets = useMemo(() => scopeToCampaign(allAssets), [allAssets, activeCampaign]);
-  const scopedAssets = useMemo(() => scopeToCampaign(assets), [assets, activeCampaign]);
+  const scopedAssets = useMemo(() => scopeToCampaign(assets).filter((asset) => !publishingSelectMode || isPublishableCreativeMedia(asset)), [assets, activeCampaign, publishingSelectMode]);
   const selected = useMemo(() => allAssets.find((asset) => asset.id === selectedId) || null, [allAssets, selectedId]);
   const campaigns = useMemo(() => { try { return CampaignStore.list(); } catch { return []; } }, [allAssets, activeCampaign]);
   const campaignNames = useMemo(() => new Map(campaigns.map((campaign) => [String(campaign.id), campaign.name])), [campaigns]);
@@ -401,7 +408,7 @@ export default function AssetLibraryStudio() {
       </WorkspaceHero>
 
       <WorkspaceSection title="Continue Working" description="Return to the most recently updated assets in this library view.">
-        {continueWorking.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{continueWorking.map((asset) => <WorkspaceCard as="button" type="button" interactive key={asset.id} onClick={() => router.push(studioRouteForAsset(asset))} className="flex min-h-24 items-center gap-3 text-left"><div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-black/20"><AssetMedia asset={asset} /></div><div className="min-w-0"><p className="truncate text-xs font-semibold">{assetTitle(asset)}</p><p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{STUDIO_LABELS[assetStudioKey(asset)] || assetType(asset)}{asset.model ? ` · ${asset.model}` : ""}</p><p className="mt-2 text-[9px] text-[var(--ms-color-gold-muted)]">{relativeTime(assetTimestamp(asset)) || "Date not recorded"}</p></div></WorkspaceCard>)}</div> : <EmptyState title="Your creative queue is ready" description="Create an asset and your most recent work will appear here." icon={<Icon type="asset" />} action={<PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Start creating</PrimaryButton>} />}
+        {continueWorking.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{continueWorking.map((asset) => <WorkspaceCard as="button" type="button" interactive key={asset.id} onClick={() => openStudioWithAsset(asset)} className="flex min-h-24 items-center gap-3 text-left"><div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-black/20"><AssetMedia asset={asset} /></div><div className="min-w-0"><p className="truncate text-xs font-semibold">{assetTitle(asset)}</p><p className="mt-1 truncate text-[9px] text-[var(--ms-color-text-muted)]">{STUDIO_LABELS[assetStudioKey(asset)] || assetType(asset)}{asset.model ? ` · ${asset.model}` : ""}</p><p className="mt-2 text-[9px] text-[var(--ms-color-gold-muted)]">{relativeTime(assetTimestamp(asset)) || "Date not recorded"}</p></div></WorkspaceCard>)}</div> : <EmptyState title="Your creative queue is ready" description="Create an asset and your most recent work will appear here." icon={<Icon type="asset" />} action={<PrimaryButton type="button" onClick={() => router.push("/studio/create")} className="min-h-9 px-4 py-2 text-xs">Start creating</PrimaryButton>} />}
       </WorkspaceSection>
 
       {collections.length > 0 && (
@@ -446,7 +453,7 @@ export default function AssetLibraryStudio() {
                 <div className="mt-7 flex flex-wrap gap-2">
                   {assetUrl(selected) ? <PrimaryButton type="button" onClick={downloadSelected} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</PrimaryButton> : null}
                   <SecondaryButton type="button" onClick={toggleFavorite} className="min-h-10 px-4 py-2 text-xs"><Icon type="favorite" size={14} /> {selected.favorite ? "Remove favorite" : "Add favorite"}</SecondaryButton>
-                  <SecondaryButton type="button" onClick={() => router.push(studioRouteForAsset(selected))} className="min-h-10 px-4 py-2 text-xs">Open Studio</SecondaryButton>
+                  <SecondaryButton type="button" onClick={() => openStudioWithAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Open Studio</SecondaryButton>
                   {publishingSelectMode ? <PrimaryButton type="button" onClick={() => createPublishingDraft(selected)} className="min-h-10 px-4 py-2 text-xs">Create Publishing Draft</PrimaryButton> : null}
                   <SecondaryButton type="button" onClick={() => router.push("/studio/publishing")} className="min-h-10 px-4 py-2 text-xs">{publishingSelectMode ? "Back to Publishing" : "Open Publishing"}</SecondaryButton>
                 </div>

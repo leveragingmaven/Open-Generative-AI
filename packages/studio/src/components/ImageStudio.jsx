@@ -948,7 +948,7 @@ export default function ImageStudio({
       localStorage.removeItem("mavensync_image_reference_handoff");
       const { urls } = JSON.parse(raw);
       const validUrls = Array.isArray(urls)
-        ? urls.filter((u) => typeof u === "string" && /^https?:\/\//.test(u))
+        ? urls.filter((u) => typeof u === "string" && (/^https?:\/\//.test(u) || /^\/api\/creative-assets\/media\?assetId=asset_[a-f0-9]{64}$/.test(u)))
         : [];
       if (!validUrls.length) return;
       const target = i2iModels[0];
@@ -960,7 +960,18 @@ export default function ImageStudio({
       setSelectedQuality(getResolutionsForI2IModel(target.id)[0] || null);
       setSelectedEffect(effects.length > 0 ? (getDefaultEffectForI2IModel(target.id) || effects[0]) : "");
       setMaxImages(getMaxImagesForI2IModel(target.id));
-      setUploadedImageUrls(validUrls);
+      if (validUrls.some((url) => url.startsWith('/api/creative-assets/media?'))) {
+        setReferenceUploading(true);
+        void Promise.all(validUrls.map(async (url) => {
+          if (!url.startsWith('/api/creative-assets/media?')) return url;
+          const response = await fetch(url, { credentials: 'same-origin' });
+          if (!response.ok) throw new Error('Creative Library image is unavailable.');
+          const blob = await response.blob();
+          if (!blob.type.startsWith('image/') || !blob.size || blob.size > 10 * 1024 * 1024) throw new Error('Creative Library image has an unsupported type or size.');
+          const extension = blob.type === 'image/jpeg' ? 'jpg' : blob.type.split('/')[1];
+          return uploadFile(apiKey, new File([blob], `creative-library.${extension}`, { type: blob.type }));
+        })).then(setUploadedImageUrls).catch((error) => setReferenceError(error.message || 'Unable to reuse the Creative Library image.')).finally(() => setReferenceUploading(false));
+      } else setUploadedImageUrls(validUrls);
     } catch (err) {
       console.warn("Failed to read Maven image handoff:", err);
     }

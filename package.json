@@ -118,6 +118,8 @@
     }
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/s3-request-presigner": "^3.1149.0",
     "@fal-ai/client": "^1.10.1",
     "@zernio/node": "^0.2.831",
     "axios": "^1.7.0",
