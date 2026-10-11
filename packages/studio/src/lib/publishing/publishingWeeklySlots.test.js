@@ -300,6 +300,12 @@ test('the weekly plan is wired into the composer without scheduling anything by 
   assert.match(source, /publishingNextAvailableSlot\(/);
   assert.match(source, /publishingScheduleConfirmation\(\{/);
   assert.match(source, /function SlotSuggestions\(/);
+  // The weekly plan is visible in the Create view even before a post is opened, so a creator arriving with an
+  // empty composer still sees this week's plan and the next free slot instead of only a "Start a new post" box.
+  assert.match(source, /function WeeklyPlanPanel\(\{ summary, nextFreeSlot, scheduledNote = null, onUseNextSlot = null \}\) \{/);
+  assert.equal((source.match(/<WeeklyPlanPanel /g) || []).length, 2);
+  assert.match(source, /scheduledNote=\{scheduledEditPolicy\(focusedDraft\)\.scheduledOnProvider \? "This post already holds an existing schedule\. Use Reschedule to move it\." : null\}/);
+  assert.match(source, /\) : <div className="space-y-5"><WeeklyPlanPanel summary=\{composerWeekSummary\} nextFreeSlot=\{nextFreeSlot\} \/><EmptyState title="Start a new post"/);
   assert.match(source, /Duplicate for Next Slot/);
   assert.match(source, /scheduled in the next 7 days/);
   assert.match(source, /onPick=\{applySlot\}/);
