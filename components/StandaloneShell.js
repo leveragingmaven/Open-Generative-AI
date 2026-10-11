@@ -472,6 +472,23 @@ const [characterTarget, setCharacterTarget] = useState(null);
     }
   }, [agencyMode, fetchBalance]);
 
+  // A customer who saved their provider key through Settings holds a usable
+  // server-side credential even though this browser stores no key, so the
+  // credential gate below must not send them back to the legacy paste-a-key
+  // prompt. Settings writes the same status this reads, so saving a key clears
+  // the gate immediately.
+  useEffect(() => {
+    if (agencyMode) return undefined;
+    let cancelled = false;
+    Promise.all(
+      BYOK_CREDENTIAL_PROVIDERS.filter(providerIsLaunchAvailable)
+        .map(async (provider) => [provider, await readProviderCredentialStatus(provider)]),
+    )
+      .then((statuses) => { if (!cancelled) setByokStatuses((current) => ({ ...current, ...Object.fromEntries(statuses) })); })
+      .catch(() => { /* A status that cannot be read leaves the gate in charge. */ });
+    return () => { cancelled = true; };
+  }, [agencyMode]);
+
   const handleKeySave = useCallback((key) => {
     if (agencyMode) return;
     localStorage.setItem(STORAGE_KEY, key);
@@ -599,8 +616,26 @@ const [characterTarget, setCharacterTarget] = useState(null);
     setDroppedFiles(null);
   }, []);
 
-  if (!agencyMode && !apiKey && !isStudioHome && !isOverviewWorkspace && !isCreateWorkspace && !isIntelligenceWorkspace) {
-    return <ApiKeyModal onSave={handleKeySave} />;
+  // Only the launch-available providers can actually power generation, so a
+  // stored key for a provider that is not active never unlocks the studios.
+  const hasLaunchReadyCredential = BYOK_CREDENTIAL_PROVIDERS
+    .filter(providerIsLaunchAvailable)
+    .some((provider) => byokStatuses[provider]?.configured === true);
+
+  // A provider rejecting a stored key comes back as 401/403. The studio has
+  // already shown the sanitized generation error, but a rejected key is only
+  // fixable where it is managed, so a credential-backed account is taken to the
+  // Settings key field instead of being left at a dead end. Accounts that never
+  // stored a credential keep the legacy browser-key flow untouched.
+  useEffect(() => {
+    if (agencyMode || !hasLaunchReadyCredential) return undefined;
+    const onAuthRequired = () => { void openSettings(); };
+    window.addEventListener('muapi:auth-required', onAuthRequired);
+    return () => window.removeEventListener('muapi:auth-required', onAuthRequired);
+  }, [agencyMode, hasLaunchReadyCredential, openSettings]);
+
+  if (!agencyMode && !apiKey && !hasLaunchReadyCredential && !isStudioHome && !isOverviewWorkspace && !isCreateWorkspace && !isIntelligenceWorkspace) {
+    return <ApiKeyModal onSave={handleKeySave} subtitle={<>Enter your <a href="https://muapi.ai/access-keys" target="_blank" rel="noreferrer" className="text-[#E82070] hover:text-[#D4A858] transition-colors">Muapi.ai</a> API key to start creating. With a Creator OS account you can instead add the key under Settings on the Studio home and keep it encrypted on the server.</>} />;
   }
 
   const studioApiKey = agencyMode ? null : apiKey;
