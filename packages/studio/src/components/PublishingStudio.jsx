@@ -12,7 +12,7 @@ import { publishingCalendarActions, publishingCalendarDateTime, publishingCalend
 import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant, scheduledForFromFields, timeFromClockParts } from "../lib/publishing/scheduleTime.js";
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
-import { assetPreviewKind } from "../lib/assets/assetPreview.js";
+import { useNearViewport } from "../lib/assets/useNearViewport.js";
 import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
@@ -64,7 +64,6 @@ function Icon({ type, size = 18 }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[type]}</svg>;
 }
 
-function assetUrl(asset) { return asset?.url || asset?.generatedFiles?.[0] || asset?.previewUrl || null; }
 function assetTitle(asset) { return asset?.title || asset?.name || asset?.description || "Untitled Asset"; }
 function assetType(asset) { return asset?.type || asset?.kind || asset?.metadata?.assetType || "creative"; }
 function providerPlatformId(platform) {
@@ -292,34 +291,43 @@ function AnalyticsMetricGrid({ metrics }) {
   return <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{entries.map(([key, label]) => <div key={key}><p className="text-sm font-semibold">{formatMetric(key, metrics[key])}</p><p className="mt-0.5 text-[8px] uppercase tracking-[0.1em] text-[var(--ms-color-text-muted)]">{label}</p></div>)}</div>;
 }
 
-function AssetPreview({ asset }) {
-  const [failedSources, setFailedSources] = useState([]);
-  const url = assetUrl(asset);
-  const type = assetPreviewKind(asset) || assetType(asset).toLowerCase();
-  const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
-  const imageUrl = [thumbnail, url].find((source) => source && !failedSources.includes(source));
-  if (imageUrl && type.includes("image")) return <img src={imageUrl} alt={assetTitle(asset)} onError={() => setFailedSources((sources) => [...sources, imageUrl])} className="h-full w-full object-cover" />;
-  if (url && !failedSources.includes(url) && type.includes("video")) return <video src={url} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, url])} aria-label={`${assetTitle(asset)} preview`} preload="metadata" className="h-full w-full object-cover" />;
-  return <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={24} /><span className="text-[9px] font-semibold uppercase tracking-[0.15em]">{type}</span></div>;
-}
-
 /**
- * The media thumbnail for one Queue card or Calendar detail panel.
+ * The media thumbnail for one Queue card, picker entry, Calendar detail panel, or composer preview.
  *
- * Images are delivered by the already-authenticated Creative Assets endpoint, resized through its
- * `variant=thumbnail` rendering. A video keeps its own account-authenticated reference at a first-frame
- * timestamp, because that endpoint only downsizes images. `publishingQueueMedia` refuses a private object
- * key, so this component can never render a stored R2 reference.
+ * Images come from the already-authenticated Creative Assets endpoint through its `variant=thumbnail`
+ * rendering, so a card loads a small WebP instead of the original multi-megabyte file. A video shows a
+ * poster tile with a play control and only mounts a `<video>` once the creator asks for it, so opening
+ * the library, composer, or Queue downloads no video bytes. A preview that fails over all of its sources
+ * reports the failure and can be retried. `publishingQueueMedia` refuses a private object key, so this
+ * component can never render a stored R2 reference.
  */
-function QueueMediaThumbnail({ media }) {
+function QueueMediaThumbnail({ media, eager = false }) {
   const [failedSources, setFailedSources] = useState([]);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [frameRef, nearViewport] = useNearViewport({ enabled: !eager });
+  const label = media?.title || "Post media";
   const fail = (source) => setFailedSources((sources) => (sources.includes(source) ? sources : [...sources, source]));
+  const retry = () => { setFailedSources([]); setImageLoaded(false); setPlaying(false); setAttempt((value) => value + 1); };
   const imageUrl = media?.imageUrl && !failedSources.includes(media.imageUrl) ? media.imageUrl : null;
   const videoUrl = media?.videoUrl && !failedSources.includes(media.videoUrl) ? media.videoUrl : null;
-  const label = media?.title || "Post media";
-  if (imageUrl) return <img src={imageUrl} alt={label} loading="lazy" decoding="async" onError={() => fail(imageUrl)} className="h-full w-full object-cover" />;
-  if (videoUrl) return <video src={videoUrl.includes("#") ? videoUrl : `${videoUrl}#t=0.1`} poster={media.imageUrl || undefined} muted playsInline preload="metadata" aria-label={`${label} poster`} onError={() => fail(videoUrl)} className="h-full w-full object-cover" />;
-  return <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={22} /><span className="text-[8px] font-semibold uppercase tracking-[0.14em]">{media?.kind || "no media"}</span></div>;
+  const frame = (children) => <div ref={frameRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black/20">{children}</div>;
+  if (!eager && !nearViewport) return frame(<span role="status" aria-label={`Waiting to load ${label}`} className="absolute inset-0 animate-pulse bg-[var(--ms-color-panel)]" />);
+  if (imageUrl) return frame(<>
+    {!imageLoaded ? <span role="status" aria-label={`Loading ${label}`} className="absolute inset-0 animate-pulse bg-[var(--ms-color-panel)]" /> : null}
+    <img key={`${imageUrl}#${attempt}`} src={imageUrl} alt={label} loading={eager ? "eager" : "lazy"} decoding="async" onLoad={() => setImageLoaded(true)} onError={() => fail(imageUrl)} className={`h-full w-full object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`} />
+  </>);
+  if (videoUrl && !playing) return frame(<button type="button" onClick={() => setPlaying(true)} aria-label={`Play ${label}`} className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)] transition-colors hover:text-white">
+    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--ms-color-gold-primary)] bg-black/40 text-[var(--ms-color-gold-primary)]"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg></span>
+    <span className="text-[8px] font-semibold uppercase tracking-[0.14em]">video · play</span>
+  </button>);
+  if (videoUrl) return <video key={`${videoUrl}#${attempt}`} src={videoUrl} poster={media.imageUrl || undefined} muted playsInline controls autoPlay preload="metadata" aria-label={label} onError={() => fail(videoUrl)} className="h-full w-full object-cover" />;
+  return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-1.5 px-3 text-center">
+    <Icon type="asset" size={22} />
+    <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-gold-muted)]">{media?.kind || "no media"}{failedSources.length ? " · preview failed" : ""}</span>
+    {failedSources.length ? <button type="button" onClick={retry} className="rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[var(--ms-color-text-secondary)] hover:text-white">Retry</button> : null}
+  </div>);
 }
 
 export default function PublishingStudio() {
@@ -1432,7 +1440,7 @@ export default function PublishingStudio() {
                   <div className="mt-3 grid max-h-80 gap-3 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
                     {pickerEntries.map((entry) => (
                       <div key={entry.id} className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-2">
-                        <div className="aspect-[16/10] overflow-hidden rounded bg-black/20"><AssetPreview asset={entry.asset} /></div>
+                        <div className="aspect-[16/10] overflow-hidden rounded bg-black/20"><QueueMediaThumbnail media={publishingQueueMedia(entry.asset)} /></div>
                         <p className="mt-2 truncate text-[10px] font-semibold">{entry.title}</p>
                         {entry.fileName === entry.title ? null : <p className="mt-0.5 truncate text-[9px] text-[var(--ms-color-text-muted)]">{entry.fileName}</p>}
                         <div className="mt-2 flex items-center justify-between gap-2">
@@ -1466,7 +1474,7 @@ export default function PublishingStudio() {
              ) : <div className="space-y-5"><WeeklyPlanPanel summary={composerWeekSummary} nextFreeSlot={nextFreeSlot} /><EmptyState title="Start a new post" description="Write a post, upload an image or video, or choose existing creative work." icon={<Icon type="asset" />} action={<div className="flex flex-wrap justify-center gap-2"><PrimaryButton type="button" onClick={createBlankDraft} className="min-h-9 px-4 py-2 text-xs">Create Post</PrimaryButton><SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Choose from Creative Library <Icon type="arrow" size={13} /></SecondaryButton></div>} /></div>}
           </WorkspaceSection>
           <WorkspaceSection title="Live Preview" description="A quiet preview of the selected post and destination.">
-            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <AssetPreview asset={focusedPreviewAsset} /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}{draftField(focusedDraft, "firstComment") && <p className="text-[10px] text-[var(--ms-color-text-muted)]"><span className="font-semibold uppercase tracking-[0.1em]">First comment:</span> {draftField(focusedDraft, "firstComment")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
+            {focusedDraft ? <WorkspaceCard className="overflow-hidden p-0"><div className="flex items-center gap-3 border-b border-[var(--ms-color-border-subtle)] p-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(232,32,112,0.14)] text-xs font-semibold text-[var(--ms-color-pink-primary)]">{(accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Y").charAt(0).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-xs font-semibold">{accounts.find((account) => focusedDraft.platforms.includes(account.platform))?.name || "Your connected account"}</p><p className="mt-0.5 text-[9px] text-[var(--ms-color-text-muted)]">{platformOptions.find((platform) => focusedDraft.platforms.includes(platform.id))?.label || "Selected destination"}</p></div></div><div className="aspect-square bg-black/20">{focusedPreviewAsset ? <QueueMediaThumbnail media={publishingQueueMedia(focusedPreviewAsset)} eager /> : <div className="flex h-full items-center justify-center text-xs text-[var(--ms-color-text-muted)]">No media selected</div>}</div><div className="space-y-2 p-4"><p className="whitespace-pre-wrap text-xs leading-5 text-[var(--ms-color-text-secondary)]">{draftField(focusedDraft, "caption") || "Your caption will appear here."}</p>{draftField(focusedDraft, "hashtags") && <p className="text-[10px] text-[var(--ms-color-pink-primary)]">{draftField(focusedDraft, "hashtags")}</p>}{draftField(focusedDraft, "firstComment") && <p className="text-[10px] text-[var(--ms-color-text-muted)]"><span className="font-semibold uppercase tracking-[0.1em]">First comment:</span> {draftField(focusedDraft, "firstComment")}</p>}</div></WorkspaceCard> : <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[var(--ms-radius-card)] border border-dashed border-[var(--ms-color-border-emphasized)] bg-black/10 px-6 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(212,168,88,0.08)] text-[var(--ms-color-gold-primary)]"><Icon type="asset" /></span><h3 className="mt-4 text-sm font-semibold">Your post preview will appear here</h3><p className="mt-2 max-w-xs text-xs leading-5 text-[var(--ms-color-text-muted)]">Choose an asset and destination to see the caption, account, and media together.</p></div>}
           </WorkspaceSection>
         </div>
       )}
@@ -1476,7 +1484,7 @@ export default function PublishingStudio() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {assets.map((asset) => (
               <WorkspaceCard key={asset.id} className="overflow-hidden p-0">
-                <div className="aspect-[16/10] bg-black/20"><AssetPreview asset={asset} /></div>
+                <div className="aspect-[16/10] bg-black/20"><QueueMediaThumbnail media={publishingQueueMedia(asset)} /></div>
                 <div className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -1552,7 +1560,7 @@ export default function PublishingStudio() {
                   <p className="mt-2 text-[10px] text-[var(--ms-color-text-secondary)]">{details.destinations.map((destination) => destination.label).join(", ") || "No destination recorded"}</p>
                   <p className="mt-1 text-[10px] text-[var(--ms-color-text-muted)]">{details.providerName} · {publishingCalendarDateTime(details.scheduledAt, details.timezone)} · {details.timezone || "Timezone not recorded"}</p>
                 </div>
-                {details.media ? <div className="h-16 w-24 shrink-0 overflow-hidden rounded border border-[var(--ms-color-border-subtle)]"><AssetPreview asset={details.media} /></div> : null}
+                {details.media ? <div className="h-16 w-24 shrink-0 overflow-hidden rounded border border-[var(--ms-color-border-subtle)]"><QueueMediaThumbnail media={publishingQueueMedia(details.media)} /></div> : null}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {actions.canEdit ? <SecondaryButton type="button" onClick={() => void editQueuedDraft(selectedCalendarDraft)} className="min-h-8 px-3 py-2 text-[10px]">Edit</SecondaryButton> : null}

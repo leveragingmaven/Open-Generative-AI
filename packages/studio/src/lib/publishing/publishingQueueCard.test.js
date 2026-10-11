@@ -364,3 +364,43 @@ test('rescheduling and cancelling a provider-owned post reuse its id instead of 
   // The draft is kept for editing and still carries its media after cancellation.
   assert.deepEqual(cancelled.assetIds, ['lib-image-1']);
 });
+
+test('an older externally hosted image keeps its original URL and is never routed through the R2 thumbnail endpoint', () => {
+  // Older media predates R2: the row stores the provider's own https URL and no storage reference, so the
+  // asset is delivered as-is and the same-origin resize endpoint must never be invented for it.
+  const legacyImage = {
+    id: 'legacy-image-1',
+    title: 'Older launch hero',
+    type: 'image',
+    kind: 'image',
+    url: 'https://cdn.muapi.ai/legacy/launch-hero.jpg',
+    generatedFiles: ['https://cdn.muapi.ai/legacy/launch-hero.jpg'],
+    metadata: { assetType: 'image', modality: 'image' },
+  };
+  const image = publishingQueueMedia(legacyImage);
+  assert.equal(image.kind, 'image');
+  assert.equal(image.imageUrl, 'https://cdn.muapi.ai/legacy/launch-hero.jpg');
+  assert.equal(image.imageUrl.includes('variant=thumbnail'), false);
+  assert.equal(image.imageUrl.includes('/api/creative-assets/media'), false);
+  assert.equal(image.videoUrl, null);
+
+  const legacyVideo = {
+    id: 'legacy-video-1',
+    title: 'Older launch clip',
+    type: 'video',
+    kind: 'video',
+    url: 'https://cdn.muapi.ai/legacy/launch-clip.mp4',
+    generatedFiles: ['https://cdn.muapi.ai/legacy/launch-clip.mp4'],
+    metadata: { assetType: 'video', modality: 'video' },
+  };
+  const clip = publishingQueueMedia(legacyVideo);
+  assert.equal(clip.kind, 'video');
+  assert.equal(clip.videoUrl, 'https://cdn.muapi.ai/legacy/launch-clip.mp4');
+  // A video keeps its own reference for the poster; no image variant is invented for it.
+  assert.equal(clip.imageUrl, null);
+
+  // The oldest records declare no kind at all, so the reference's own extension decides it.
+  const undeclared = publishingQueueMedia({ id: 'legacy-image-2', url: 'https://cdn.muapi.ai/legacy/undated.png' });
+  assert.equal(undeclared.kind, 'image');
+  assert.equal(undeclared.imageUrl, 'https://cdn.muapi.ai/legacy/undated.png');
+});

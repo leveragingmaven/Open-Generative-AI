@@ -4,6 +4,7 @@ import test from 'node:test';
 import { PublishingCenterMVP } from './PublishingCenterMVP.js';
 import { ZernioPublishingProvider } from './ZernioPublishingProvider.js';
 import { publishingComposerValues, publishingDraftUpdateFromComposer } from './publishingComposer.js';
+import { publishingQueueMedia } from './publishingQueueCard.js';
 import {
   attachmentFromLibraryAsset,
   draftAttachmentAvailability,
@@ -203,7 +204,7 @@ test('the Publishing composer exposes Choose from Library beside upload and reus
   assert.match(source, /libraryPickerEntries\(assets, \{ query: libraryQuery \}\)/);
   assert.match(source, /attachmentFromLibraryAsset\(asset/);
   assert.match(source, /draftAttachmentAvailability\(focusedComposerValues, assets/);
-  assert.match(source, /<AssetPreview asset=\{entry\.asset\} \/>/);
+  assert.match(source, /<QueueMediaThumbnail media=\{publishingQueueMedia\(entry\.asset\)\} \/>/);
   assert.match(source, /entry\.fileName/);
   assert.match(source, /entry\.mediaType/);
   assert.match(source, /fetchDurableCreativeAssets\(\)/);
@@ -212,4 +213,34 @@ test('the Publishing composer exposes Choose from Library beside upload and reus
   const picker = fs.readFileSync(new URL('./publishingLibraryPicker.js', import.meta.url), 'utf8');
   // The picker never reads a storage key, so a private R2 reference cannot reach the browser.
   assert.doesNotMatch(picker, /storageReference/);
+});
+
+test('an older externally hosted image stays selectable for publishing with its own URL', () => {
+  const legacy = {
+    id: 'legacy-image-1',
+    title: 'Older launch hero',
+    filename: 'launch-hero.jpg',
+    type: 'image',
+    url: 'https://cdn.muapi.ai/legacy/launch-hero.jpg',
+    generatedFiles: ['https://cdn.muapi.ai/legacy/launch-hero.jpg'],
+    metadata: { assetType: 'image', modality: 'image' },
+  };
+  const entries = libraryPickerEntries([legacy]);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].id, 'legacy-image-1');
+  assert.equal(entries[0].mediaType, 'image');
+  assert.equal(entries[0].thumbnailUrl, 'https://cdn.muapi.ai/legacy/launch-hero.jpg');
+  assert.equal(entries[0].thumbnailUrl.includes('variant=thumbnail'), false);
+
+  const attachment = attachmentFromLibraryAsset(legacy);
+  assert.deepEqual(attachment.assetIds, ['legacy-image-1']);
+  assert.equal(attachment.assets[0].url, 'https://cdn.muapi.ai/legacy/launch-hero.jpg');
+
+  // A mixed library offers older external media and newer stored media in one list, in library order.
+  const mixed = libraryPickerEntries([legacy, libraryImage('lib-image-1')]);
+  assert.deepEqual(mixed.map((entry) => entry.id), ['legacy-image-1', 'lib-image-1']);
+  // The entry carries the asset's own delivery URL; the resize is applied when the tile renders it.
+  assert.equal(mixed[1].thumbnailUrl, mediaUrl('lib-image-1'));
+  assert.equal(publishingQueueMedia(mixed[1].asset).imageUrl, `${mediaUrl('lib-image-1')}&variant=thumbnail`);
+  assert.equal(draftAttachmentAvailability({ assetIds: ['legacy-image-1'] }, [legacy]).unavailable, false);
 });
