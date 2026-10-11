@@ -263,12 +263,27 @@ test('a failed budget generation is never retried on a more expensive model', as
   assert.doesNotMatch(JSON.stringify(state.captured.t2v), /gemini-omni|veo3/);
 });
 
-test('a premium image-to-video model is confirmed, priced honestly, and then animated', async () => {
+test('a generic animation is recommended the budget image-to-video model and generates directly', async () => {
   const messages = [{ role: 'user', content: 'Animate this image.' }];
   const attachments = [{ attachmentId: 'asset_upload_1', kind: 'image', url: IMAGE_URL }];
   const state = harness({ messages, attachments });
 
-  const plan = await planTurn('Animate this image into a video.', state, { attachments: ['asset_upload_1'] });
+  const result = await planTurn('Animate this image into a video.', state, { attachments: ['asset_upload_1'] });
+  assert.equal(result.status, 200);
+  assert.equal(state.captured.i2v.length, 1);
+  assert.equal(state.captured.i2v[0].providerArgs.image_url, IMAGE_URL);
+  assert.notEqual(state.captured.i2v[0].providerArgs.model, 'veo3-image-to-video', 'the published $2.50 model is no longer the automatic default');
+  assert.equal(state.captured.persisted[0].media.costTier, 'budget');
+  assert.equal(state.captured.persisted[0].media.approvalStatus, 'not_required');
+  assert.doesNotMatch(result.reply, /Confirm this video generation/);
+});
+
+test('the premium image-to-video model stays available, priced honestly, and gated when asked for', async () => {
+  const messages = [{ role: 'user', content: 'Animate this image.' }];
+  const attachments = [{ attachmentId: 'asset_upload_1', kind: 'image', url: IMAGE_URL }];
+  const state = harness({ messages, attachments });
+
+  const plan = await planTurn('Animate this image into a video with Veo3 Image To Video.', state, { attachments: ['asset_upload_1'] });
   assert.equal(plan.status, 200);
   assert.equal(state.captured.i2v.length, 0, 'no image-to-video request may happen before approval');
   assert.match(plan.reply, /Confirm this video generation/);
@@ -282,6 +297,74 @@ test('a premium image-to-video model is confirmed, priced honestly, and then ani
   assert.equal(state.captured.i2v[0].providerArgs.image_url, IMAGE_URL);
   assert.equal(state.captured.persisted[0].media.approvalStatus, 'approved');
   assert.equal(state.captured.persisted[0].media.costTier, 'premium');
+});
+
+test('the approval reply offers confirm, another model, and cancel', async () => {
+  const state = harness();
+  const plan = await planTurn('Create a cinematic video of a cat walking on grass.', state);
+
+  assert.match(plan.reply, /Reply "confirm" to generate exactly this/);
+  assert.match(plan.reply, /"use <model name>" to generate with a different model instead/);
+  assert.match(plan.reply, /"cancel" to stop/);
+  assert.match(plan.reply, /Nothing is generated until you confirm/);
+});
+
+test('choosing another model during approval shows that model and generates only after confirming it', async () => {
+  const state = harness();
+  const plan = await planTurn('Create a cinematic video of a cat walking on grass.', state);
+  // The customer redirects the pending approval to a cheaper catalog model.
+  state.setSession({ messages: [
+    { role: 'user', content: 'Create a cinematic video of a cat walking on grass.' },
+    { role: 'assistant', content: plan.reply },
+  ] });
+  const chosen = await turn('use Seedance Lite instead', state);
+
+  assert.equal(chosen.status, 200);
+  assert.equal(state.captured.t2v.length, 0, 'choosing a model must not generate it');
+  assert.match(chosen.reply, /Confirm this video generation/);
+  assert.match(chosen.reply, /ByteDance · Seedance Lite/);
+  assert.match(chosen.reply, /You chose this model\./);
+  assert.match(chosen.reply, /Reply "confirm" to generate exactly this/);
+
+  // Confirming the replacement runs exactly that model and nothing else.
+  state.setSession({ messages: [
+    { role: 'user', content: 'use Seedance Lite instead' },
+    { role: 'assistant', content: chosen.reply },
+  ] });
+  const confirmed = await turn('confirm', state);
+  assert.equal(confirmed.status, 200);
+  assert.equal(state.captured.t2v.length, 1);
+  assert.equal(state.captured.t2v[0].providerArgs.model, 'seedance-lite-t2v');
+  assert.equal(state.captured.persisted[0].media.selectionMode, 'user_choice');
+});
+
+test('asking for other models lists alternatives without generating or losing the pending plan', async () => {
+  const state = harness();
+  const plan = await planTurn('Create a cinematic video of a cat walking on grass.', state);
+  state.setSession({ messages: [
+    { role: 'user', content: 'Create a cinematic video of a cat walking on grass.' },
+    { role: 'assistant', content: plan.reply },
+  ] });
+  const listed = await turn('choose another model', state);
+
+  assert.equal(listed.status, 200);
+  assert.equal(state.captured.t2v.length, 0);
+  assert.match(listed.reply, /Available text-to-video models/);
+  assert.match(listed.reply, /Seedance Lite/);
+  assert.match(listed.reply, /Reply "use <model name>"/);
+
+  // The original plan is still the live one: it is the newest approval marker
+  // in the transcript and the shortlist reply does not retire it.
+  state.setSession({ messages: [
+    { role: 'user', content: 'Create a cinematic video of a cat walking on grass.' },
+    { role: 'assistant', content: plan.reply },
+    { role: 'user', content: 'choose another model' },
+    { role: 'assistant', content: listed.reply },
+  ] });
+  const confirmed = await turn('confirm', state);
+  assert.equal(confirmed.status, 200);
+  assert.equal(state.captured.t2v.length, 1);
+  assert.equal(state.captured.t2v[0].providerArgs.model, 'gemini-omni-text-to-video');
 });
 
 test('a missing customer credential still fails before any provider request', async () => {

@@ -17,10 +17,13 @@ import { createServerVisionTextIntelligence } from './serverVisionTextIntelligen
 import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
 import { generateMavenVideo, buildGeneratedVideoReply, describeVideoProvenance } from './mavenVideoGeneration.js';
 import {
+  buildVideoAlternativesReply,
   buildVideoApprovalCancellationReply,
   buildVideoApprovalReply,
   isVideoApprovalCancellation,
   isVideoApprovalConfirmation,
+  isVideoModelChoiceRequest,
+  planAlternateVideoRoute,
   planMavenVideoRoute,
   readPendingVideoApproval,
 } from './mavenVideoApproval.js';
@@ -665,6 +668,25 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
         return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: videoReferences });
       }
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, videoReferences) };
+    }
+    // A pending approval can be redirected to another available model at any
+    // time. The replacement is shown with its own provider, model, settings and
+    // price and needs its own confirmation, so nothing is ever substituted
+    // silently - not even at the customer's own request.
+    const alternateVideoPlan = planAlternateVideoRoute({ pending: pendingVideoApproval, message });
+    if (alternateVideoPlan) {
+      const { reply } = buildVideoApprovalReply({ ...alternateVideoPlan, identity, conversationId });
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], []) };
+    }
+    if (pendingVideoApproval && isVideoModelChoiceRequest(message)) {
+      const reply = buildVideoAlternativesReply({ pending: pendingVideoApproval });
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], []) };
     }
     if (pendingVideoApproval && isVideoApprovalCancellation(message)) {
       const reply = buildVideoApprovalCancellationReply();

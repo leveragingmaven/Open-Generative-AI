@@ -43,7 +43,7 @@ export async function generateMavenVideo({
   const safePrompt = extractVideoPrompt(prompt);
   if (!safePrompt) throw videoError('video_prompt_required', 'Describe the video you want to create.', 400);
   const route = approved
-    ? resolveApprovedVideoRoute({ kind: approved.kind || 't2v', prompt: safePrompt, modelId: approved.modelId, settings: approved.settings })
+    ? resolveApprovedVideoRoute({ ...approved, kind: approved.kind || 't2v', prompt: safePrompt })
     : selectMavenVideoRoute(safePrompt);
   const tier = videoCostTier({ model: route.model, inputs: route.inputs });
 

@@ -5,6 +5,7 @@ import { selectMavenImageToVideoRoute } from './mavenImageToVideoModelRouter.js'
 import {
   resolveApprovedVideoRoute,
   videoCostTier,
+  videoModelIsBudgetClass,
   videoSelectionReason,
 } from './mavenVideoApproval.js';
 
@@ -20,9 +21,11 @@ export async function generateMavenImageToVideo({ identity, prompt, imageUrl, si
   const safePrompt = extractVideoPrompt(prompt);
   if (!safePrompt) throw errorWith('video_prompt_required', 'Describe how you want to animate the image.', 400);
   if (!httpsUrl(imageUrl)) throw errorWith('image_source_unavailable', 'The trusted image reference is not available for animation.', 422);
+  // The budget-tier preference must match the one the approval plan used, or a
+  // budget plan would execute the premium default instead.
   const route = approved
-    ? resolveApprovedVideoRoute({ kind: approved.kind || 'i2v', prompt: safePrompt, modelId: approved.modelId, settings: approved.settings })
-    : selectMavenImageToVideoRoute(safePrompt);
+    ? resolveApprovedVideoRoute({ ...approved, kind: approved.kind || 'i2v', prompt: safePrompt })
+    : selectMavenImageToVideoRoute(safePrompt, { isBudget: videoModelIsBudgetClass });
   const tier = videoCostTier({ model: route.model, inputs: route.inputs });
   let apiKey;
   try {

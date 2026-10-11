@@ -30,8 +30,9 @@
  * SSO secret in the chat hot path, none of which this flow can supply.
  */
 import { MUAPI_MODEL_FIXTURES } from '../../packages/studio/src/lib/intelligence/ProductionCapabilityCatalog.js';
-import { selectMavenVideoRoute, videoResolutionRank } from './mavenVideoModelRouter.js';
-import { selectMavenImageToVideoRoute } from './mavenImageToVideoModelRouter.js';
+import { t2vModels, i2vModels } from '../../packages/studio/src/models.js';
+import { selectMavenVideoRoute, videoResolutionRank, findModel } from './mavenVideoModelRouter.js';
+import { selectMavenImageToVideoRoute, findModel as findImageToVideoModel } from './mavenImageToVideoModelRouter.js';
 import { extractVideoPrompt } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 
 export const VIDEO_APPROVAL_TTL_SECONDS = 600;
@@ -60,6 +61,14 @@ export function isVideoApprovalConfirmation(message) {
 export function isVideoApprovalCancellation(message) {
   const text = String(message || '').trim();
   return Boolean(text) && text.length <= 40 && CANCELLATION_PATTERN.test(text);
+}
+
+const CHOICE_PATTERN = /^(choose|pick|show|list|different|another|other|options|alternatives|which)\b/i;
+
+/** "Choose another model" without naming one: answer with the shortlist. */
+export function isVideoModelChoiceRequest(message) {
+  const text = String(message || '').trim();
+  return Boolean(text) && text.length <= 60 && CHOICE_PATTERN.test(text);
 }
 
 function videoFixtures() {
@@ -152,8 +161,30 @@ export function videoPriceNote(model) {
 }
 
 export function videoSelectionReason(mode, tier) {
-  if (mode === 'explicit') return 'explicit_model_request';
+  if (mode === 'explicit' || mode === 'user_choice') return 'explicit_model_request';
   return tier === VIDEO_COST_TIER.PREMIUM ? 'quality_signal_auto_upgrade' : 'auto_default';
+}
+
+/** Catalog entries of one modality, in catalog order. */
+export function videoCatalog(kind) {
+  return kind === 'i2v' ? i2vModels : t2vModels;
+}
+
+/** Cost predicate handed to the routers so auto-selection can prefer budget models. */
+export function videoModelIsBudgetClass(model) {
+  return videoCostTier({ model, inputs: {} }) === VIDEO_COST_TIER.BUDGET;
+}
+
+/** Provider · model · settings · audio, plus the honest price statement. */
+export function describeVideoChoice({ model, inputs = {} } = {}) {
+  const duration = Number(inputs.duration);
+  return [
+    [model?.provider_name || model?.provider || 'Provider unknown', model?.name || model?.id || 'Model unknown'].join(' · '),
+    inputs.aspect_ratio ? String(inputs.aspect_ratio) : null,
+    Number.isFinite(duration) ? `${duration}s` : 'duration: provider default',
+    inputs.resolution ? String(inputs.resolution) : 'resolution: provider default',
+    'audio: provider default',
+  ].filter(Boolean).join(' · ');
 }
 
 function creatorKey(identity) {
@@ -209,9 +240,11 @@ export function buildVideoApprovalReply({ identity, conversationId, kind, prompt
   const model = route?.model?.name || route?.model?.id;
   const settings = [inputs.aspect_ratio, Number.isFinite(inputs.duration) ? `${inputs.duration}s` : null, inputs.resolution]
     .filter(Boolean).join(' · ');
-  const why = route?.mode === 'explicit'
-    ? 'You asked for this model, and it is priced above the budget tier.'
-    : 'This was selected automatically from your request, and it is priced above the budget tier.';
+  const why = route?.mode === 'user_choice'
+    ? 'You chose this model.'
+    : route?.mode === 'explicit'
+      ? 'You asked for this model, and it is priced above the budget tier.'
+      : 'This was selected automatically from your request, and it is priced above the budget tier.';
   const reply = [
     '**Confirm this video generation**',
     '',
@@ -219,7 +252,7 @@ export function buildVideoApprovalReply({ identity, conversationId, kind, prompt
     why,
     videoPriceNote(route?.model),
     '',
-    'Reply "confirm" to generate exactly this, or name a different model (for example "Seedance Lite") to change it.',
+    'Reply "confirm" to generate exactly this, "use <model name>" to generate with a different model instead, or "cancel" to stop. Nothing is generated until you confirm.',
   ].join('\n');
   const marker = encodeMarker({
     v: 1,
@@ -228,6 +261,9 @@ export function buildVideoApprovalReply({ identity, conversationId, kind, prompt
     i: creatorKey(identity),
     c: String(conversationId || ''),
     m: String(route?.model?.id || ''),
+    // The selection mode is recorded so a user-chosen model can be re-validated
+    // against the catalog rather than the auto-selection default.
+    u: route?.mode === 'user_choice' ? 'user_choice' : 'auto',
     s: inputs,
     p: String(prompt || ''),
     e: now + VIDEO_APPROVAL_TTL_SECONDS,
@@ -274,6 +310,7 @@ export function readPendingVideoApproval(messages, { identity, conversationId, n
       kind: payload.k,
       modelId: String(payload.m),
       settings: payload.s && typeof payload.s === 'object' ? payload.s : {},
+      selectionMode: payload.u === 'user_choice' ? 'user_choice' : 'auto',
       prompt: payload.p,
       expiresAt: Number(payload.e) * 1000,
     };
@@ -284,13 +321,18 @@ export function readPendingVideoApproval(messages, { identity, conversationId, n
 /**
  * Resolves what a video request would actually run, without calling a provider.
  * The caller compares `requiresApproval` before anything is generated.
+ *
+ * Image-to-video auto-selection prefers a budget-tier catalog model: the previous
+ * default was the published $2.50 model, so a generic "animate this image"
+ * request was answered by a premium model every time. The premium model stays
+ * available and stays gated whenever it is asked for by name.
  */
-export function planMavenVideoRoute({ kind = 't2v', prompt } = {}) {
+export function planMavenVideoRoute({ kind = 't2v', prompt, catalog = null } = {}) {
   const safePrompt = extractVideoPrompt(prompt);
   if (!safePrompt) throw videoApprovalError('video_prompt_required', 'Describe the video you want to create.', 400);
   const route = kind === 'i2v'
-    ? selectMavenImageToVideoRoute(safePrompt)
-    : selectMavenVideoRoute(safePrompt);
+    ? selectMavenImageToVideoRoute(safePrompt, { ...(catalog ? { catalog } : {}), isBudget: videoModelIsBudgetClass })
+    : selectMavenVideoRoute(safePrompt, catalog ? { catalog } : {});
   const tier = videoCostTier({ model: route.model, inputs: route.inputs });
   return {
     kind,
@@ -309,19 +351,86 @@ export function videoApprovalError(code, message, status) {
 /**
  * Re-derives the route from the approved prompt and requires it to match what
  * the customer saw before anything is sent to the provider.
+ *
+ * A model the customer explicitly chose is re-derived against a catalog holding
+ * only that model, and the model must still exist in the catalog of that
+ * modality - so a marker can never authorize an invented model or a model the
+ * router would not select for that prompt.
  */
 export function resolveApprovedVideoRoute(pending) {
-  const route = pending?.kind === 'i2v'
-    ? selectMavenImageToVideoRoute(pending.prompt)
-    : selectMavenVideoRoute(pending.prompt);
-  if (String(route.model.id) !== String(pending.modelId) || !sameSettings(route.inputs, pending.settings)) {
-    throw videoApprovalError(
-      'video_approval_stale',
-      'The video model or its settings changed since you confirmed, so nothing was generated. Please ask again.',
-      409,
-    );
+  const derive = (catalog) => (pending?.kind === 'i2v'
+    ? selectMavenImageToVideoRoute(pending.prompt, { ...(catalog ? { catalog } : {}), isBudget: videoModelIsBudgetClass })
+    : selectMavenVideoRoute(pending.prompt, catalog ? { catalog } : {}));
+  const matches = (route) => String(route.model.id) === String(pending.modelId)
+    && sameSettings(route.inputs, pending.settings);
+  const automatic = derive(null);
+  if (matches(automatic)) return automatic;
+  if (pending.selectionMode === 'user_choice') {
+    const chosen = videoCatalog(pending.kind).find((model) => String(model.id) === String(pending.modelId));
+    if (chosen) {
+      const route = derive([chosen]);
+      if (matches(route)) return { ...route, mode: 'user_choice' };
+    }
   }
-  return route;
+  throw videoApprovalError(
+    'video_approval_stale',
+    'The video model or its settings changed since you confirmed, so nothing was generated. Please ask again.',
+    409,
+  );
+}
+
+/**
+ * The alternate model a customer named while an approval is pending. Returns
+ * null when the message does not name a different usable model of the same
+ * modality, so an ordinary reply is never mistaken for a model choice.
+ */
+export function planAlternateVideoRoute({ pending, message } = {}) {
+  if (!pending) return null;
+  const catalog = videoCatalog(pending.kind);
+  const named = pending.kind === 'i2v'
+    ? findImageToVideoModel(message, catalog)
+    : findModel(message, catalog);
+  if (!named || String(named.id) === String(pending.modelId)) return null;
+  if (pending.kind === 'i2v' && (named.family === 'effects' || /\b(effect|reference|start.?end|transition)\b/i.test(`${named.id} ${named.name}`))) return null;
+  const plan = planMavenVideoRoute({ kind: pending.kind, prompt: pending.prompt, catalog: [named] });
+  const route = { ...plan.route, mode: 'user_choice' };
+  return {
+    ...plan,
+    route,
+    // A customer-chosen model is always shown and confirmed before it runs,
+    // whether or not it is above the budget tier.
+    requiresApproval: true,
+    tier: videoCostTier({ model: named, inputs: route.inputs }),
+  };
+}
+
+/** Shortlist of usable models of the same modality, budget tier first. */
+export function videoModelAlternatives({ kind = 't2v', excludeModelId = null, limit = 4 } = {}) {
+  const usable = videoCatalog(kind).filter((model) => model.family !== 'effects'
+    && !/\b(reference|start.?end|transition)\b/i.test(`${model.id} ${model.name}`));
+  const ordered = [...usable.filter(videoModelIsBudgetClass), ...usable.filter((model) => !videoModelIsBudgetClass(model))];
+  const picks = [];
+  for (const model of ordered) {
+    if (String(model.id) === String(excludeModelId) || picks.some((pick) => pick.model.id === model.id)) continue;
+    picks.push({ model, priceNote: videoPriceNote(model) });
+    if (picks.length >= limit) break;
+  }
+  return picks;
+}
+
+/** The reply that lists the other models a customer may choose instead. */
+export function buildVideoAlternativesReply({ pending } = {}) {
+  const current = videoCatalog(pending?.kind).find((model) => String(model.id) === String(pending?.modelId)) || null;
+  const alternatives = videoModelAlternatives({ kind: pending?.kind, excludeModelId: pending?.modelId });
+  return [
+    `**Available ${pending?.kind === 'i2v' ? 'image-to-video' : 'text-to-video'} models**`,
+    '',
+    ...alternatives.map(({ model, priceNote }) => `- ${[model.provider_name || model.provider, model.name].filter(Boolean).join(' · ')} — ${priceNote}`),
+    '',
+    `Reply "use <model name>" to see one of these with its settings, or "confirm" to keep ${current?.name || 'the selected model'}, or "cancel" to stop.`,
+    '',
+    current ? `Currently selected: ${current.name}.` : '',
+  ].filter((line) => line !== '').join('\n');
 }
 
 export const mavenVideoApprovalInternals = {

@@ -43,7 +43,8 @@ async function planTurn(state, message, attachmentIds) {
 
 async function animate(state, message, attachmentIds) {
   const { plan, withAttachments } = await planTurn(state, message, attachmentIds);
-  if (!/maven-video-approval:/.test(plan.reply || '')) return { plan, confirm: null, callsBeforeConfirm: state.calls.i2v.length };
+  // A budget model generates on the request itself; a premium model is confirmed first.
+  if (!/maven-video-approval:/.test(plan.reply || '')) return { plan, confirm: null, generated: plan };
   const callsBeforeConfirm = state.calls.i2v.length;
   state.session.messages = [
     ...state.session.messages,
@@ -51,42 +52,42 @@ async function animate(state, message, attachmentIds) {
     { role: 'assistant', content: plan.reply },
   ];
   const confirm = await handleDesignAgentConversationPost(request({ conversationId: 'c1', message: 'confirm', ...withAttachments }), state.services);
-  return { plan, confirm, callsBeforeConfirm };
+  return { plan, confirm, generated: confirm, callsBeforeConfirm };
 }
 
 test('uploaded image ID is resolved from owned session assets for I2V', async () => {
   const sourceAsset = { attachmentId: 'asset_upload_1', kind: 'image', url: source };
   const state = deps({ attachments: [sourceAsset] });
-  const { plan, confirm, callsBeforeConfirm } = await animate(state, 'Animate this image into a video.', ['asset_upload_1']);
+  const { generated } = await animate(state, 'Animate this image into a video.', ['asset_upload_1']);
 
-  assert.equal(callsBeforeConfirm, 0, 'the plan turn must not call the provider');
-  assert.match(plan.reply, /Confirm this video generation/);
-  assert.equal(confirm.status, 200);
+  assert.equal(generated.status, 200);
+  assert.equal(state.calls.i2v.length, 1);
   assert.equal(state.calls.i2v[0].imageUrl, source);
   assert.equal(state.calls.t2v, 0);
-  assert.match(confirm.reply, /Play or download the generated video/);
-  assert.ok(confirm.reply.includes(video));
+  assert.match(generated.reply, /Play or download the generated video/);
+  assert.ok(generated.reply.includes(video));
+  // A generic animation is answered by the catalog's budget model, so no
+  // premium confirmation stands between the request and the result.
+  assert.doesNotMatch(generated.reply, /Confirm this video generation/);
 });
 
 test('previous generated image resolves only from trusted assistant asset metadata', async () => {
   const imageAsset = { attachmentId: 'asset_generated_1', kind: 'image', url: source };
   const previous = { role: 'assistant', content: `![photo](${source})`, attachments: [{ attachmentId: 'asset_generated_1', kind: 'image' }] };
   const state = deps({ attachments: [imageAsset], messages: [previous] });
-  const { plan, confirm } = await animate(state, 'Animate the previous image into a video.');
+  const { generated } = await animate(state, 'Animate the previous image into a video.');
 
-  assert.equal(confirm.status, 200);
+  assert.equal(generated.status, 200);
   assert.equal(state.calls.i2v[0].imageUrl, source);
   assert.equal(state.calls.t2v, 0);
-  // The plan names the model the customer is authorizing.
-  assert.match(plan.reply, /Veo3 Image To Video/);
 });
 
 test('uploaded attachment requests use the ID registered by the composer, never its browser URL', async () => {
   const sourceAsset = { attachmentId: 'asset_upload_2', kind: 'image', url: source };
   const state = deps({ attachments: [sourceAsset] });
-  const { confirm } = await animate(state, 'Animate this photo into a video.', ['asset_upload_2']);
+  const { generated } = await animate(state, 'Animate this photo into a video.', ['asset_upload_2']);
 
-  assert.equal(confirm.status, 200);
+  assert.equal(generated.status, 200);
   assert.equal(state.calls.i2v[0].imageUrl, source);
 });
 
@@ -116,7 +117,8 @@ test('foreign conversation assets cannot be used for an implicit prior-image req
 test('a confirmation whose source image is gone fails closed without a provider call', async () => {
   const sourceAsset = { attachmentId: 'asset_upload_3', kind: 'image', url: source };
   const state = deps({ attachments: [sourceAsset] });
-  const { plan } = await planTurn(state, 'Animate this image into a video.', ['asset_upload_3']);
+  // Naming the premium model keeps it available, and keeps it gated.
+  const { plan } = await planTurn(state, 'Animate this image into a video with Veo3 Image To Video.', ['asset_upload_3']);
   assert.match(plan.reply, /maven-video-approval:/);
   assert.equal(state.calls.i2v.length, 0, 'the plan turn must not call the provider');
 

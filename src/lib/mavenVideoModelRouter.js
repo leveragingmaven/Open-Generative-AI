@@ -9,7 +9,8 @@ function normalize(text) {
   return ` ${String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
 }
 
-function findModel(text, catalog) {
+/** The catalog model a message names, matched on catalog name or model id. */
+export function findModel(text, catalog) {
   const haystack = normalize(text);
   let match = null;
   for (const model of catalog) {

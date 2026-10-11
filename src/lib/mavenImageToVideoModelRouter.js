@@ -7,7 +7,7 @@ function i2vError(code, message) {
 
 function normalized(text) { return ` ${String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `; }
 
-function findModel(text, catalog) {
+export function findModel(text, catalog) {
   const query = normalized(text);
   let best = null;
   for (const model of catalog) {
@@ -60,8 +60,16 @@ function defaultOptions(model) {
   };
 }
 
-/** Selects a single-image-capable catalog route; excludes effects and multi-image references. */
-export function selectMavenImageToVideoRoute(message, { catalog = i2vModels } = {}) {
+/**
+ * Selects a single-image-capable catalog route; excludes effects and multi-image references.
+ *
+ * `isBudget` is an injected cost predicate. When it is supplied, auto-selection
+ * prefers the catalog's own budget-tier entries over premium ones, so a generic
+ * "animate this image" request is recommended the cheapest supported model
+ * instead of whatever happens to sit first in the catalog. An explicitly named
+ * model is unaffected: the user's pick is still honored exactly.
+ */
+export function selectMavenImageToVideoRoute(message, { catalog = i2vModels, isBudget = null } = {}) {
   const requested = parseVideoRequestOptions(message);
   const explicit = findModel(message, catalog);
   if (explicit && (explicit.family === 'effects' || /\b(effect|reference|start.?end|transition)\b/i.test(`${explicit.id} ${explicit.name}`))) {
@@ -69,7 +77,10 @@ export function selectMavenImageToVideoRoute(message, { catalog = i2vModels } = 
   }
   const options = { aspectRatio: requested.aspectRatio, duration: requested.duration, resolution: requested.resolution };
   const candidates = explicit ? [explicit] : catalog.filter((model) => model.family !== 'effects' && !/\b(reference|start.?end|transition)\b/i.test(`${model.id} ${model.name}`));
-  const model = candidates.find((candidate) => compatible(candidate, options));
+  const ordered = !explicit && typeof isBudget === 'function'
+    ? [...candidates.filter((candidate) => isBudget(candidate)), ...candidates.filter((candidate) => !isBudget(candidate))]
+    : candidates;
+  const model = ordered.find((candidate) => compatible(candidate, options));
   if (!model) {
     if (explicit) {
       const meta = optionsFor(explicit);
