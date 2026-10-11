@@ -240,6 +240,20 @@ test('generateI2V forwards declared controls and drops undeclared ones', async (
   assert.equal('seed' in undeclared.submissionBody, false);
 });
 
+test('generateI2V posts Grok Imagine to its own endpoint using the images_list image field', async () => {
+  const { submissionUrl, submissionBody } = await captureVideoSubmission(generateI2V, {
+    model: 'grok-imagine-image-to-video',
+    prompt: 'animate this frame',
+    image_url: 'https://test/frame.png',
+    duration: 6,
+  });
+
+  assert.equal(submissionUrl, 'https://api.muapi.ai/api/v1/grok-imagine-image-to-video');
+  assert.deepEqual(submissionBody.images_list, ['https://test/frame.png']);
+  assert.equal('image_url' in submissionBody, false);
+  assert.equal(submissionBody.duration, 6);
+});
+
 test('generateVideo skips optional controls left at their unset defaults', async () => {
   const { submissionBody } = await captureVideoSubmission(generateVideo, {
     model: 'seedance-2.5-text-to-video',

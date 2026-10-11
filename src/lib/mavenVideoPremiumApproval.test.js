@@ -272,7 +272,8 @@ test('a generic animation is recommended the budget image-to-video model and gen
   assert.equal(result.status, 200);
   assert.equal(state.captured.i2v.length, 1);
   assert.equal(state.captured.i2v[0].providerArgs.image_url, IMAGE_URL);
-  assert.notEqual(state.captured.i2v[0].providerArgs.model, 'veo3-image-to-video', 'the published $2.50 model is no longer the automatic default');
+  assert.equal(state.captured.i2v[0].providerArgs.model, 'grok-imagine-image-to-video', 'the verified budget default animates the image');
+  assert.equal(state.captured.persisted[0].media.modelName, 'Grok Imagine Image To Video');
   assert.equal(state.captured.persisted[0].media.costTier, 'budget');
   assert.equal(state.captured.persisted[0].media.approvalStatus, 'not_required');
   assert.doesNotMatch(result.reply, /Confirm this video generation/);

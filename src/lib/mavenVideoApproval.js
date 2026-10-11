@@ -170,9 +170,40 @@ export function videoCatalog(kind) {
   return kind === 'i2v' ? i2vModels : t2vModels;
 }
 
+/**
+ * The single routing configuration every video entry point must share: the cost
+ * predicate plus the verified budget defaults. Planning and execution both derive
+ * their route from this, so they can never disagree about which model runs.
+ */
+export function videoRoutingOptions(kind = 't2v') {
+  return { isBudget: videoModelIsBudgetClass, preferred: verifiedBudgetVideoDefaults(kind) };
+}
+
 /** Cost predicate handed to the routers so auto-selection can prefer budget models. */
 export function videoModelIsBudgetClass(model) {
   return videoCostTier({ model, inputs: {} }) === VIDEO_COST_TIER.BUDGET;
+}
+
+// The budget models auto-selection should reach for first. Nothing here is
+// invented: each id must exist in the catalog of that modality, be budget-tier
+// by the same rule that gates premium models, and - for image-to-video - use an
+// image field the provider adapter already builds (`image_url` or `images_list`).
+// A candidate that fails any check is simply not preferred, and the routers fall
+// back to their own budget-first catalog order.
+const PREFERRED_BUDGET_DEFAULTS = Object.freeze({
+  t2v: ['seedance-lite-t2v'],
+  i2v: ['grok-imagine-image-to-video'],
+});
+const PROVIDER_IMAGE_FIELDS = new Set(['image_url', 'images_list']);
+
+/** Preferred default model ids for a modality that pass every verification above. */
+export function verifiedBudgetVideoDefaults(kind = 't2v') {
+  return (PREFERRED_BUDGET_DEFAULTS[kind] || []).filter((id) => {
+    const model = videoCatalog(kind).find((entry) => String(entry.id) === id);
+    if (!model || !videoModelIsBudgetClass(model)) return false;
+    if (kind === 'i2v' && model.imageField && !PROVIDER_IMAGE_FIELDS.has(model.imageField)) return false;
+    return true;
+  });
 }
 
 /** Provider · model · settings · audio, plus the honest price statement. */
@@ -245,11 +276,17 @@ export function buildVideoApprovalReply({ identity, conversationId, kind, prompt
     : route?.mode === 'explicit'
       ? 'You asked for this model, and it is priced above the budget tier.'
       : 'This was selected automatically from your request, and it is priced above the budget tier.';
+  // An automatic premium selection is never allowed to look like a quiet default:
+  // say plainly that the verified budget models cannot serve this request.
+  const noBudgetAlternative = route?.mode === 'auto'
+    ? 'No verified budget-tier model supports these settings, so this is shown as a choice rather than a default.'
+    : null;
   const reply = [
     '**Confirm this video generation**',
     '',
     `${provider} · ${model}${settings ? ` · ${settings}` : ''}`,
     why,
+    ...(noBudgetAlternative ? [noBudgetAlternative] : []),
     videoPriceNote(route?.model),
     '',
     'Reply "confirm" to generate exactly this, "use <model name>" to generate with a different model instead, or "cancel" to stop. Nothing is generated until you confirm.',
@@ -330,9 +367,10 @@ export function readPendingVideoApproval(messages, { identity, conversationId, n
 export function planMavenVideoRoute({ kind = 't2v', prompt, catalog = null } = {}) {
   const safePrompt = extractVideoPrompt(prompt);
   if (!safePrompt) throw videoApprovalError('video_prompt_required', 'Describe the video you want to create.', 400);
+  const routing = videoRoutingOptions(kind);
   const route = kind === 'i2v'
-    ? selectMavenImageToVideoRoute(safePrompt, { ...(catalog ? { catalog } : {}), isBudget: videoModelIsBudgetClass })
-    : selectMavenVideoRoute(safePrompt, catalog ? { catalog } : {});
+    ? selectMavenImageToVideoRoute(safePrompt, { ...(catalog ? { catalog } : {}), ...routing })
+    : selectMavenVideoRoute(safePrompt, catalog ? { catalog, ...routing } : routing);
   const tier = videoCostTier({ model: route.model, inputs: route.inputs });
   return {
     kind,
@@ -359,8 +397,8 @@ export function videoApprovalError(code, message, status) {
  */
 export function resolveApprovedVideoRoute(pending) {
   const derive = (catalog) => (pending?.kind === 'i2v'
-    ? selectMavenImageToVideoRoute(pending.prompt, { ...(catalog ? { catalog } : {}), isBudget: videoModelIsBudgetClass })
-    : selectMavenVideoRoute(pending.prompt, catalog ? { catalog } : {}));
+    ? selectMavenImageToVideoRoute(pending.prompt, { ...(catalog ? { catalog } : {}), ...videoRoutingOptions('i2v') })
+    : selectMavenVideoRoute(pending.prompt, catalog ? { catalog, ...videoRoutingOptions('t2v') } : videoRoutingOptions('t2v')));
   const matches = (route) => String(route.model.id) === String(pending.modelId)
     && sameSettings(route.inputs, pending.settings);
   const automatic = derive(null);

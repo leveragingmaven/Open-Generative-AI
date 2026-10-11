@@ -5,6 +5,7 @@ import { selectMavenVideoRoute, stripVideoRoutingFromPrompt } from './mavenVideo
 import {
   resolveApprovedVideoRoute,
   videoCostTier,
+  videoRoutingOptions,
   videoSelectionReason,
 } from './mavenVideoApproval.js';
 
@@ -44,7 +45,9 @@ export async function generateMavenVideo({
   if (!safePrompt) throw videoError('video_prompt_required', 'Describe the video you want to create.', 400);
   const route = approved
     ? resolveApprovedVideoRoute({ ...approved, kind: approved.kind || 't2v', prompt: safePrompt })
-    : selectMavenVideoRoute(safePrompt);
+    // Same routing configuration as the approval plan: budget-first for ordinary
+    // requests, so a premium model is never the quiet default.
+    : selectMavenVideoRoute(safePrompt, videoRoutingOptions('t2v'));
   const tier = videoCostTier({ model: route.model, inputs: route.inputs });
 
   let apiKey;

@@ -63,13 +63,14 @@ function defaultOptions(model) {
 /**
  * Selects a single-image-capable catalog route; excludes effects and multi-image references.
  *
- * `isBudget` is an injected cost predicate. When it is supplied, auto-selection
- * prefers the catalog's own budget-tier entries over premium ones, so a generic
- * "animate this image" request is recommended the cheapest supported model
- * instead of whatever happens to sit first in the catalog. An explicitly named
- * model is unaffected: the user's pick is still honored exactly.
+ * `isBudget` is an injected cost predicate and `preferred` an ordered list of
+ * catalog ids to try first. When they are supplied, auto-selection prefers the
+ * verified budget-tier entries - and among them the preferred ones - over
+ * premium ones, so a generic "animate this image" request is never quietly
+ * answered by a premium model such as Veo. An explicitly named model is
+ * unaffected: the user's pick is still honored exactly.
  */
-export function selectMavenImageToVideoRoute(message, { catalog = i2vModels, isBudget = null } = {}) {
+export function selectMavenImageToVideoRoute(message, { catalog = i2vModels, isBudget = null, preferred = [] } = {}) {
   const requested = parseVideoRequestOptions(message);
   const explicit = findModel(message, catalog);
   if (explicit && (explicit.family === 'effects' || /\b(effect|reference|start.?end|transition)\b/i.test(`${explicit.id} ${explicit.name}`))) {
@@ -77,9 +78,15 @@ export function selectMavenImageToVideoRoute(message, { catalog = i2vModels, isB
   }
   const options = { aspectRatio: requested.aspectRatio, duration: requested.duration, resolution: requested.resolution };
   const candidates = explicit ? [explicit] : catalog.filter((model) => model.family !== 'effects' && !/\b(reference|start.?end|transition)\b/i.test(`${model.id} ${model.name}`));
-  const ordered = !explicit && typeof isBudget === 'function'
-    ? [...candidates.filter((candidate) => isBudget(candidate)), ...candidates.filter((candidate) => !isBudget(candidate))]
-    : candidates;
+  const isPreferred = (candidate) => preferred.includes(candidate.id);
+  const budget = typeof isBudget === 'function' ? candidates.filter((candidate) => isBudget(candidate)) : [];
+  const ordered = explicit || !budget.length
+    ? candidates
+    : [
+      ...budget.filter(isPreferred),
+      ...budget.filter((candidate) => !isPreferred(candidate)),
+      ...candidates.filter((candidate) => !isBudget(candidate)),
+    ];
   const model = ordered.find((candidate) => compatible(candidate, options));
   if (!model) {
     if (explicit) {

@@ -91,8 +91,17 @@ function isTextToVideoModel(model) {
   return !/\b(extend|extension|image.?to.?video|i2v)\b/.test(text);
 }
 
-/** Resolve by exact catalog name/model ID or auto-select compatible T2V catalog entry. */
-export function selectMavenVideoRoute(message, { catalog = t2vModels } = {}) {
+/**
+ * Resolve by exact catalog name/model ID or auto-select a compatible T2V catalog entry.
+ *
+ * `isBudget` is an injected cost predicate and `preferred` an ordered list of
+ * catalog ids to try first. For an ordinary request (no quality signal) the
+ * auto-selection then prefers the verified budget-tier entries - and among them
+ * the preferred ones - so no premium model, Veo included, can become the quiet
+ * default. A request that asks for higher fidelity keeps the existing
+ * capability-based ranking, and an explicitly named model is always honored.
+ */
+export function selectMavenVideoRoute(message, { catalog = t2vModels, isBudget = null, preferred = [] } = {}) {
   const options = parseVideoRequestOptions(message);
   const model = findModel(message, catalog);
   if (model && !isTextToVideoModel(model)) {
@@ -106,18 +115,30 @@ export function selectMavenVideoRoute(message, { catalog = t2vModels } = {}) {
     return true;
   };
   const optionSafe = candidates.filter(supportsOptions);
+  // Budget-first ordering for ordinary requests only: a quality signal keeps the
+  // existing capability ranking (which may legitimately choose a premium model,
+  // always behind the confirmation gate).
+  const isPreferred = (candidate) => preferred.includes(candidate.id);
+  const budget = typeof isBudget === 'function' ? optionSafe.filter((candidate) => isBudget(candidate)) : [];
+  const rankedOptions = options.highQuality || !budget.length
+    ? optionSafe
+    : [
+      ...budget.filter(isPreferred),
+      ...budget.filter((candidate) => !isPreferred(candidate)),
+      ...optionSafe.filter((candidate) => !isBudget(candidate)),
+    ];
   // Auto-selection used to take the first compatible catalog entry, which is a lightweight
   // 480p tier model even for "cinematic"/"high quality" requests. When the user asks for
   // higher fidelity and did not pin a resolution, prefer the compatible model that declares
   // the highest resolution. This is capability-based selection only - no quality claims.
   const compatible = (options.highQuality && !options.resolution && optionSafe.length)
-    ? optionSafe.reduce((best, candidate) => (
+    ? rankedOptions.reduce((best, candidate) => (
       resolutionRank(candidate) > resolutionRank(best)
-      || (resolutionRank(candidate) === resolutionRank(best) && candidate !== best && optionSafe.indexOf(candidate) < optionSafe.indexOf(best))
+      || (resolutionRank(candidate) === resolutionRank(best) && candidate !== best && rankedOptions.indexOf(candidate) < rankedOptions.indexOf(best))
         ? candidate
         : best
-    ), optionSafe[0])
-    : optionSafe[0];
+    ), rankedOptions[0])
+    : rankedOptions[0];
   if (!compatible) {
     if (model) {
       if (options.aspectRatio && !aspectRatios(model).includes(options.aspectRatio)) {
