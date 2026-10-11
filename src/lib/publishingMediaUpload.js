@@ -28,15 +28,27 @@ export async function handlePublishingMediaUpload(request, {
     return failure('unsupported_media_type', 'Choose a supported image or video file.', 415);
   }
 
+  // Media storage is MuAPI's file host, so an upload needs a MuAPI credential. The creator can only fix
+  // their own key, and only where it is managed, so the customer response names that place instead of a
+  // dead end. An agency deployment missing its server-owned key is an operator problem, and telling a
+  // creator to add a key in Settings there would be wrong.
+  const credentialFailure = () => failure(
+    'upload_credential_unavailable',
+    agencyMode
+      ? 'Media upload is unavailable for this deployment.'
+      : 'Connect your MuAPI API key in Settings to upload media.',
+    503,
+  );
+
   let credential;
   try {
     credential = agencyMode ? serverKey : await credentialResolver({
       accountId: identity.accountId, creatorIdentityKey: identity.identityKey, providerId: 'muapi',
     });
   } catch {
-    return failure('upload_credential_unavailable', 'Media upload is unavailable for this account.', 503);
+    return credentialFailure();
   }
-  if (!credential) return failure('upload_credential_unavailable', 'Media upload is unavailable for this account.', 503);
+  if (!credential) return credentialFailure();
 
   const uploadBody = new FormData();
   uploadBody.append('file', file, file.name);
