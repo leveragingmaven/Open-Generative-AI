@@ -797,7 +797,7 @@ export default function LipSyncStudio({
         </header>
 
         {history.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full pt-4 shrink-0 animate-fade-in-up">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 w-full pt-3 shrink-0 animate-fade-in-up">
             {history.map((entry, idx) => (
               <div
                 key={entry.id || idx}

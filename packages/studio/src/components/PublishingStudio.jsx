@@ -141,6 +141,40 @@ function SlotSuggestions({ slots, onPick, labelPrefix, note }) {
 }
 
 /**
+ * The short weekday name for a local calendar date key (`YYYY-MM-DD`).
+ *
+ * The weekday is read from the calendar date itself, anchored at midday UTC, so the label can never slip onto
+ * the neighbouring day for a viewer in another timezone. Display only: no schedule is derived from it.
+ */
+const WEEKDAY_SHORT_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function weeklyDayLabel(date) {
+  const [year, month, day] = String(date || "").split("-").map(Number);
+  if (![year, month, day].every(Number.isInteger)) return "";
+  return WEEKDAY_SHORT_LABELS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()] || "";
+}
+
+/**
+ * One day of the week: its weekday label and how many posts it holds.
+ *
+ * A day with scheduled posts is a solid gold chip carrying its count, so a scheduled day is never mistaken for
+ * an empty one; an empty day is a muted dashed chip reading 0.
+ */
+function WeeklyDayCell({ day }) {
+  const label = weeklyDayLabel(day.date);
+  const filled = day.count > 0;
+  const posts = day.count === 1 ? "post" : "posts";
+  return <span
+    title={`${label} ${day.date} · ${filled ? `${day.count} ${posts} scheduled` : "free"}`}
+    aria-label={`${label} ${day.date}: ${filled ? `${day.count} ${posts} scheduled` : "free"}`}
+    className={`inline-flex min-w-[34px] flex-col items-center justify-center gap-0.5 rounded-[var(--ms-radius-button)] px-1.5 py-1 text-center ${filled ? "bg-[var(--ms-color-gold-primary)] text-black" : "border border-dashed border-[var(--ms-color-border-subtle)] text-[var(--ms-color-text-muted)]"}`}
+  >
+    <span className={`text-[8px] font-bold uppercase tracking-[0.08em] ${filled ? "text-black/70" : ""}`}>{label}</span>
+    <span className="text-[10px] font-bold leading-none">{day.count}</span>
+  </span>;
+}
+
+/**
  * The weekly plan, shown in the composer whether or not a post is open yet.
  *
  * It is read-only planning information derived from the drafts this browser has loaded: how many posts the
@@ -154,8 +188,8 @@ function WeeklyPlanPanel({ summary, nextFreeSlot, scheduledNote = null, onUseNex
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">This week</p>
         <p className="mt-1 text-xs font-semibold">{summary.scheduledCount} {summary.scheduledCount === 1 ? "post" : "posts"} scheduled in the next 7 days</p>
       </div>
-      <div className="flex items-center gap-1" aria-label="Scheduled posts per day for the next seven days">
-        {summary.perDay.map((day) => <span key={day.date} title={`${day.date} · ${day.count} scheduled`} className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[9px] font-semibold ${day.count ? "bg-[var(--ms-color-gold-primary)] text-black" : "border border-[var(--ms-color-border-subtle)] text-[var(--ms-color-text-muted)]"}`}>{day.count || "·"}</span>)}
+      <div className="flex flex-wrap items-center gap-1" aria-label="Scheduled posts per day for the next seven days">
+        {summary.perDay.map((day) => <WeeklyDayCell key={day.date} day={day} />)}
       </div>
     </div>
     {scheduledNote

@@ -308,6 +308,13 @@ test('the weekly plan is wired into the composer without scheduling anything by 
   assert.match(source, /\) : <div className="space-y-5"><WeeklyPlanPanel summary=\{composerWeekSummary\} nextFreeSlot=\{nextFreeSlot\} \/><EmptyState title="Start a new post"/);
   assert.match(source, /Duplicate for Next Slot/);
   assert.match(source, /scheduled in the next 7 days/);
+  // Every day chip carries a weekday label and its count, so a day holding a post is distinguishable from an
+  // empty day at a glance, and the row wraps instead of clipping on a narrow screen.
+  assert.match(source, /const WEEKDAY_SHORT_LABELS = \["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"\];/);
+  assert.match(source, /function weeklyDayLabel\(date\) \{/);
+  assert.match(source, /function WeeklyDayCell\(\{ day \}\) \{/);
+  assert.match(source, /<div className="flex flex-wrap items-center gap-1" aria-label="Scheduled posts per day for the next seven days">/);
+  assert.match(source, /\{summary\.perDay\.map\(\(day\) => <WeeklyDayCell key=\{day\.date\} day=\{day\} \/>\)\}/);
   assert.match(source, /onPick=\{applySlot\}/);
   // Suggestions are derived from loaded schedules only, and are never presented as guaranteed availability.
   assert.match(source, /Based on the schedules this browser has loaded\. Posts created on another device appear after the Calendar refreshes\./);
