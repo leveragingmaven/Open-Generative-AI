@@ -387,6 +387,42 @@ export default function LipSyncStudio({
   const { activeCampaign } = useActiveCampaign();
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
+  // ── History playback ────────────────────────────────────────────────────
+  // Which saved result is playing, and the elements behind it. Playback only
+  // ever starts from a deliberate press — the native controls, which a mouse,
+  // a keyboard, and a touchscreen can all operate — and starting one result
+  // pauses every other, so two results can never talk over each other. Nothing
+  // here rewrites a stored URL or touches an asset record.
+  const [playingHistoryKey, setPlayingHistoryKey] = useState(null);
+  const historyVideoRefs = useRef(new Map());
+
+  const registerHistoryVideo = useCallback((key) => (element) => {
+    if (element) historyVideoRefs.current.set(key, element);
+    else historyVideoRefs.current.delete(key);
+  }, []);
+
+  const stopHistoryPlayback = useCallback(() => setPlayingHistoryKey(null), []);
+
+  // One result at a time: whenever the playing result changes, every other
+  // result is paused. Clearing the key pauses all of them, which is what the
+  // fullscreen dialog relies on so only one copy of the audio ever runs.
+  useEffect(() => {
+    for (const [key, element] of historyVideoRefs.current.entries()) {
+      if (key !== playingHistoryKey && element && !element.paused) element.pause();
+    }
+  }, [playingHistoryKey]);
+
+  // The fullscreen dialog is dismissible with Escape, not only by pointing at
+  // its close button.
+  useEffect(() => {
+    if (!fullscreenUrl) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setFullscreenUrl(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreenUrl]);
+
   // ── Dropdown state ──────────────────────────────────────────────────────
   const [openDropdown, setOpenDropdown] = useState(null); // 'model' | 'resolution' | null
   const modelBtnRef = useRef(null);
@@ -798,33 +834,44 @@ export default function LipSyncStudio({
 
         {history.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 w-full pt-3 shrink-0 animate-fade-in-up">
-            {history.map((entry, idx) => (
+            {history.map((entry, idx) => {
+              const historyKey = entry.id || idx;
+              const isPlaying = playingHistoryKey === historyKey;
+              return (
               <div
-                key={entry.id || idx}
-                className="relative group rounded-2xl overflow-hidden border border-white/10 bg-[#0a0a0a] shadow-xl hover:border-primary/50 transition-all duration-300 flex flex-col"
+                key={historyKey}
+                className={`relative group rounded-2xl overflow-hidden border bg-[#0a0a0a] shadow-xl transition-all duration-300 flex flex-col ${isPlaying ? "border-primary/50" : "border-white/10 hover:border-primary/50"}`}
               >
+                {/* Native controls, deliberately started. `preload="metadata"`
+                    paints a poster frame so the result is recognizable before
+                    it plays, and the controls give a mouse, a keyboard, and a
+                    touchscreen the same play/pause, seek, and fullscreen. */}
                 <video
+                  ref={registerHistoryVideo(historyKey)}
                   src={entry.url}
-                  className="w-full aspect-video object-cover bg-black/40 cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setFullscreenUrl(entry.url)}
-                  controls={false}
+                  className="w-full aspect-video object-cover bg-black/40"
+                  controls
                   loop
-                  muted
                   playsInline
-                  onMouseOver={(e) => e.target.play()}
-                  onMouseOut={(e) => {
-                    e.target.pause();
-                    e.target.currentTime = 0;
-                  }}
+                  preload="metadata"
+                  aria-label={`${isPlaying ? "Playing" : "Play"} lip sync result ${idx + 1}${entry.prompt ? `: ${entry.prompt}` : ""}`}
+                  onPlay={() => setPlayingHistoryKey(historyKey)}
+                  onPause={() => setPlayingHistoryKey((current) => (current === historyKey ? null : current))}
                 />
                 
                 {/* Overlay actions */}
-                <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Visible on touch, where there is no hover to reveal them, and
+                    revealed by hover or keyboard focus on a pointer device. */}
+                <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                   <button
                     type="button"
                     title="Fullscreen"
+                    aria-label={`Open lip sync result ${idx + 1} fullscreen`}
                     onClick={(e) => {
                       e.stopPropagation();
+                      // The dialog plays the video itself, so the card stops here
+                      // instead of leaving two copies of the same audio running.
+                      stopHistoryPlayback();
                       setFullscreenUrl(entry.url);
                     }}
                     className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
@@ -839,6 +886,7 @@ export default function LipSyncStudio({
                   <button
                     type="button"
                     title="Download"
+                    aria-label={`Download lip sync result ${idx + 1}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       downloadFile(entry.url, `lipsync-${entry.id || idx}.mp4`);
@@ -852,6 +900,7 @@ export default function LipSyncStudio({
                   <button
                     type="button"
                     title="Delete"
+                    aria-label={`Delete lip sync result ${idx + 1} from history`}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (confirm("Are you sure you want to delete this generated item?")) {
@@ -904,7 +953,8 @@ export default function LipSyncStudio({
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="shrink-0 rounded-xl border border-dashed border-white/[0.08] px-4 py-6 text-center text-xs text-white/35">
@@ -1226,6 +1276,7 @@ export default function LipSyncStudio({
         >
           <button
             type="button"
+            aria-label="Close fullscreen video"
             className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10"
             onClick={(e) => {
               e.stopPropagation();
