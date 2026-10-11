@@ -39,6 +39,15 @@ test("Mobile shell chrome keeps the workspace name readable and tracks the dynam
   assert.match(shellSource, /text-sm sm:text-base font-semibold tracking-tight truncate/, "the workspace name scales down on phone widths");
 });
 
+test("The mobile back control is icon-only and keeps its accessible name", () => {
+  // At 360px the "Dashboard" label left the workspace name ~75px, which truncated it. The label is
+  // now desktop-only, so the control must keep an accessible name for the icon-only phone case.
+  assert.doesNotMatch(shellSource, /sm:hidden">Dashboard</, "the mobile-only back label must stay removed so the workspace name is not truncated");
+  assert.match(shellSource, /aria-label="Back to Dashboard"/, "the icon-only back control keeps its accessible name");
+  assert.match(shellSource, /hidden sm:inline">Back to Dashboard</, "the desktop label is preserved");
+  assert.match(shellSource, /justify-center gap-1\.5 rounded-md border border-white\/10 bg-\[#1B1B1B\] px-3 py-2 text-\[11px\][^"]*sm:justify-start sm:px-2\.5 sm:py-1\.5/, "the phone tap target is padded without changing desktop padding");
+});
+
 test("Dedicated workflow routes are not classified as Studio home", () => {
   assert.match(shellSource, /const isStudioHome = slug\.length === 0 && !idFromParams;/);
   const workflowPage = shellSource.match(/if \(isStudioHome\) \{[\s\S]*?case 'workflows':[\s\S]*?break;/)?.[0];

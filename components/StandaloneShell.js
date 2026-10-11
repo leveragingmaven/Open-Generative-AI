@@ -916,14 +916,16 @@ const [characterTarget, setCharacterTarget] = useState(null);
                 <a
                   href="/studio"
                   aria-label="Back to Dashboard"
-                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-[#1B1B1B] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 transition-colors hover:border-[#D4A858]/40 hover:bg-[#232323] hover:text-white"
+                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-[#1B1B1B] px-3 py-2 text-[11px] font-semibold text-white/70 transition-colors hover:border-[#D4A858]/40 hover:bg-[#232323] hover:text-white sm:justify-start sm:px-2.5 sm:py-1.5"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M19 12H5" />
                     <path d="M12 19l-7-7 7-7" />
                   </svg>
+                  {/* Phone widths drop the back control to its icon: at 360px the label left the
+                      workspace name with only ~75px, truncating it. The arrow keeps its accessible
+                      name, and the identical label is still there from sm up. */}
                   <span className="hidden sm:inline">Back to Dashboard</span>
-                  <span className="sm:hidden">Dashboard</span>
                 </a>
               )}
 <div className="min-w-0 flex-1 border-l border-[#D4A858]/50 pl-2 sm:pl-3">
