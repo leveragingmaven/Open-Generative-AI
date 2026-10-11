@@ -37,15 +37,24 @@ test('Maven Chat records generated and edited images in the owner library', asyn
 });
 
 test('Maven Chat records text video, image-to-video, and audio with their source metadata', async () => {
+  // The image-to-video default model is above the budget tier, so the customer
+  // is asked to confirm it before it runs. The transcript is fed back in below.
+  const messages = [];
   const { saved, base } = services({
     generateMavenVideo: async () => ({ url: 'https://cdn.test/video.mp4', model: 'seedance' }),
     generateMavenImageToVideo: async () => ({ url: 'https://cdn.test/animated.mp4', model: 'seedance', operation: 'image_to_video' }),
     generateMavenAudio: async () => ({ url: 'https://cdn.test/speech.mp3', model: 'minimax', voiceId: 'voice-1' }),
+    conversationReader: { async read() { return { conversationId: 'owned-session', attachments: [image], messages }; } },
   });
   const video = await handleDesignAgentConversationPost(request('Create a video of a sunrise.'), base);
-  const animated = await handleDesignAgentConversationPost(request('Animate this image into a video.', ['asset_source']), base);
+  const animationPlan = await handleDesignAgentConversationPost(request('Animate this image into a video.', ['asset_source']), base);
+  messages.push(
+    { role: 'user', content: 'Animate this image into a video.' },
+    { role: 'assistant', content: animationPlan.reply },
+  );
+  const animated = await handleDesignAgentConversationPost(request('confirm', ['asset_source']), base);
   const audio = await handleDesignAgentConversationPost(request('Narrate this: Welcome to Maven.'), base);
-  assert.deepEqual([video.status, animated.status, audio.status], [200, 200, 200]);
+  assert.deepEqual([video.status, animationPlan.status, animated.status, audio.status], [200, 200, 200, 200]);
   assert.deepEqual(saved.map(({ args }) => args.kind), ['video', 'video', 'audio']);
   assert.equal(saved[1].args.sourceAssetId, 'asset_source');
   assert.equal(saved[2].args.media.voiceId, 'voice-1');

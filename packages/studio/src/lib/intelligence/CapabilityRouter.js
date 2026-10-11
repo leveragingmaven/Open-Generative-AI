@@ -16,8 +16,26 @@ export class CapabilityRouter {
     [...required, ...preferred].forEach((requirement) => {
       if (!this.capabilities.get(requirement.id)) throw new Error(`Unknown capability: ${requirement.id}`);
     });
-    const eligible = getEligibleDeployments(this.deployments.list(), required, options.policy);
-    const ranked = rankDeployments(eligible, { required, preferred }, options.preferences);
+    // An explicitly requested model is honored, never substituted. Filtering to
+    // the requested deployment before ranking means a user who picked a model
+    // gets that model; when it is not an eligible deployment the request fails
+    // loudly (`requested_model_unavailable`) instead of silently running - and
+    // billing - a different one. Callers that hold a legacy path can fall back
+    // to it explicitly with the user's own selection.
+    const requestedModel = options.requestedModel == null ? null : String(options.requestedModel).trim();
+    const all = this.deployments.list();
+    const matchesRequestedModel = (deployment) => Boolean(requestedModel)
+      && [deployment?.id, deployment?.metadata?.modelId, deployment?.metadata?.endpointId]
+        .some((value) => String(value || '') === requestedModel);
+    if (requestedModel && !all.some(matchesRequestedModel)) {
+      throw Object.assign(new Error(`Requested model is not an available deployment: ${requestedModel}`), { code: "requested_model_unavailable" });
+    }
+    const eligible = getEligibleDeployments(all, required, options.policy);
+    const candidates = requestedModel ? eligible.filter(matchesRequestedModel) : eligible;
+    if (requestedModel && !candidates.length) {
+      throw Object.assign(new Error(`Requested model is not eligible for this capability: ${requestedModel}`), { code: "requested_model_unavailable" });
+    }
+    const ranked = rankDeployments(candidates, { required, preferred }, options.preferences);
     if (options.inputs) {
       const missing = deployment => (deployment.metadata?.requiredInputs || []).filter(name => name !== 'prompt' && options.inputs[name] == null && deployment.metadata?.inputSchema?.[name]?.default === undefined).length;
       ranked.sort((a, b) => missing(a.deployment) - missing(b.deployment));

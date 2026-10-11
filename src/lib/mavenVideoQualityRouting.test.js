@@ -23,8 +23,12 @@ const CREDENTIAL = 'customer-muapi-key';
 /**
  * Runs the handler with the real generator. Records the credential lookup (the
  * providerId/operation routing authority) and the provider request.
+ *
+ * Video turns whose model sits above the budget tier are answered with a
+ * confirmation plan, so these tests pass the transcript that the plan turn
+ * produced via `messages` to drive the confirming turn.
  */
-async function runVideoTurn(message, { credentialResult = CREDENTIAL, credentialError = null } = {}) {
+async function runVideoTurn(message, { credentialResult = CREDENTIAL, credentialError = null, messages = [] } = {}) {
   const captured = { credential: null, provider: null, providerCalls: 0, textProvider: false };
   const result = await handleDesignAgentConversationPost(
     { async json() { return { conversationId: 'owned-session', message }; } },
@@ -32,7 +36,7 @@ async function runVideoTurn(message, { credentialResult = CREDENTIAL, credential
       controlledExecution: true,
       identity: IDENTITY,
       ownershipService: { async verifyOwnedSession() { return { ok: true }; } },
-      conversationReader: { async read({ conversationId }) { return { conversationId, messages: [], attachments: [] }; } },
+      conversationReader: { async read({ conversationId }) { return { conversationId, messages, attachments: [] }; } },
       generateMavenVideo: (identity, args) => generateMavenVideo({
         ...args,
         identity,
@@ -59,10 +63,23 @@ async function runVideoTurn(message, { credentialResult = CREDENTIAL, credential
   return { result, captured };
 }
 
-test('a high-quality video request reaches the provider with the resolution-bearing catalog model and the requested settings', async () => {
-  const { result, captured } = await runVideoTurn(
-    'Create a cinematic, high-quality 10-second 16:9 video of a product reveal on a marble counter.',
-  );
+test('a high-quality video request is confirmed first, then reaches the provider with the resolution-bearing catalog model', async () => {
+  const prompt = 'Create a cinematic, high-quality 10-second 16:9 video of a product reveal on a marble counter.';
+
+  // Turn 1: the premium selection is described and NOT executed.
+  const planned = await runVideoTurn(prompt);
+  assert.equal(planned.result.status, 200);
+  assert.equal(planned.captured.providerCalls, 0, 'no paid request may happen before approval');
+  assert.equal(planned.captured.credential, null, 'the credential is not even resolved before approval');
+  assert.match(planned.result.reply, /Google · Gemini Omni · 16:9 · 10s · 1080p/);
+
+  // Turn 2: the customer confirms, and the approved settings reach the provider.
+  const { result, captured } = await runVideoTurn('confirm', {
+    messages: [
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: planned.result.reply },
+    ],
+  });
 
   assert.equal(result.status, 200);
   // Routing authority stays server-side: the customer credential is resolved for
@@ -73,6 +90,7 @@ test('a high-quality video request reaches the provider with the resolution-bear
     providerId: 'muapi',
     operation: 'video_generation',
   });
+  assert.equal(captured.providerCalls, 1);
   assert.equal(captured.provider.apiKey, CREDENTIAL);
   assert.equal(captured.provider.args.model, 'gemini-omni-text-to-video');
   assert.equal(captured.provider.args.aspect_ratio, '16:9');

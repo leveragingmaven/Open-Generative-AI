@@ -14,8 +14,11 @@ export function mediaStudioRuntimeEnabled(studioId) {
   return enabled(`CREATIVE_OS_${String(studioId).toUpperCase()}_STUDIO`);
 }
 
-export function createMediaStudioRequest({ studioId, recipeId, operation, capability, prompt = "", inputs = {}, references = [], output = {}, apiKey } = {}) {
-  return { recipeId, studioId, intent: prompt, inputs: { ...inputs, apiKey }, references, output, metadata: { compatibility: `${studioId}-studio`, operation, capability } };
+// `model` is hoisted out of `inputs` so routing can honor the model the user
+// selected instead of treating it as just another opaque input. It stays in
+// `inputs` too, because recipes and the legacy provider path read it there.
+export function createMediaStudioRequest({ studioId, recipeId, operation, capability, prompt = "", inputs = {}, references = [], output = {}, apiKey, model = inputs.model } = {}) {
+  return { recipeId, studioId, model: model ? String(model) : null, intent: prompt, inputs: { ...inputs, apiKey }, references, output, metadata: { compatibility: `${studioId}-studio`, operation, capability } };
 }
 
 export async function executeMediaStudioRequest(request, { legacyExecute, runtimeFactory = createMediaStudioRuntime, runtimeOptions = {} } = {}) {

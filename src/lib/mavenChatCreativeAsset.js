@@ -65,7 +65,17 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
     metadata: {
       assetType: kind, modality: kind, studio: 'maven-chat', status: 'completed',
       operation: media.operation || (kind === 'image' ? 'image_generation' : `${kind}_generation`),
-      provider, model: media.model || null, modelName: media.modelName || null,
+      provider,
+      model: media.executedModel || media.model || null,
+      executedModel: media.executedModel || media.model || null,
+      modelName: media.modelName || null,
+      // Requested vs executed, plus why the model was chosen and whether the
+      // customer authorized it. A silent substitution becomes visible here.
+      requestedModel: media.requestedModel || null,
+      selectionMode: media.selectionMode || null,
+      overrideReason: media.overrideReason || null,
+      costTier: media.costTier || null,
+      approvalStatus: media.approvalStatus || null,
       sessionAssetId: sessionAssetId || null, sourceAssetId,
       campaignId,
       storageStatus: 'r2', retentionVerified: true,

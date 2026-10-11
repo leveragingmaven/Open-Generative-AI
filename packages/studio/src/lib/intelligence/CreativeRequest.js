@@ -11,6 +11,9 @@ export function createCreativeRequest(input = {}) {
     studioId: input.studioId || null,
     operation: input.operation || null,
     recipeId: input.recipeId || null,
+    // The model the user explicitly selected, when the surface has one. Routing
+    // honors it or fails loudly; it is never silently replaced.
+    model: input.model ? String(input.model) : null,
     intent: input.intent || "",
     capabilityRequirements: Array.isArray(input.capabilityRequirements)
       ? input.capabilityRequirements.map((requirement) => (

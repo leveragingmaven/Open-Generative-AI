@@ -15,7 +15,15 @@ import { notConfiguredTextIntelligenceError, serverOpenAICompatibleProvider } fr
 import { DesignAgentConversationIntelligenceService, trustedImageUrl } from './designAgentConversationIntelligence.js';
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
 import { generateMavenImage, generateMavenImageEdit, buildGeneratedImageReply } from './mavenImageGeneration.js';
-import { generateMavenVideo, buildGeneratedVideoReply } from './mavenVideoGeneration.js';
+import { generateMavenVideo, buildGeneratedVideoReply, describeVideoProvenance } from './mavenVideoGeneration.js';
+import {
+  buildVideoApprovalCancellationReply,
+  buildVideoApprovalReply,
+  isVideoApprovalCancellation,
+  isVideoApprovalConfirmation,
+  planMavenVideoRoute,
+  readPendingVideoApproval,
+} from './mavenVideoApproval.js';
 import { generateMavenImageToVideo } from './mavenImageToVideoGeneration.js';
 import { generateMavenAudio, buildGeneratedAudioReply } from './mavenAudioGeneration.js';
 import { generateMavenLipSync, buildGeneratedLipSyncReply } from './mavenLipSyncGeneration.js';
@@ -291,6 +299,9 @@ const SAFE_ERROR_CODES = new Set([
   'lipsync_input_required', 'lipsync_audio_required', 'lipsync_model_unavailable', 'lipsync_option_unsupported', 'lipsync_provider_credential_required', 'lipsync_generation_failed', 'lipsync_generation_unsupported',
   'video_generation_unsupported', 'video_prompt_required', 'video_model_unavailable', 'video_option_unsupported',
   'image_source_unavailable', 'video_model_unavailable', 'video_option_unsupported',
+  // A confirmed video plan that no longer matches the live catalog: the customer
+  // is told to ask again rather than being charged for a substituted model.
+  'video_approval_stale',
 ]);
 
 const PROVIDER_FAILURE_CODES = new Set([
@@ -620,6 +631,49 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       attachments: sessionReadResult?.attachments || [],
     };
 
+    // An unresolved premium-video approval outranks every other intent: the
+    // customer's next utterance decides whether the model they were shown may run.
+    // Confirmation re-derives the route and requires it to match exactly, so the
+    // provider is never called for a selection the customer did not see. Any other
+    // message is treated as a new request and gated again.
+    const pendingVideoApproval = readPendingVideoApproval(trustedSessionReadResult.messages, { identity, conversationId });
+    if (pendingVideoApproval && isVideoApprovalConfirmation(message)) {
+      let video;
+      let sourceAssetId = null;
+      if (pendingVideoApproval.kind === 'i2v') {
+        const sourceImage = trustedAttachments.find((item) => item.kind === 'image')
+          || resolveLastTrustedImageReference(sessionReadResult, conversationId);
+        if (!sourceImage) {
+          throw Object.assign(new Error('The image this confirmation refers to is no longer available as a trusted session asset. Please attach it again.'), { code: 'image_source_unavailable', status: 422 });
+        }
+        sourceAssetId = sourceImage.attachmentId;
+        const generateImageVideo = await getService('generateMavenImageToVideo');
+        video = await generateImageVideo(identity, { prompt: pendingVideoApproval.prompt, imageUrl: trustedImageUrl(sourceImage), approved: pendingVideoApproval, signal: request?.signal });
+      } else {
+        const generateVideo = await getService('generateMavenVideo');
+        video = await generateVideo(identity, { prompt: pendingVideoApproval.prompt, approved: pendingVideoApproval, signal: request?.signal });
+      }
+      const videoReferences = await registerGeneratedReference(getService, identity, conversationId, video, {
+        kind: 'video',
+        allowDefault: deps.registerMavenMediaReference !== undefined || deps.generateMavenVideo === undefined || deps.generateMavenImageToVideo === undefined || deps.persistMavenCreativeAsset !== undefined,
+        persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenVideo === undefined || deps.generateMavenImageToVideo === undefined,
+        sourceAssetId,
+      });
+      const reply = withLibraryWarning(buildGeneratedVideoReply({ ...video, provenance: describeVideoProvenance(video) }), videoReferences);
+      if (videoReferences.length) trustedSessionReadResultWithRefs.attachments.push({ ...videoReferences[0], url: video.url });
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: videoReferences });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, videoReferences) };
+    }
+    if (pendingVideoApproval && isVideoApprovalCancellation(message)) {
+      const reply = buildVideoApprovalCancellationReply();
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], []) };
+    }
+
     // Speech and lip-sync have priority over video and image intents to avoid accidental cross-modality execution.
     if (isLipSyncRequest(message)) {
       let character = trustedAttachments.find((item) => item.kind === 'image');
@@ -672,21 +726,41 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       throw error;
     }
     if (videoIntent && imageAttachment) {
+      // Image-to-video goes through the same cost gate as text-to-video: a model
+      // above the budget tier is described and confirmed before any paid call.
+      const imageVideoPlan = planMavenVideoRoute({ kind: 'i2v', prompt: message });
+      if (imageVideoPlan.requiresApproval) {
+        const { reply } = buildVideoApprovalReply({ ...imageVideoPlan, identity, conversationId });
+        if (wantsStream) {
+          return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+        }
+        return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], []) };
+      }
       const generateImageVideo = await getService('generateMavenImageToVideo');
       const sourceUrl = trustedImageUrl(imageAttachment);
-      const video = await generateImageVideo(identity, { prompt: message, imageUrl: sourceUrl, signal: request?.signal });
+      const video = await generateImageVideo(identity, { prompt: imageVideoPlan.prompt, imageUrl: sourceUrl, signal: request?.signal });
       const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, video, { kind: 'video', allowDefault: deps.registerMavenMediaReference !== undefined || deps.generateMavenImageToVideo === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImageToVideo === undefined, sourceAssetId: imageAttachment.attachmentId });
-      const reply = withLibraryWarning(buildGeneratedVideoReply(video), generatedReferences);
+      const reply = withLibraryWarning(buildGeneratedVideoReply({ ...video, provenance: describeVideoProvenance(video) }), generatedReferences);
       if (wantsStream) {
         return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences });
       }
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, generatedReferences) };
     }
     if (!trustedAttachments.some((item) => item.kind === 'image') && isVideoGenerationRequest(message)) {
+      // Text-to-video: budget selections generate directly, premium selections are
+      // described and confirmed first. No provider request happens before approval.
+      const videoPlan = planMavenVideoRoute({ kind: 't2v', prompt: message });
+      if (videoPlan.requiresApproval) {
+        const { reply } = buildVideoApprovalReply({ ...videoPlan, identity, conversationId });
+        if (wantsStream) {
+          return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: [], generatedReferences: [] });
+        }
+        return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], []) };
+      }
       const generateVideo = await getService('generateMavenVideo');
-      const video = await generateVideo(identity, { prompt: message, signal: request?.signal });
+      const video = await generateVideo(identity, { prompt: videoPlan.prompt, signal: request?.signal });
       const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, video, { kind: 'video', allowDefault: deps.registerMavenMediaReference !== undefined || deps.generateMavenVideo === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenVideo === undefined });
-      const reply = withLibraryWarning(buildGeneratedVideoReply(video), generatedReferences);
+      const reply = withLibraryWarning(buildGeneratedVideoReply({ ...video, provenance: describeVideoProvenance(video) }), generatedReferences);
       if (wantsStream) {
         return buildConversationStreamResponse({
           service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },

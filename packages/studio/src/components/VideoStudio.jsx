@@ -5,6 +5,7 @@ import { generateVideo, generateI2V, processV2V, uploadFile } from "../lib/provi
 import { downloadAsset } from "../lib/assets/assetManager.js";
 import { buildRecipe } from "../lib/intelligence/PromptBuilder.js";
 import { createMediaStudioRequest, executeMediaStudioRequest } from "../lib/intelligence/MediaStudioRuntime.js";
+import { videoGenerationSummary } from "../lib/videoGenerationSummary.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { withCampaignMetadata } from "../lib/campaigns/campaignAssetMetadata.js";
 import { enrichCreativeRequest, selectCreativeSkillsForStudio } from "../lib/creative-brief/index.js";
@@ -1734,7 +1735,24 @@ const composerPreviews = (
     </div>
   );
 
+  // Pre-generation summary: the exact provider, model and settings the next
+  // Generate will send. Read-only; the existing choosers stay the only way to
+  // change a model.
+  const allStudioModels = [...t2vModels, ...i2vModels, ...v2vModels];
+  const summaryModel = allStudioModels.find(m => m.id === selectedModel) || null;
+  const summaryDurations = imageMode ? getDurationsForI2VModel(selectedModel) : getDurationsForModel(selectedModel);
+  const summaryResolutions = imageMode ? getResolutionsForI2VModel(selectedModel) : getResolutionsForVideoModel(selectedModel);
+  const videoPreGenerationSummary = videoGenerationSummary({
+    model: summaryModel,
+    inputs: {
+      aspect_ratio: selectedAr,
+      ...(summaryDurations.length > 0 ? { duration: selectedDuration } : {}),
+      ...(summaryResolutions.length > 0 ? { resolution: selectedResolution } : {}),
+    },
+  });
+
   const composerGenerationControls = (
+    <>
     <div ref={dropdownRef} className="flex items-center flex-wrap gap-1 min-w-0">
               {/* Model btn */}
               <div className="relative min-w-0 shrink">
@@ -2063,6 +2081,13 @@ const composerPreviews = (
                 </button>
               )}
     </div>
+      <div
+        className="basis-full w-full min-w-0 truncate px-1 pt-1 text-[10px] leading-4 text-[#64748B]"
+        title={videoPreGenerationSummary}
+      >
+        {videoPreGenerationSummary}
+      </div>
+    </>
   );
 
   // ── render ────────────────────────────────────────────────────────────────

@@ -58,7 +58,12 @@ function defaultResolution(model) {
 const RESOLUTION_RANK = { '360p': 1, '480p': 2, '540p': 3, '580p': 4, '720p': 5, '768p': 6, '1080p': 7, '1440p': 8, '2160p': 9, '4k': 9 };
 
 function resolutionRank(model) {
-  return resolutions(model).reduce((max, value) => Math.max(max, RESOLUTION_RANK[value] || 0), 0);
+  return resolutions(model).reduce((max, value) => Math.max(max, videoResolutionRank(value)), 0);
+}
+
+/** Shared pixel-height ordering, exported so cost tiering uses one source of truth. */
+export function videoResolutionRank(value) {
+  return RESOLUTION_RANK[String(value || '').toLowerCase()] || 0;
 }
 
 /** Lowest declared resolution at or above the quality floor; falls back to the highest declared. */

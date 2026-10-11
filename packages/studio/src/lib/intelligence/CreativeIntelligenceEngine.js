@@ -46,6 +46,7 @@ export class CreativeIntelligenceEngine {
         policy: input.routingPolicy,
         preferences: request.preferences,
         inputs: request.inputs,
+        requestedModel: request.model,
       })
       : null;
     const warnings = [];
