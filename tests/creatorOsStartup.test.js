@@ -30,6 +30,15 @@ test("Studio home mounts the simple Dashboard and /studio/overview preserves the
   assert.match(shellSource, /isStudioHome \? "overflow-visible" : activeWorkspaceTab === 'publishing'/);
 });
 
+test("Mobile shell chrome keeps the workspace name readable and tracks the dynamic viewport", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(shellSource, /ms-app-viewport overflow-hidden/, "the full-height shell must track the dynamic viewport so mobile browser chrome and the keyboard cannot hide bottom controls");
+  assert.doesNotMatch(shellSource, /h-screen overflow-hidden/, "the fixed 100vh shell height must not be restored");
+  assert.match(css, /\.ms-app-viewport \{\s*height: 100vh;\s*height: 100dvh;\s*\}/, "the dynamic viewport utility keeps a vh fallback");
+  assert.match(shellSource, /hidden sm:block text-\[10px\] uppercase tracking-\[0\.2em\]/, "the header eyebrow is hidden on phone widths instead of wrapping inside the 56px header");
+  assert.match(shellSource, /text-sm sm:text-base font-semibold tracking-tight truncate/, "the workspace name scales down on phone widths");
+});
+
 test("Dedicated workflow routes are not classified as Studio home", () => {
   assert.match(shellSource, /const isStudioHome = slug\.length === 0 && !idFromParams;/);
   const workflowPage = shellSource.match(/if \(isStudioHome\) \{[\s\S]*?case 'workflows':[\s\S]*?break;/)?.[0];

@@ -898,7 +898,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   const creativeShell = (
     <div
-      className={`w-full bg-[#121212] text-white flex ${isStudioHome ? "min-h-screen overflow-x-clip" : "h-screen overflow-hidden"}`}
+      className={`w-full bg-[#121212] text-white flex ${isStudioHome ? "min-h-screen overflow-x-clip" : "ms-app-viewport overflow-hidden"}`}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -910,8 +910,8 @@ const [characterTarget, setCharacterTarget] = useState(null);
       <div className={`flex-1 min-w-0 flex flex-col ${isStudioHome ? "overflow-visible" : "min-h-0 overflow-hidden"}`}>
         {/* Informational workspace header */}
         {isHeaderVisible && (
-          <header className="sticky top-0 z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-4 px-4 md:px-5">
-            <div className="flex items-center gap-3 min-w-0">
+          <header className="sticky top-0 z-50 flex-shrink-0 h-14 border-b border-white/[0.06] bg-[#121212]/95 flex items-center justify-between gap-2 sm:gap-3 md:gap-5 px-3 sm:px-4 md:px-5">
+            <div className="flex flex-1 items-center gap-2 sm:gap-3 min-w-0">
               {!isStudioHome && (
                 <a
                   href="/studio"
@@ -926,9 +926,13 @@ const [characterTarget, setCharacterTarget] = useState(null);
                   <span className="sm:hidden">Dashboard</span>
                 </a>
               )}
-<div className="min-w-0 border-l border-[#D4A858]/50 pl-3">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
-                <p className="text-base font-semibold tracking-tight truncate mt-0.5">{isStudioHome ? 'Dashboard' : (isOverviewWorkspace ? 'Workspace overview' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard'))))))}</p>
+<div className="min-w-0 flex-1 border-l border-[#D4A858]/50 pl-2 sm:pl-3">
+                {/* The uppercase eyebrow is the first thing to go on a phone: at 375px it wraps to two
+                    lines inside the fixed 56px header and squeezes the workspace name down to a
+                    three-character truncation. The name below it and the Workspaces button carry the
+                    same context, so hiding the label keeps the header readable without losing meaning. */}
+                <p className="hidden sm:block text-[10px] uppercase tracking-[0.2em] text-[#D4A858]/70 leading-none">Current workspace</p>
+                <p className="text-sm sm:text-base font-semibold tracking-tight truncate sm:mt-0.5">{isStudioHome ? 'Dashboard' : (isOverviewWorkspace ? 'Workspace overview' : (isCreateWorkspace ? 'Create' : (isIntelligenceWorkspace ? 'Intelligence' : (isComingSoonRoute ? comingSoonName : (tabById(activeWorkspaceTab)?.label || (activeWorkspaceTab === 'mcp-cli' ? 'System' : 'Dashboard'))))))}</p>
                 <CampaignHeaderLabel />
               </div>
             </div>

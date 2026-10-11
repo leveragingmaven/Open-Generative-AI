@@ -87,6 +87,17 @@ body {
   outline-offset: 3px;
 }
 
+/* Full-height Creator OS shell.
+   `100vh` is the *largest* viewport height: it does not shrink when a phone's
+   browser chrome or on-screen keyboard is showing, so bottom-anchored controls
+   (chat composer, sticky footers, studio action bars) end up behind the
+   keyboard. `100dvh` tracks the visible viewport, and the `100vh` line above it
+   stays as the fallback for engines that do not support dynamic units. */
+.ms-app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
