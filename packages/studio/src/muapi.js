@@ -51,6 +51,30 @@ function notifyAuthRequired(status, detail) {
     window.dispatchEvent(new CustomEvent('muapi:auth-required', { detail: { status, message: detail } }));
 }
 
+const PROVIDER_DISPLAY_NAMES = Object.freeze({
+    muapi: 'MuAPI',
+    fal: 'fal.ai',
+    kie: 'Kie.ai',
+    openrouter: 'OpenRouter',
+});
+
+// Creator OS resolves a customer's own provider credential server-side, so a
+// studio whose default provider has no credential for this account answers with
+// a sanitized `provider_credential_*:<provider>` code instead of a provider
+// error. A customer who configured a different provider must be told which
+// credential is needed and where to add it, rather than shown a bare status
+// line. Provider names and the Settings destination only: never the credential.
+function providerCredentialMessage(bodyText) {
+    if (typeof bodyText !== 'string' || bodyText === '') return '';
+    let body = null;
+    try { body = JSON.parse(bodyText); } catch { /* not a JSON provider error */ }
+    const code = typeof body?.code === 'string' ? body.code : '';
+    const match = /^provider_credential_(?:required|unavailable):([a-z0-9_-]{1,40})$/.exec(code);
+    if (!match) return '';
+    const label = PROVIDER_DISPLAY_NAMES[match[1]] || match[1];
+    return `Add your ${label} API key in Settings to continue.`;
+}
+
 const TERMINAL_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled']);
 const SUCCESS_STATUSES = new Set(['completed', 'succeeded', 'success']);
 
@@ -164,7 +188,7 @@ async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 
     if (!response.ok) {
         const errText = await response.text();
         notifyAuthRequired(response.status, errText);
-        throw new Error(`API Request Failed: ${response.status} ${response.statusText} - ${errText.slice(0, 100)}`);
+        throw new Error(providerCredentialMessage(errText) || `API Request Failed: ${response.status} ${response.statusText} - ${errText.slice(0, 100)}`);
     }
     const submitData = await response.json();
     const requestId = submitData.request_id || submitData.id;
@@ -415,12 +439,12 @@ export function uploadFile(apiKey, file, onProgress) {
                 let detail = xhr.statusText;
                 try {
                     const errObj = JSON.parse(xhr.responseText);
-                    detail = errObj.detail || detail;
+                    detail = errObj.error || errObj.detail || detail;
                 } catch (e) {
                     // fallback to statusText
                 }
                 notifyAuthRequired(xhr.status, detail);
-                reject(new Error(`File upload failed: ${xhr.status} - ${detail}`));
+                reject(new Error(providerCredentialMessage(xhr.responseText) || `File upload failed: ${xhr.status} - ${detail}`));
             }
         };
 

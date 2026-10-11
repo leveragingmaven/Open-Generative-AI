@@ -23,3 +23,18 @@ test('fal generation endpoint rejects browser credential and identity overrides'
   assert.equal(body.error, 'Invalid request.');
   assert.doesNotMatch(JSON.stringify(body), /browser-secret/);
 });
+
+// A fal.ai customer who has not stored a fal key needs the fixable instruction,
+// not a generic unavailability line: the studio gate admits any launch-available
+// provider, so selecting a fal model without a fal credential is reachable.
+test('fal generation endpoint names the fal.ai key and Settings when the credential is missing', async () => {
+  const result = await handleFalGenerationPost(request({ operation: 'image_generation', inputs: { model: 'fal-ai/flux/schnell', prompt: 'x' } }), {
+    identity: { accountId: 'account-1', identityKey: 'creator-1' },
+    credentialResolver: async () => { throw Object.assign(new Error('missing'), { code: 'provider_credential_required:fal' }); },
+    provider: { execute: async () => { assert.fail('the provider must not run without a credential'); } },
+  });
+  assert.equal(result.status, 400);
+  const body = await result.json();
+  assert.equal(body.error, 'Connect your fal.ai API key in Settings to generate images.');
+  assert.equal(body.code, 'provider_credential_required:fal');
+});

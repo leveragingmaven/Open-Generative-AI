@@ -17,7 +17,9 @@ export async function handleFalGenerationPost(request, { identity, provider = fa
     return Response.json({ ok: true, provider: 'fal', requestId: result.providerResponseRef || null, outputReferences: result.outputReferences || [], providerMetadata: result.providerMetadata || {} });
   } catch (error) {
     const code = String(error?.code || 'provider_execution_failed');
-    const message = code.startsWith('provider_credential') ? 'Provider credential is unavailable.' : code === 'provider_execution_timeout' ? 'Provider execution timed out.' : 'Provider execution failed.';
+    // A missing or rejected fal.ai credential is fixable only in Settings, so say
+    // so (matching the Maven Chat copy) instead of a generic unavailability line.
+    const message = code.startsWith('provider_credential') ? 'Connect your fal.ai API key in Settings to generate images.' : code === 'provider_execution_timeout' ? 'Provider execution timed out.' : 'Provider execution failed.';
     return Response.json({ error: message, code }, { status: code.startsWith('provider_credential') ? 400 : 502 });
   }
 }

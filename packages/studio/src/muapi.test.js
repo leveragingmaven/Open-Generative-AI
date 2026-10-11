@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { generateAudio, generateI2I, generateI2V, generateImage, generateVideo, getPredictionResult, getPublishedAgents, getTemplateAgents } from "./muapi.js";
+import { generateAudio, generateI2I, generateI2V, generateImage, generateVideo, getPredictionResult, getPublishedAgents, getTemplateAgents, uploadFile } from "./muapi.js";
 
 const realSetTimeout = globalThis.setTimeout;
 const resultUrl = (requestId) => `https://api.muapi.ai/api/v1/predictions/${requestId}/result`;
@@ -542,6 +542,51 @@ test('non-Agency browser requests keep sending the client key through the proxy'
     '/api/api/v1/predictions/request-1/result',
   ]);
   assert.deepEqual(requests.map(({ headers }) => headers['x-api-key']), ['test-key', 'test-key']);
+});
+
+// A studio defaults to its aggregator provider, so a Creator OS customer who
+// configured a different provider (or none at all) reaches that studio without
+// the credential it needs. The message must name the provider and the place to
+// add the key, not repeat the proxy's raw status body.
+const credentialRequiredBody = JSON.stringify({
+  error: 'MuAPI BYOK credential is not configured for this account.',
+  code: 'provider_credential_required:muapi',
+});
+
+test('a generation without a usable provider credential names the key and Settings', async () => {
+  globalThis.fetch = async () => response(credentialRequiredBody, 503);
+  await assert.rejects(
+    () => generateImage(null, imageParams()),
+    (error) => error.message === 'Add your MuAPI API key in Settings to continue.',
+  );
+});
+
+test('an upload without a usable provider credential names the key and Settings', async () => {
+  const previous = globalThis.XMLHttpRequest;
+  globalThis.XMLHttpRequest = class {
+    open() {}
+    setRequestHeader() {}
+    send() {
+      this.status = 503;
+      this.statusText = 'Service Unavailable';
+      this.responseText = credentialRequiredBody;
+      this.onload();
+    }
+  };
+  try {
+    await assert.rejects(
+      () => uploadFile(null, {}),
+      (error) => error.message === 'Add your MuAPI API key in Settings to continue.',
+    );
+  } finally {
+    if (previous === undefined) delete globalThis.XMLHttpRequest;
+    else globalThis.XMLHttpRequest = previous;
+  }
+});
+
+test('an unrelated provider failure keeps the existing diagnostic message', async () => {
+  globalThis.fetch = async () => response(JSON.stringify({ detail: 'provider bus is down' }), 502);
+  await assert.rejects(() => generateImage('test-key', imageParams()), /API Request Failed: 502/);
 });
 
 test('non-Agency server-side requests are unchanged', async () => {

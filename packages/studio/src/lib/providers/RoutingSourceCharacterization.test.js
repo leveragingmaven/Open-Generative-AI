@@ -108,7 +108,10 @@ test("The FAL endpoint refuses a missing server-side credential", async () => {
 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), {
-    error: "Provider credential is unavailable.",
+    // The copy is deliberately actionable: the studio gate admits any
+    // launch-available provider, so a customer can reach a fal model without a
+    // fal credential and must be told which key to add and where.
+    error: "Connect your fal.ai API key in Settings to generate images.",
     code: "provider_credential_required:fal",
   });
 });
