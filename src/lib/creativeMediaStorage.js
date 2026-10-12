@@ -77,7 +77,12 @@ export async function storeVideoPoster({ accountId, assetId, sourcePath, storage
     await storage.putObject({ key, body: bytes, contentType: POSTER_MIME, sizeBytes: bytes.length });
     return { key, storageReference: await storage.createDeliveryReference(key), contentType: POSTER_MIME, sizeBytes: bytes.length, reused: false };
   } catch (error) {
-    if (error instanceof PosterExtractionUnavailableError) return null;
+    // A poster is presentation: a miss must never fail the asset it belongs to. A runtime with no
+    // decoder is the expected miss and stays quiet; anything else is a real problem, so it is left in
+    // the server log by code instead of disappearing into a null.
+    if (!(error instanceof PosterExtractionUnavailableError)) {
+      console.warn('[videoPoster] poster not stored', error?.code || error?.message || 'unknown_error');
+    }
     return null;
   }
 }
