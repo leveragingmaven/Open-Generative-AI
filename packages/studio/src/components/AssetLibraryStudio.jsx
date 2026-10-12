@@ -11,6 +11,7 @@ import { downloadAsset } from "../lib/assets/downloadManager.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { useNearViewport } from "../lib/assets/useNearViewport.js";
 import { CREATIVE_LIBRARY_PAGE_SIZE, libraryPageRemaining, libraryPageWindow } from "../lib/assets/libraryPaging.js";
+import { MEDIA_CANDIDATE_TIMEOUT_MS, nextMediaSource } from "../lib/assets/assetMediaSources.js";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
 import { isPublishableCreativeMedia } from "../lib/publishing/publishingLibraryAssets.js";
 import {
@@ -179,6 +180,10 @@ function MediaPoster({ kind, note }) {
  * Only tiles near the viewport fetch anything, an image walks from its declared thumbnail to the
  * server-resized `variant=thumbnail` rendering and finally the original, and a video stays a poster
  * until it is opened. A preview that fails every source says so instead of rendering an empty frame.
+ *
+ * A source is abandoned after `MEDIA_CANDIDATE_TIMEOUT_MS` as well as on `error`: a request that
+ * never settles would otherwise hold the tile on its loading frame forever, invisible at
+ * `opacity-0`, with the later sources — including the asset's own delivery URL — never requested.
  */
 function AssetMedia({ asset, className = "", fullSize = false, eager = false }) {
   const [failedSources, setFailedSources] = useState([]);
@@ -188,9 +193,19 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false }) 
   const primaryUrl = assetUrl(asset);
   const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
   const candidates = [fullSize ? null : thumbnail, fullSize ? null : assetThumbnailUrl(asset), primaryUrl].filter(Boolean);
-  const imageUrl = candidates.find((source) => !failedSources.includes(source)) || null;
+  const imageUrl = nextMediaSource(candidates, failedSources);
   const videoUrl = primaryUrl && !failedSources.includes(primaryUrl) ? primaryUrl : null;
   const frame = (children) => <div ref={frameRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[var(--ms-color-background)]">{children}</div>;
+
+  // A pending source expires into a failure so the tile can advance. The wait only runs while an
+  // `<img>` is actually mounted for an image tile, so the viewport gate never starts it early and a
+  // video tile (which renders no `<img>`) is untouched. Loading the source disarms it.
+  useEffect(() => {
+    if (!kind.includes("image") || !imageUrl || loadedSource === imageUrl || (!eager && !nearViewport)) return undefined;
+    const timer = setTimeout(() => setFailedSources((sources) => [...sources, imageUrl]), MEDIA_CANDIDATE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [imageUrl, loadedSource, kind, eager, nearViewport]);
+
   if (!eager && !nearViewport) return frame(<MediaSkeleton />);
   if (imageUrl && kind.includes("image")) return frame(<>
     {loadedSource !== imageUrl ? <MediaSkeleton label={`Loading ${assetTitle(asset)}`} /> : null}
@@ -198,7 +213,7 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false }) 
       onLoad={() => setLoadedSource(imageUrl)} onError={() => setFailedSources((sources) => [...sources, imageUrl])}
       className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${loadedSource === imageUrl ? "opacity-100" : "opacity-0"} ${className}`} />
   </>);
-  if (candidates.length > 0 && kind.includes("image")) return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center"><Icon type="asset" size={22} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ms-color-gold-muted)]">Preview unavailable</span><span className="text-[9px] text-[var(--ms-color-text-muted)]">Open the asset to retry</span></div>);
+  if (kind.includes("image")) return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center"><Icon type="asset" size={22} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ms-color-gold-muted)]">Preview unavailable</span><span className="text-[9px] text-[var(--ms-color-text-muted)]">Open the asset to retry</span></div>);
   if (videoUrl && kind.includes("video")) {
     if (fullSize) return <video src={videoUrl} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, videoUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
     return frame(<MediaPoster kind="video" note="Open to play" />);
