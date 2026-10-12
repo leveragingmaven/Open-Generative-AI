@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import { requireCreatorIdentity } from './creatorOsAuth.js';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
-import { ownedCreativeObjectKey } from './creativeMediaStorage.js';
+import { ownedCreativeObjectKey, ownedCreativePosterKey } from './creativeMediaStorage.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
 
 const RANGE = /^bytes=(?:\d+-\d*|-\d+)$/;
@@ -63,22 +63,41 @@ export async function handleCreativeMedia(request, { identity, repository = new 
   if (!identity?.accountId) return failure(401);
   const url = new URL(request.url);
   const assetId = url.searchParams.get('assetId');
-  const thumbnail = url.searchParams.get('variant') === 'thumbnail';
-  if (url.searchParams.has('variant') && !thumbnail) return failure(400);
+  const variant = url.searchParams.get('variant') || null;
+  const thumbnail = variant === 'thumbnail';
+  // The poster frame stored beside a video: a small still image, requested like any other rendering.
+  const poster = variant === 'poster';
+  if (variant && !thumbnail && !poster) return failure(400);
   if (!/^asset_[a-f0-9]{64}$/.test(String(assetId || ''))) return failure(404);
   const range = request.headers?.get?.('range') || null;
-  if (thumbnail && (range || request.method === 'HEAD')) return failure(416);
+  if ((thumbnail || poster) && (range || request.method === 'HEAD')) return failure(416);
   if (range && !RANGE.test(range)) return failure(416);
   try {
     const asset = await repository.get(assetId, { accountId: identity.accountId });
     const key = ownedCreativeObjectKey(asset, identity.accountId);
     if (!key || String(asset.accountId) !== String(identity.accountId)) return failure(404);
+    const posterKey = poster ? ownedCreativePosterKey(asset, identity.accountId) : null;
+    if (poster && !posterKey) return failure(404);
     const objectStorage = storage || getR2MediaStorage();
-    const object = request.method === 'HEAD' ? await objectStorage.getMetadata(key) : await objectStorage.getObject(key, { range });
+    const object = request.method === 'HEAD' ? await objectStorage.getMetadata(key) : await objectStorage.getObject(posterKey || key, poster ? {} : { range });
     if (!object) return failure(404);
     const type = String(object.ContentType || object.contentType || '').toLowerCase();
-    if (!MEDIA_TYPES.has(type)) return failure(415);
+    if (!poster && !MEDIA_TYPES.has(type)) return failure(415);
     const headers = new Headers({ 'Content-Type': type, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes' });
+    if (poster) {
+      // Stored at save time, so it is served as-is: no resizing, no decoding, no per-request work.
+      if (!type.startsWith('image/')) { object.Body?.destroy?.(); return failure(415); }
+      const length = Number(object.ContentLength ?? object.sizeBytes);
+      if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_IMAGE_BYTES) {
+        object.Body?.destroy?.();
+        return failure(413);
+      }
+      if (!object.Body) return failure(503);
+      const data = await completeImage(object.Body, length, request.signal);
+      headers.set('Content-Length', String(data.length));
+      headers.delete('Accept-Ranges');
+      return new Response(data, { status: 200, headers });
+    }
     if (thumbnail) {
       if (!type.startsWith('image/')) { object.Body?.destroy?.(); return failure(415); }
       if (!Number.isSafeInteger(Number(object.ContentLength)) || Number(object.ContentLength) <= 0

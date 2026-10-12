@@ -315,15 +315,21 @@ function QueueMediaThumbnail({ media, eager = false }) {
   const videoUrl = media?.videoUrl && !failedSources.includes(media.videoUrl) ? media.videoUrl : null;
   const frame = (children) => <div ref={frameRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black/20">{children}</div>;
   if (!eager && !nearViewport) return frame(<span role="status" aria-label={`Waiting to load ${label}`} className="absolute inset-0 animate-pulse bg-[var(--ms-color-panel)]" />);
+  // A stored video shows its poster frame here — the same still the Creative Library shows — so a
+  // card is recognizable before it plays. The still is a button, not a dead image: the play control
+  // a video card has always had stays reachable, now drawn over the real frame.
   if (imageUrl) return frame(<>
     {!imageLoaded ? <span role="status" aria-label={`Loading ${label}`} className="absolute inset-0 animate-pulse bg-[var(--ms-color-panel)]" /> : null}
     <img key={`${imageUrl}#${attempt}`} src={imageUrl} alt={label} loading={eager ? "eager" : "lazy"} decoding="async" onLoad={() => setImageLoaded(true)} onError={() => fail(imageUrl)} className={`h-full w-full object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`} />
+    {media?.kind === "video" && videoUrl ? <button type="button" onClick={() => setPlaying(true)} aria-label={`Play ${label}`} className="absolute inset-0 flex items-center justify-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--ms-color-gold-primary)] bg-black/40 text-[var(--ms-color-gold-primary)]"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg></span>
+    </button> : null}
   </>);
   if (videoUrl && !playing) return frame(<button type="button" onClick={() => setPlaying(true)} aria-label={`Play ${label}`} className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)] transition-colors hover:text-white">
     <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--ms-color-gold-primary)] bg-black/40 text-[var(--ms-color-gold-primary)]"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg></span>
     <span className="text-[8px] font-semibold uppercase tracking-[0.14em]">video · play</span>
   </button>);
-  if (videoUrl) return <video key={`${videoUrl}#${attempt}`} src={videoUrl} poster={media.imageUrl || undefined} muted playsInline controls autoPlay preload="metadata" aria-label={label} onError={() => fail(videoUrl)} className="h-full w-full object-cover" />;
+  if (videoUrl) return <video key={`${videoUrl}#${attempt}`} src={videoUrl} poster={media.imageUrl || undefined} muted playsInline controls autoPlay preload="metadata" aria-label={label} onError={() => fail(videoUrl)} className="h-full w-full object-contain" />;
   return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-1.5 px-3 text-center">
     <Icon type="asset" size={22} />
     <span className="text-[8px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-gold-muted)]">{media?.kind || "no media"}{failedSources.length ? " · preview failed" : ""}</span>

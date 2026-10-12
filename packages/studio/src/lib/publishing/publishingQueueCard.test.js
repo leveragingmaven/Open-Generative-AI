@@ -90,12 +90,15 @@ test('Queue thumbnails use the authenticated Creative Assets endpoint and never 
   assert.equal(publishingAssetDeliveryUrl(libraryImage()).includes('storage://'), false);
 });
 
-test('a video keeps its own reference for a poster frame instead of an image thumbnail variant', () => {
+test('a video shows its own stored poster frame and never the image thumbnail variant', () => {
   const video = publishingQueueMedia(libraryVideo());
   assert.equal(video.kind, 'video');
   assert.equal(video.videoUrl, mediaUrl('lib-video-1'));
-  // The endpoint only downsizes images, so no image URL is invented for a stored video.
-  assert.equal(video.imageUrl, null);
+  // The endpoint only downsizes images, so the thumbnail variant is never invented for a video — but
+  // the poster frame extracted when the video was saved is an image the endpoint really serves, and a
+  // card shows it so the clip is recognizable before it plays.
+  assert.equal(video.imageUrl, `${mediaUrl('lib-video-1')}&variant=poster`);
+  assert.equal(video.imageUrl.includes('variant=thumbnail'), false);
 
   const withPoster = publishingQueueMedia(libraryVideo('lib-video-2'));
   assert.equal(withPoster.videoUrl, mediaUrl('lib-video-2'));

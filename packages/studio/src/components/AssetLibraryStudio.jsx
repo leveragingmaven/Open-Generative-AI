@@ -8,6 +8,7 @@ import { InMemoryAssetIndexer } from "../lib/intelligence/AssetIndexer.js";
 import { useActiveCampaign } from "../lib/campaigns/CampaignContext.js";
 import { CampaignStore } from "../lib/campaigns/CampaignStore.js";
 import { downloadAsset } from "../lib/assets/downloadManager.js";
+import { assetPosterUrl } from "../lib/assets/assetPoster.js";
 import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { useNearViewport } from "../lib/assets/useNearViewport.js";
 import { CREATIVE_LIBRARY_PAGE_SIZE, libraryPageRemaining, libraryPageWindow } from "../lib/assets/libraryPaging.js";
@@ -175,6 +176,27 @@ function MediaPoster({ kind, note }) {
 }
 
 /**
+ * What stands in for a video until it plays: the poster frame stored beside the video, or — for a
+ * video that has none yet (a legacy record, or an asset saved before a decoder was available) — the
+ * drawn placeholder. Either way a small Play mark sits over it, and no video element is mounted: a
+ * tile with a poster costs one small image, never the video file.
+ */
+function VideoPosterArt({ src, note = "Open to play" }) {
+  const [failed, setFailed] = useState(false);
+  const frameSrc = src && !failed ? src : null;
+  return <>
+    {frameSrc
+      ? <img src={frameSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="absolute inset-0 h-full w-full object-cover" />
+      : <MediaPoster kind="video" note={note} />}
+    <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--ms-color-gold-primary)] bg-black/45 text-[var(--ms-color-gold-primary)]">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+      </span>
+    </span>
+  </>;
+}
+
+/**
  * One asset's preview.
  *
  * Only tiles near the viewport fetch anything, an image walks from its declared thumbnail to the
@@ -198,6 +220,7 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false, pl
   const kind = assetPreviewKind(asset) || assetType(asset).toLowerCase();
   const primaryUrl = assetUrl(asset);
   const thumbnail = asset?.thumbnail || asset?.thumbnails?.[0];
+  const posterUrl = assetPosterUrl(asset);
   const candidates = [fullSize ? null : thumbnail, fullSize ? null : assetThumbnailUrl(asset), primaryUrl].filter(Boolean);
   const imageUrl = nextMediaSource(candidates, failedSources);
   const videoUrl = primaryUrl && !failedSources.includes(primaryUrl) ? primaryUrl : null;
@@ -230,9 +253,13 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false, pl
       className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${loadedSource === imageUrl ? "opacity-100" : "opacity-0"} ${className}`} />
   </>);
   if (videoUrl && kind.includes("video")) {
-    if (!fullSize) return frame(<MediaPoster kind="video" note="Open to play" />);
-    if (!videoMounted) return <button type="button" onClick={() => setVideoPressed(true)} aria-label={`Play ${assetTitle(asset)}`} className="h-full w-full">{frame(<MediaPoster kind="video" note="Press play" />)}</button>;
-    return <video src={videoUrl} poster={thumbnail || undefined} onLoadedMetadata={() => setLoadedSource(videoUrl)} onError={() => setFailedSources((sources) => [...sources, videoUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
+    if (!fullSize) return frame(<VideoPosterArt src={posterUrl} />);
+    if (!videoMounted) return <button type="button" onClick={() => setVideoPressed(true)} aria-label={`Play ${assetTitle(asset)}`} className="h-full w-full">{frame(<VideoPosterArt src={posterUrl} note="Press play" />)}</button>;
+    // The element keeps its own aspect ratio: a portrait clip is never stretched or cropped into the
+    // surface it was opened in, and `object-contain` is the explicit statement of that. Only bounding
+    // it — never forcing a width or height — is what lets the intrinsic 608x1472 (or 1920x1080)
+    // decide the shape it takes inside the centred surface.
+    return <div className="flex h-full w-full items-center justify-center"><video src={videoUrl} poster={posterUrl || thumbnail || undefined} onLoadedMetadata={() => setLoadedSource(videoUrl)} onError={() => setFailedSources((sources) => [...sources, videoUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`max-h-full max-w-full object-contain ${className}`} /></div>;
   }
   if (kind.includes("image") || kind.includes("video")) return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center"><Icon type="asset" size={22} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ms-color-gold-muted)]">Preview unavailable</span><span className="text-[9px] text-[var(--ms-color-text-muted)]">Open the asset to retry</span></div>);
   if (primaryUrl && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={primaryUrl} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
@@ -589,7 +616,7 @@ export default function AssetLibraryStudio() {
       {previewAsset && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-3 sm:p-6" onClick={() => setPreviewAsset(null)}>
         <div role="dialog" aria-modal="true" aria-label={`Preview ${assetTitle(previewAsset)}`} onClick={(event) => event.stopPropagation()} className="flex max-h-full w-full max-w-6xl flex-col gap-3 rounded-[var(--ms-radius-card)] border border-[var(--ms-color-border-emphasized)] bg-[var(--ms-color-panel)] p-3 sm:p-4">
           <div className="flex items-center justify-between gap-3"><h2 className="min-w-0 truncate text-sm font-semibold">{assetTitle(previewAsset)}</h2><button type="button" autoFocus onClick={() => setPreviewAsset(null)} aria-label="Close preview" className="rounded-full border border-white/20 px-3 py-1 text-xs">Close</button></div>
-          <div key={mediaAttempt} className="h-[min(75vh,760px)] min-h-48 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-[var(--ms-color-background)]"><AssetMedia asset={previewAsset} fullSize eager /></div>
+          <div key={mediaAttempt} className="flex h-[min(75vh,760px)] min-h-48 items-center justify-center overflow-hidden rounded-[var(--ms-radius-card-small)] bg-[var(--ms-color-background)]"><AssetMedia asset={previewAsset} fullSize eager /></div>
           {downloadError ? <p role="alert" className="text-xs text-[var(--ms-color-error)]">{downloadError}</p> : null}
           <div className="flex justify-end gap-2"><SecondaryButton type="button" onClick={() => setMediaAttempt((value) => value + 1)} className="min-h-9 px-4 py-2 text-xs">Retry preview</SecondaryButton><SecondaryButton type="button" onClick={() => void downloadSelected(previewAsset)} disabled={Boolean(downloadingId)} aria-busy={downloadingId === previewAsset.id ? "true" : undefined} className="min-h-9 px-4 py-2 text-xs disabled:opacity-50"><Icon type="download" size={14} /> {downloadingId === previewAsset.id ? "Downloading…" : "Download"}</SecondaryButton></div>
         </div>

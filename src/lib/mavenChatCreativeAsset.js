@@ -37,7 +37,10 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
   }
   const digest = crypto.createHash('sha256').update(JSON.stringify([accountId, conversationId, kind, media.url])).digest('hex');
   const id = `asset_${digest}`;
-  const stored = await copyMedia({ accountId, assetId: id, url: media.url, kind });
+  // A video's poster is produced here, while its own bytes are still on disk, so a library card can
+  // show the frame later without ever downloading the video. A runtime without a decoder stores no
+  // poster and the asset itself is saved exactly as before.
+  const stored = await copyMedia({ accountId, assetId: id, url: media.url, kind, poster: kind === 'video' });
   const provider = media.provider || media.transport || 'muapi';
   const timestamp = new Date().toISOString();
   const asset = {
@@ -80,6 +83,8 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
       campaignId,
       storageStatus: 'r2', retentionVerified: true,
       contentType: stored.contentType, sizeBytes: stored.sizeBytes, checksum: stored.checksum,
+      posterStatus: kind === 'video' ? (stored.poster ? 'stored' : 'not_extracted') : null,
+      posterStorageReference: stored.poster?.storageReference || null,
       duration: media.duration || null, aspectRatio: media.aspectRatio || null,
       resolution: media.resolution || null, voiceId: media.voiceId || null,
     },

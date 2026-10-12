@@ -46,11 +46,14 @@ test("a recoverable preview failure can be retried", () => {
 
 test("a video tile is a poster until the asset is opened, so opening the library downloads no video", () => {
   assert.match(librarySource, /function MediaPoster\(\{ kind, note \}\)/);
-  assert.match(librarySource, /return frame\(<MediaPoster kind="video" note="Open to play" \/>\);/);
+  // The tile is the stored poster frame (the drawn placeholder stays as the fallback), so a video
+  // is recognizable without the video file being fetched.
+  assert.match(librarySource, /if \(!fullSize\) return frame\(<VideoPosterArt src=\{posterUrl\} \/>\);/);
+  assert.match(librarySource, /function VideoPosterArt\(\{ src, note = "Open to play" \}\)/);
   // A full-size surface is the one that mounts the real element; a tile returns its poster above it.
   // The mount also requires `videoMounted` (announced outcome: the surface was opened for playback
   // or the creator pressed play), which is why this no longer reads `if (fullSize) return <video`.
-  assert.match(librarySource, /return <video src=\{videoUrl\} poster=\{thumbnail \|\| undefined\}/);
+  assert.match(librarySource, /return <div className="flex h-full w-full items-center justify-center"><video src=\{videoUrl\} poster=\{posterUrl \|\| thumbnail \|\| undefined\}/);
   assert.doesNotMatch(librarySource, /kind\.includes\("video"\)\) return <video/);
 });
 

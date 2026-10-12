@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { configuredHosts, resolveSafeAddresses, safeUrl } from './zernioMediaResolver.js';
 import { maxBytesFor } from './uploadSecurity.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
+import { POSTER_MIME, PosterExtractionUnavailableError, extractPosterFrame } from './videoPoster.js';
 
 const MIME = {
   image: new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']),
@@ -16,6 +17,7 @@ const MIME = {
   audio: new Set(['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/aac', 'audio/flac']),
 };
 const PREFIX = 'creator-os/production';
+const MAX_POSTER_BYTES = 1024 * 1024;
 
 function accountPath(accountId) {
   return crypto.createHash('sha256').update(String(accountId)).digest('hex');
@@ -32,6 +34,19 @@ export function ownedCreativeObjectKey(asset, accountId) {
   return String(asset?.storageReference || '') === `storage://${expected}` ? expected : null;
 }
 
+/**
+ * Where a stored asset's poster frame lives: beside its own object, under the same account path.
+ * A poster is only ever addressed for an asset whose primary object this account already owns, so
+ * the extra object inherits the existing ownership rule instead of adding a second one.
+ */
+export function creativePosterKey(accountId, assetId) {
+  return `${creativeObjectKey(accountId, assetId).replace(/\/primary$/, '')}/poster`;
+}
+
+export function ownedCreativePosterKey(asset, accountId) {
+  return ownedCreativeObjectKey(asset, accountId) ? creativePosterKey(accountId, asset.id) : null;
+}
+
 export function isStoredCreativeAsset(asset) {
   return typeof asset?.storageReference === 'string' && asset.storageReference.startsWith('storage://');
 }
@@ -43,7 +58,31 @@ export function browserCreativeAsset(asset, accountId) {
   return { ...asset, storageReference: url, url, generatedFiles: [url], providerOutputReference: null };
 }
 
-export async function copyProviderMedia({ accountId, assetId, url, kind, storage = getR2MediaStorage(), fetchImpl = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts() }) {
+/**
+ * Store the poster frame of an already-downloaded video as WebP, next to its own object.
+ *
+ * Returns `null` whenever a poster cannot be produced — the common case being a runtime without a
+ * decoder. A poster is presentation, so a miss must never fail the asset it belongs to; the whole
+ * call is therefore non-throwing, and `reused` reports an existing object instead of re-extracting.
+ */
+export async function storeVideoPoster({ accountId, assetId, sourcePath, storage = getR2MediaStorage(), extract = extractPosterFrame, maxBytes = MAX_POSTER_BYTES, ...extractOptions }) {
+  const key = creativePosterKey(accountId, assetId);
+  try {
+    const existing = await storage.getMetadata(key);
+    if (existing) {
+      return { key, storageReference: await storage.createDeliveryReference(key), contentType: existing.contentType || POSTER_MIME, sizeBytes: existing.sizeBytes, reused: true };
+    }
+    const bytes = await extract(sourcePath, extractOptions);
+    if (!bytes?.length || bytes.length > maxBytes) return null;
+    await storage.putObject({ key, body: bytes, contentType: POSTER_MIME, sizeBytes: bytes.length });
+    return { key, storageReference: await storage.createDeliveryReference(key), contentType: POSTER_MIME, sizeBytes: bytes.length, reused: false };
+  } catch (error) {
+    if (error instanceof PosterExtractionUnavailableError) return null;
+    return null;
+  }
+}
+
+export async function copyProviderMedia({ accountId, assetId, url, kind, poster = false, storage = getR2MediaStorage(), fetchImpl = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts() }) {
   if (!MIME[kind]) throw new Error('r2_media_kind_invalid');
   const source = safeUrl(url, allowlist);
   await resolveSafeAddresses(source.hostname, lookup);
@@ -75,7 +114,9 @@ export async function copyProviderMedia({ accountId, assetId, url, kind, storage
     if (!sizeBytes) throw new Error('provider_media_empty');
     const checksum = digest.digest('hex');
     await storage.putObject({ key, body: createReadStream(path), contentType, sizeBytes, metadata: { sha256: checksum } });
-    return { key, storageReference: await storage.createDeliveryReference(key), contentType, sizeBytes, checksum };
+    // The video is still on disk here, so its poster costs one decode and no extra download.
+    const storedPoster = poster && kind === 'video' ? await storeVideoPoster({ accountId, assetId, sourcePath: path, storage }) : null;
+    return { key, storageReference: await storage.createDeliveryReference(key), contentType, sizeBytes, checksum, poster: storedPoster };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

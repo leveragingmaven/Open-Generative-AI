@@ -34,11 +34,16 @@ test("one opened asset is never two players downloading the file", () => {
   assert.match(librarySource, /<AssetMedia asset=\{previewAsset\} fullSize eager \/>/);
   assert.match(librarySource, /if \(!videoMounted\) return <button type="button" onClick=\{\(\) => setVideoPressed\(true\)\}/);
   assert.match(librarySource, /aria-label=\{`Play \$\{assetTitle\(asset\)\}`\}/);
-  assert.match(librarySource, /frame\(<MediaPoster kind="video" note="Press play" \/>\)\}<\/button>;/);
+  // The unplayed surface shows the stored poster frame (or the drawn placeholder when there is
+  // none) under the Play mark, and mounts no element either way.
+  assert.match(librarySource, /frame\(<VideoPosterArt src=\{posterUrl\} note="Press play" \/>\)\}<\/button>;/);
 });
 
 test("the grid keeps its poster and the player keeps native controls", () => {
-  // A tile mounts no media element at all, and opening the library still transfers no video bytes.
-  assert.match(librarySource, /if \(!fullSize\) return frame\(<MediaPoster kind="video" note="Open to play" \/>\);/);
+  // A tile mounts no media element at all, and opening the library still transfers no video bytes:
+  // the tile is the stored poster frame, with the drawn placeholder as its fallback.
+  assert.match(librarySource, /if \(!fullSize\) return frame\(<VideoPosterArt src=\{posterUrl\} \/>\);/);
+  assert.match(librarySource, /function MediaPoster\(\{ kind, note \}\)/);
+  assert.match(librarySource, /: <MediaPoster kind="video" note=\{note\} \/>/);
   assert.match(librarySource, /\baria-label=\{`\$\{assetTitle\(asset\)\} preview`\} controls preload="metadata"/);
 });

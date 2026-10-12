@@ -1,3 +1,4 @@
+import { assetPosterUrl } from '../assets/assetPoster.js';
 import { assetPreviewKind } from '../assets/assetPreview.js';
 import { publishingCalendarDetails } from './publishingCalendar.js';
 import { libraryAssetMediaUrl } from './publishingLibraryPicker.js';
@@ -51,10 +52,11 @@ function thumbnailVariant(url) {
 /**
  * The image and video references a card may render for one asset.
  *
- * `imageUrl` is always safe to use as an `<img>` source: a declared thumbnail, or — for images only —
- * the asset's own delivery URL. Stored objects get the authenticated endpoint's downscaled
- * `variant=thumbnail` rendering, which the endpoint only produces for images, so a video keeps its
- * own reference in `videoUrl` for a poster frame instead of a URL that would fail as an image.
+ * `imageUrl` is always safe to use as an `<img>` source: a declared thumbnail, the asset's own
+ * delivery URL for an image, or — for a stored video — its stored poster frame. Stored objects get
+ * the authenticated endpoint's downscaled `variant=thumbnail` rendering, which the endpoint only
+ * produces for images, and a stored video asks for its stored `variant=poster` still instead of a
+ * URL that would fail as an image. A video keeps its own reference in `videoUrl` for playback.
  */
 export function publishingQueueMedia(asset = null) {
   if (!asset) return null;
@@ -63,12 +65,13 @@ export function publishingQueueMedia(asset = null) {
   const thumbnail = declaredThumbnail(asset);
   const sameOriginCreativeMedia = Boolean(url?.startsWith('/api/creative-assets/media?'));
   const resized = sameOriginCreativeMedia && url ? thumbnailVariant(url) : null;
+  const poster = kind === 'video' ? assetPosterUrl(asset) : null;
   return {
     id: String(asset.id || asset.assetId || '').trim() || null,
     kind,
     title: asset.title || asset.name || asset.filename || asset.metadata?.filename || null,
     imageUrl: thumbnail
-      || (kind === 'image' ? resized || url : null),
+      || (kind === 'image' ? resized || url : poster),
     videoUrl: kind === 'video' ? url : null,
   };
 }
