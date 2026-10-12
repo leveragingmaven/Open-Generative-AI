@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AssetLibraryService, deleteCreativeLibraryAsset, isAssetReferencedByPublishingDrafts, withoutCreativeLibraryAsset } from "../lib/intelligence/AssetLibraryService.js";
 import { localAssetManager } from "../lib/intelligence/AssetManager.js";
@@ -287,6 +287,7 @@ export default function AssetLibraryStudio() {
   const [publishingNotice, setPublishingNotice] = useState(null);
   const [visibleCount, setVisibleCount] = useState(CREATIVE_LIBRARY_PAGE_SIZE);
   const [mediaAttempt, setMediaAttempt] = useState(0);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   const reload = async () => {
     setLoading(true);
@@ -424,11 +425,26 @@ export default function AssetLibraryStudio() {
     router.push(suffix ? `${target}?${suffix}` : target);
   };
 
+  // A download fetches the whole asset before it hands the file to the browser. Without a
+  // single-flight guard every click during that fetch starts another one — the measured behaviour was
+  // three clicks on one video producing three full 1,845,462 B transfers and three silent saves.
+  //
+  // The lock is a ref, not the rendered state: two clicks in the same tick would both read the state
+  // from the render that is still on screen and start two transfers before React has re-rendered, so
+  // the guard has to be set synchronously. `downloadingId` is what the controls report.
+  const downloadInFlight = useRef(null);
   const downloadSelected = async (asset = selected) => {
-    if (!asset || !assetUrl(asset)) return;
+    if (!asset || !assetUrl(asset) || downloadInFlight.current) return;
+    downloadInFlight.current = asset.id;
     setDownloadError(null);
-    const result = await downloadAsset(assetUrl(asset), { id: asset.id, kind: assetType(asset), prefix: assetTitle(asset) });
-    if (!result.ok) setDownloadError("This media could not be downloaded. Please try again.");
+    setDownloadingId(asset.id);
+    try {
+      const result = await downloadAsset(assetUrl(asset), { id: asset.id, kind: assetType(asset), prefix: assetTitle(asset) });
+      if (!result.ok) setDownloadError("This media could not be downloaded. Please try again.");
+    } finally {
+      downloadInFlight.current = null;
+      setDownloadingId(null);
+    }
   };
 
   useEffect(() => {
@@ -559,7 +575,7 @@ export default function AssetLibraryStudio() {
                 </dl>
                 {!durableIds.has(selected.id) && localIds.has(selected.id) ? <div className="mt-5 flex flex-wrap items-end gap-2"><label className="min-w-[180px] flex-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ms-color-text-muted)]">Title<input aria-label="Asset title" value={renameTitle || selected.title || ""} onChange={(event) => setRenameTitle(event.target.value)} className="mt-2 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white" /></label><SecondaryButton type="button" disabled={!renameTitle.trim() || renameTitle.trim() === selected.title || assetActionBusy} onClick={() => handleRename(selected)} className="min-h-10 px-4 py-2 text-xs">{assetActionBusy ? "Saving…" : "Save Title"}</SecondaryButton></div> : null}
                 <div className="mt-7 flex flex-wrap gap-2">
-                  {assetUrl(selected) ? <><PrimaryButton type="button" onClick={() => setPreviewAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Preview full size</PrimaryButton><SecondaryButton type="button" onClick={() => void downloadSelected()} className="min-h-10 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</SecondaryButton><SecondaryButton type="button" onClick={() => setMediaAttempt((value) => value + 1)} className="min-h-10 px-4 py-2 text-xs">Retry preview</SecondaryButton></> : null}
+                  {assetUrl(selected) ? <><PrimaryButton type="button" onClick={() => setPreviewAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Preview full size</PrimaryButton><SecondaryButton type="button" onClick={() => void downloadSelected()} disabled={Boolean(downloadingId)} aria-busy={downloadingId === selected.id ? "true" : undefined} className="min-h-10 px-4 py-2 text-xs disabled:opacity-50"><Icon type="download" size={14} /> {downloadingId === selected.id ? "Downloading…" : "Download"}</SecondaryButton><SecondaryButton type="button" onClick={() => setMediaAttempt((value) => value + 1)} className="min-h-10 px-4 py-2 text-xs">Retry preview</SecondaryButton></> : null}
                   <SecondaryButton type="button" onClick={toggleFavorite} className="min-h-10 px-4 py-2 text-xs"><Icon type="favorite" size={14} /> {selected.favorite ? "Remove favorite" : "Add favorite"}</SecondaryButton>
                   <SecondaryButton type="button" onClick={() => openStudioWithAsset(selected)} className="min-h-10 px-4 py-2 text-xs">Open Studio</SecondaryButton>
                   {publishingSelectMode ? <PrimaryButton type="button" onClick={() => createPublishingDraft(selected)} className="min-h-10 px-4 py-2 text-xs">Create Publishing Draft</PrimaryButton> : null}
@@ -575,7 +591,7 @@ export default function AssetLibraryStudio() {
           <div className="flex items-center justify-between gap-3"><h2 className="min-w-0 truncate text-sm font-semibold">{assetTitle(previewAsset)}</h2><button type="button" autoFocus onClick={() => setPreviewAsset(null)} aria-label="Close preview" className="rounded-full border border-white/20 px-3 py-1 text-xs">Close</button></div>
           <div key={mediaAttempt} className="h-[min(75vh,760px)] min-h-48 overflow-hidden rounded-[var(--ms-radius-card-small)] bg-[var(--ms-color-background)]"><AssetMedia asset={previewAsset} fullSize eager /></div>
           {downloadError ? <p role="alert" className="text-xs text-[var(--ms-color-error)]">{downloadError}</p> : null}
-          <div className="flex justify-end gap-2"><SecondaryButton type="button" onClick={() => setMediaAttempt((value) => value + 1)} className="min-h-9 px-4 py-2 text-xs">Retry preview</SecondaryButton><SecondaryButton type="button" onClick={() => void downloadSelected(previewAsset)} className="min-h-9 px-4 py-2 text-xs"><Icon type="download" size={14} /> Download</SecondaryButton></div>
+          <div className="flex justify-end gap-2"><SecondaryButton type="button" onClick={() => setMediaAttempt((value) => value + 1)} className="min-h-9 px-4 py-2 text-xs">Retry preview</SecondaryButton><SecondaryButton type="button" onClick={() => void downloadSelected(previewAsset)} disabled={Boolean(downloadingId)} aria-busy={downloadingId === previewAsset.id ? "true" : undefined} className="min-h-9 px-4 py-2 text-xs disabled:opacity-50"><Icon type="download" size={14} /> {downloadingId === previewAsset.id ? "Downloading…" : "Download"}</SecondaryButton></div>
         </div>
       </div>}
     </ExperiencePage>
