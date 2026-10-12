@@ -85,6 +85,38 @@ test('owned library assets restore missing session references and work across ne
   assert.deepEqual(await ownedMavenChatReferences({ accountId: '42', identityKey: 'creator:other' }, 'new-session', loadOptions(store)), []);
 });
 
+test('a video asks for a poster while its bytes are on disk, and records what came back', async () => {
+  const calls = [];
+  const storing = (poster) => async ({ accountId, assetId, kind, poster: wantsPoster }) => {
+    calls.push({ kind, wantsPoster });
+    return {
+      storageReference: `storage://creator-os/production/accounts/${accountId}/assets/${assetId}/primary`,
+      contentType: kind === 'video' ? 'video/mp4' : 'image/png', sizeBytes: 12, checksum: 'checksum',
+      poster: poster ? { storageReference: `storage://creator-os/production/accounts/${accountId}/assets/${assetId}/poster`, contentType: 'image/webp', sizeBytes: 9, reused: false } : null,
+    };
+  };
+
+  const withPoster = repository();
+  const stored = await persistMavenChatAsset(owner, { conversationId: 'session-1', kind: 'video', media: { url: 'https://cdn.test/video.mp4' } }, { repository: withPoster, copyMedia: storing(true) });
+  assert.equal(stored.metadata.posterStatus, 'stored');
+  assert.match(stored.metadata.posterStorageReference, /\/poster$/);
+  assert.deepEqual(calls.at(-1), { kind: 'video', wantsPoster: true });
+
+  // A runtime without a decoder reports no poster, and the video is still saved: a poster is
+  // presentation, so its absence must never fail the generation that produced the asset.
+  const withoutPoster = repository();
+  const noPoster = await persistMavenChatAsset(owner, { conversationId: 'session-1', kind: 'video', media: { url: 'https://cdn.test/video-2.mp4' } }, { repository: withoutPoster, copyMedia: storing(false) });
+  assert.equal(noPoster.metadata.posterStatus, 'not_extracted');
+  assert.equal(noPoster.metadata.posterStorageReference, null);
+  assert.equal(noPoster.kind, 'video');
+  assert.equal(withoutPoster.rows.size, 1);
+
+  // An image has no poster, so the copy step is not asked to make one.
+  const imageStore = repository();
+  await persistMavenChatAsset(owner, { conversationId: 'session-1', kind: 'image', media: { url: 'https://cdn.test/image.png' } }, { repository: imageStore, copyMedia: storing(true) });
+  assert.deepEqual(calls.at(-1), { kind: 'image', wantsPoster: false });
+});
+
 test('an image-only transcript is recovered by exact owner-library URL, never a foreign URL', async () => {
   const store = repository();
   const saved = await persistMavenChatAsset(owner, { conversationId: 'session-1', kind: 'image', media: { url: 'https://cdn.test/owned.png' } }, saveOptions(store));

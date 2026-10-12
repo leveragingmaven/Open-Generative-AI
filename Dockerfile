@@ -19,6 +19,16 @@ RUN npm run build
 # Production runner
 FROM base AS runner
 ENV NODE_ENV=production
+
+# ffmpeg is the one runtime dependency the poster step needs: it decodes a single frame of a generated
+# video, which `sharp` then stores as the asset's poster WebP. It comes from the distribution's own
+# `community` repository, which is not guaranteed to be listed in the base image, so the repository for
+# this image's own Alpine release is added once when it is missing. Nothing else in the image changes:
+# no service, no GPU runtime, no npm package.
+RUN grep -q '/community' /etc/apk/repositories \
+ || echo "https://dl-cdn.alpinelinux.org/alpine/v$(cut -d. -f1,2 /etc/alpine-release)/community" >> /etc/apk/repositories
+RUN apk add --no-cache ffmpeg
+RUN ffmpeg -version > /dev/null
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
