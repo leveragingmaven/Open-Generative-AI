@@ -13,6 +13,7 @@ import { clockPartsFromTime, resolvedScheduleTimeZone, scheduleFieldsForInstant,
 import { getZernioConnectionOption, ZERNIO_CONNECTION_CATALOG } from "../lib/publishing/zernioConnectionCatalog.js";
 import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/publishing/zernioOAuth.js";
 import { useNearViewport } from "../lib/assets/useNearViewport.js";
+import { CREATIVE_LIBRARY_PAGE_SIZE, libraryPageRemaining, libraryPageWindow } from "../lib/assets/libraryPaging.js";
 import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
@@ -338,6 +339,10 @@ export default function PublishingStudio() {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState("");
+  // Both Publishing Center asset surfaces page exactly like the Creative Library: twelve cards first and
+  // twelve more per request, so neither surface mounts the whole account library at once.
+  const [libraryPickerVisibleCount, setLibraryPickerVisibleCount] = useState(CREATIVE_LIBRARY_PAGE_SIZE);
+  const [creativeWorkVisibleCount, setCreativeWorkVisibleCount] = useState(CREATIVE_LIBRARY_PAGE_SIZE);
   const [libraryDegraded, setLibraryDegraded] = useState(false);
   const [assets, setAssets] = useState([]);
   const [drafts, setDrafts] = useState([]);
@@ -495,6 +500,11 @@ export default function PublishingStudio() {
     if (returnedFromOAuth) void refreshConnectedAccounts(center);
     return () => { centerRef.current = null; };
   }, []);
+
+  // A changed search term is a new result set, so the picker restarts at its first page rather than mixing two
+  // batches. Attaching or replacing an asset is not a search change, so it leaves the revealed cards where they
+  // are, and a later library refresh only ever appends to what is already shown.
+  useEffect(() => { setLibraryPickerVisibleCount(CREATIVE_LIBRARY_PAGE_SIZE); }, [libraryQuery]);
 
   const loadInboxMessages = async (conversation, center = centerRef.current) => {
     if (!conversation || !center) return;
@@ -703,6 +713,13 @@ export default function PublishingStudio() {
   const weeklySlots = useMemo(() => nextSlots(4), [drafts, scheduleDraftId, scheduleDate, scheduleTime, scheduleTimezone]);
   const nextFreeSlot = weeklySlots[0] || null;
   const pickerEntries = useMemo(() => libraryPickerEntries(assets, { query: libraryQuery }), [assets, libraryQuery]);
+  // Both surfaces map a window rather than the whole result set, so the first page mounts twelve thumbnails and
+  // Load More can only append the next twelve of the same sorted, already-filtered order: no duplicate, no
+  // skipped asset, and the existing ordering is untouched.
+  const pickerVisibleEntries = useMemo(() => libraryPageWindow(pickerEntries, libraryPickerVisibleCount), [pickerEntries, libraryPickerVisibleCount]);
+  const pickerRemainingEntries = useMemo(() => libraryPageRemaining(pickerEntries, libraryPickerVisibleCount), [pickerEntries, libraryPickerVisibleCount]);
+  const creativeWorkAssets = useMemo(() => libraryPageWindow(assets, creativeWorkVisibleCount), [assets, creativeWorkVisibleCount]);
+  const creativeWorkRemaining = useMemo(() => libraryPageRemaining(assets, creativeWorkVisibleCount), [assets, creativeWorkVisibleCount]);
   const activePlatforms = useMemo(() => [...new Set([
     ...accounts.map((account) => account.platform).filter(Boolean),
     ...drafts.flatMap((draft) => draft.platforms || []),
@@ -1438,7 +1455,7 @@ export default function PublishingStudio() {
                 <input type="search" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} aria-label="Search Creative Library media" placeholder="Search your saved images and videos" className="mt-3 min-h-10 w-full rounded-[var(--ms-radius-button)] border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background)] px-3 text-xs text-white outline-none placeholder:text-[var(--ms-color-text-muted)] focus:border-[var(--ms-color-gold-primary)]" />
                 {pickerEntries.length ? (
                   <div className="mt-3 grid max-h-80 gap-3 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-                    {pickerEntries.map((entry) => (
+                    {pickerVisibleEntries.map((entry) => (
                       <div key={entry.id} className="rounded-[var(--ms-radius-card-small)] border border-[var(--ms-color-border-subtle)] bg-black/10 p-2">
                         <div className="aspect-[16/10] overflow-hidden rounded bg-black/20"><QueueMediaThumbnail media={publishingQueueMedia(entry.asset)} /></div>
                         <p className="mt-2 truncate text-[10px] font-semibold">{entry.title}</p>
@@ -1449,6 +1466,7 @@ export default function PublishingStudio() {
                         </div>
                       </div>
                     ))}
+                    {pickerRemainingEntries > 0 ? <SecondaryButton type="button" onClick={() => setLibraryPickerVisibleCount((count) => count + CREATIVE_LIBRARY_PAGE_SIZE)} className="col-span-full min-h-9 px-4 py-2 text-xs">Load {Math.min(CREATIVE_LIBRARY_PAGE_SIZE, pickerRemainingEntries)} more assets</SecondaryButton> : null}
                   </div>
                 ) : <p className="mt-3 text-xs leading-5 text-[var(--ms-color-text-muted)]">{assets.length ? "No saved library media matches this search." : "No images or videos are saved in your Creative Library yet. Create or upload media first, then choose it here."}</p>}
               </div>
@@ -1482,7 +1500,7 @@ export default function PublishingStudio() {
       {activeView === "create" && <WorkspaceSection title="Choose creative work" description="Assets returned by the existing Publishing Center asset selection.">
         {assets.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {assets.map((asset) => (
+            {creativeWorkAssets.map((asset) => (
               <WorkspaceCard key={asset.id} className="overflow-hidden p-0">
                 <div className="aspect-[16/10] bg-black/20"><QueueMediaThumbnail media={publishingQueueMedia(asset)} /></div>
                 <div className="p-4">
@@ -1498,6 +1516,7 @@ export default function PublishingStudio() {
                 </div>
               </WorkspaceCard>
             ))}
+            {creativeWorkRemaining > 0 ? <div className="col-span-full flex justify-center"><SecondaryButton type="button" onClick={() => setCreativeWorkVisibleCount((count) => count + CREATIVE_LIBRARY_PAGE_SIZE)} className="min-h-9 px-4 py-2 text-xs">Load {Math.min(CREATIVE_LIBRARY_PAGE_SIZE, creativeWorkRemaining)} more assets</SecondaryButton></div> : null}
           </div>
         ) : <EmptyState title="No assets ready for publishing" description="Open the Creative Library to choose an existing asset, or create new content first. Only real saved assets appear here." icon={<Icon type="ready" />} action={<SecondaryButton type="button" onClick={() => router.push(libraryPublishPath)} className="min-h-9 px-4 py-2 text-xs">Select from Creative Library</SecondaryButton>} />}
       </WorkspaceSection>}
