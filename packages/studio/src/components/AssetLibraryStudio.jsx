@@ -183,11 +183,17 @@ function MediaPoster({ kind, note }) {
  *
  * A source is abandoned after `MEDIA_CANDIDATE_TIMEOUT_MS` as well as on `error`: a request that
  * never settles would otherwise hold the tile on its loading frame forever, invisible at
- * `opacity-0`, with the later sources — including the asset's own delivery URL — never requested.
+ * `opacity-0`, with the later sources — including the asset's own delivery URL — never requested. A
+ * video source is abandoned on exactly the same terms: the element reports `loadedmetadata` or
+ * `error`, and a response that reports neither would otherwise spin over a black frame forever.
+ *
+ * A video plays only in the surface the creator opened `playOnOpen` for, or in the one they pressed
+ * play in, so one opened asset is never two players downloading the same file at once.
  */
-function AssetMedia({ asset, className = "", fullSize = false, eager = false }) {
+function AssetMedia({ asset, className = "", fullSize = false, eager = false, playOnOpen = true }) {
   const [failedSources, setFailedSources] = useState([]);
   const [loadedSource, setLoadedSource] = useState(null);
+  const [videoPressed, setVideoPressed] = useState(false);
   const [frameRef, nearViewport] = useNearViewport({ enabled: !eager });
   const kind = assetPreviewKind(asset) || assetType(asset).toLowerCase();
   const primaryUrl = assetUrl(asset);
@@ -195,6 +201,7 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false }) 
   const candidates = [fullSize ? null : thumbnail, fullSize ? null : assetThumbnailUrl(asset), primaryUrl].filter(Boolean);
   const imageUrl = nextMediaSource(candidates, failedSources);
   const videoUrl = primaryUrl && !failedSources.includes(primaryUrl) ? primaryUrl : null;
+  const videoMounted = Boolean(fullSize && videoUrl) && (playOnOpen || videoPressed);
   const frame = (children) => <div ref={frameRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[var(--ms-color-background)]">{children}</div>;
 
   // A pending source expires into a failure so the tile can advance. The wait only runs while an
@@ -206,6 +213,15 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false }) 
     return () => clearTimeout(timer);
   }, [imageUrl, loadedSource, kind, eager, nearViewport]);
 
+  // The same bound for a video: only a mounted <video> starts the wait, so a tile's poster and a
+  // surface nobody opened for playback cannot expire a source they never loaded. `loadedmetadata`
+  // arrives with the header, so a slow file still disarms the wait long before it finishes.
+  useEffect(() => {
+    if (!videoMounted || loadedSource === videoUrl) return undefined;
+    const timer = setTimeout(() => setFailedSources((sources) => [...sources, videoUrl]), MEDIA_CANDIDATE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [videoMounted, videoUrl, loadedSource]);
+
   if (!eager && !nearViewport) return frame(<MediaSkeleton />);
   if (imageUrl && kind.includes("image")) return frame(<>
     {loadedSource !== imageUrl ? <MediaSkeleton label={`Loading ${assetTitle(asset)}`} /> : null}
@@ -213,11 +229,12 @@ function AssetMedia({ asset, className = "", fullSize = false, eager = false }) 
       onLoad={() => setLoadedSource(imageUrl)} onError={() => setFailedSources((sources) => [...sources, imageUrl])}
       className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${loadedSource === imageUrl ? "opacity-100" : "opacity-0"} ${className}`} />
   </>);
-  if (kind.includes("image")) return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center"><Icon type="asset" size={22} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ms-color-gold-muted)]">Preview unavailable</span><span className="text-[9px] text-[var(--ms-color-text-muted)]">Open the asset to retry</span></div>);
   if (videoUrl && kind.includes("video")) {
-    if (fullSize) return <video src={videoUrl} poster={thumbnail || undefined} onError={() => setFailedSources((sources) => [...sources, videoUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
-    return frame(<MediaPoster kind="video" note="Open to play" />);
+    if (!fullSize) return frame(<MediaPoster kind="video" note="Open to play" />);
+    if (!videoMounted) return <button type="button" onClick={() => setVideoPressed(true)} aria-label={`Play ${assetTitle(asset)}`} className="h-full w-full">{frame(<MediaPoster kind="video" note="Press play" />)}</button>;
+    return <video src={videoUrl} poster={thumbnail || undefined} onLoadedMetadata={() => setLoadedSource(videoUrl)} onError={() => setFailedSources((sources) => [...sources, videoUrl])} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className={`h-full w-full object-cover ${className}`} />;
   }
+  if (kind.includes("image") || kind.includes("video")) return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center"><Icon type="asset" size={22} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ms-color-gold-muted)]">Preview unavailable</span><span className="text-[9px] text-[var(--ms-color-text-muted)]">Open the asset to retry</span></div>);
   if (primaryUrl && kind.includes("audio")) return <div className="flex h-full w-full items-center justify-center p-4"><audio src={primaryUrl} aria-label={`${assetTitle(asset)} preview`} controls preload="metadata" className="w-full" /></div>;
   return frame(<div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--ms-color-gold-muted)]"><Icon type="asset" size={25} /><span className="text-[9px] font-semibold uppercase tracking-[0.16em]">{kind}</span></div>);
 }
@@ -528,7 +545,8 @@ export default function AssetLibraryStudio() {
         <WorkspaceSection title="Asset Details" description="Existing metadata for the selected asset." actions={<button type="button" onClick={() => setSelectedId(null)} className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--ms-color-text-muted)] hover:text-white">Close details</button>}>
           <WorkspaceCard className="overflow-hidden p-0">
             <div className="grid lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
-              <div key={mediaAttempt} className="h-72 overflow-hidden bg-[var(--ms-color-background)] sm:h-96 lg:h-[30rem]"><AssetMedia asset={selected} fullSize eager /></div>
+              {/* The full-size preview is the playing surface; this panel keeps its poster until the creator presses play, so one opened asset is never two players. */}
+              <div key={mediaAttempt} className="h-72 overflow-hidden bg-[var(--ms-color-background)] sm:h-96 lg:h-[30rem]"><AssetMedia asset={selected} fullSize eager playOnOpen={false} /></div>
               <div className="p-5 sm:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3"><div><StatusBadge tone="gold">{assetType(selected)}</StatusBadge><h3 className="mt-3 text-xl font-semibold tracking-[-0.025em]">{assetTitle(selected)}</h3>{selected.description ? <p className="mt-2 text-xs leading-5 text-[var(--ms-color-text-secondary)]">{selected.description}</p> : null}</div>{selectedStatus ? <StatusBadge tone={selectedStatus === "failed" ? "error" : "neutral"}>{selectedStatus}</StatusBadge> : null}</div>
                 <dl className="mt-6 grid gap-x-5 gap-y-4 sm:grid-cols-2">

@@ -35,8 +35,9 @@ test("the Creative Library tile bounds how long one source may stay pending", ()
   // Only an image tile with a mounted <img> starts the wait, so the viewport gate cannot expire a
   // source before the tile is on screen and a video tile (which renders no <img>) is untouched.
   assert.match(librarySource, /if \(!kind\.includes\("image"\) \|\| !imageUrl \|\| loadedSource === imageUrl \|\| \(!eager && !nearViewport\)\) return undefined;/);
-  // An image with no usable source says so, instead of rendering an empty frame.
-  assert.match(librarySource, /if \(kind\.includes\("image"\)\) return frame\(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">/);
+  // An asset with no usable source says so, instead of rendering an empty frame. Video joined this
+  // branch with its own bounded wait, so a video that never resolves reports a failure too.
+  assert.match(librarySource, /if \(kind\.includes\("image"\) \|\| kind\.includes\("video"\)\) return frame\(<div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">/);
   assert.match(librarySource, /Preview unavailable/);
   assert.ok(MEDIA_CANDIDATE_TIMEOUT_MS > 0 && MEDIA_CANDIDATE_TIMEOUT_MS <= 60_000, "the wait must stay bounded and finite");
 });
