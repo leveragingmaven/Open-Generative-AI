@@ -56,3 +56,4 @@ export {
   createMotionRunRecord,
   MOTION_HISTORY_KEY,
 } from "./MotionHistory.js";
+export * from "./carousel/index.js";

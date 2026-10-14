@@ -34,6 +34,16 @@ import { isImageGenerationRequest, isImageEditRequest, referencesAttachedImage }
 import { isImageToVideoRequest, isVideoGenerationRequest } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 import { isAudioGenerationRequest, extractSpeechText } from '../../packages/studio/src/lib/mavenAudioIntent.js';
 import { isLipSyncRequest } from '../../packages/studio/src/lib/mavenLipSyncIntent.js';
+import { isCarouselRequest, extractCarouselBrief } from '../../packages/studio/src/lib/mavenCarouselIntent.js';
+import { planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
+import {
+  buildCarouselStoryboardReply,
+  buildCarouselApprovedReply,
+  buildCarouselCancellationReply,
+  readPendingCarouselApproval,
+  isCarouselApprovalConfirmation,
+  isCarouselApprovalCancellation,
+} from './mavenCarouselApproval.js';
 import { persistMavenChatAsset, ownedMavenChatReferences } from './mavenChatCreativeAsset.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
@@ -734,6 +744,34 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments.push({ ...generatedReferences[0], url: audio.url });
       if (wantsStream) return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences });
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, generatedReferences) };
+    }
+
+    // Maven Motion carousel: Maven drafts an animated-carousel storyboard from the
+    // brief and asks for approval. Nothing renders inside the chat request — a local
+    // render takes minutes — so an approved storyboard renders from Motion Design,
+    // where the slides are previewed and exported. No paid provider is involved.
+    const pendingCarousel = readPendingCarouselApproval(trustedSessionReadResult.messages, { identity, conversationId });
+    if (pendingCarousel && isCarouselApprovalConfirmation(message)) {
+      const reply = buildCarouselApprovedReply({ pending: pendingCarousel });
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, []) };
+    }
+    if (pendingCarousel && isCarouselApprovalCancellation(message)) {
+      const reply = buildCarouselCancellationReply();
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, []) };
+    }
+    if (isCarouselRequest(message)) {
+      const carouselPlan = planCarousel({ brief: extractCarouselBrief(message) });
+      const { reply } = buildCarouselStoryboardReply({ identity, conversationId, brief: message, plan: carouselPlan });
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, []) };
     }
 
     // Text-to-video executes via the existing MuAPI adapter and its polling method.

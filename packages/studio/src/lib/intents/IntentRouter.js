@@ -25,6 +25,7 @@ import {
 } from "../character/CharacterLipSyncConstants.js";
 import { TWIN_BLUEPRINTS, getBlueprint } from "../twin/TwinBlueprints.js";
 import { listTwins } from "../twin/TwinStore.js";
+import { MOTION_CAROUSEL_INTENT } from "../mavenCarouselIntent.js";
 
 export const INTENT_CATEGORIES = Object.freeze(["Video", "Motion Graphics", "Character", "Campaign", "AI Twins"]);
 
@@ -159,6 +160,7 @@ const BASE_INTENTS = [
       skillIds: ["vibe-motion"],
     },
   },
+  MOTION_CAROUSEL_INTENT,
   {
     id: "performance-transfer",
     name: "Transfer a performance",

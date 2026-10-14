@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import MarketingMotionPanel from "./MarketingMotionPanel.jsx";
+import MavenCarouselPanel from "./MavenCarouselPanel.jsx";
 import {
   PromptSegmentedControl,
   PromptSegmentOption,
@@ -19,7 +20,7 @@ import { VibeMotionContent } from "../VibeMotionStudio.jsx";
  *   execute the identical runMotionGraphics runtime. No logic is duplicated.
  */
 export default function MarketingMotionWorkspace({ apiKey, motionTarget = null, onExit }) {
-  const [mode, setMode] = useState("graphics"); // 'graphics' | 'vibe'
+  const [mode, setMode] = useState("graphics"); // 'graphics' | 'vibe' | 'carousel'
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-app-bg">
@@ -40,12 +41,21 @@ export default function MarketingMotionWorkspace({ apiKey, motionTarget = null, 
           >
             Vibe Motion
           </PromptSegmentOption>
+          <PromptSegmentOption
+            type="button"
+            onClick={() => setMode("carousel")}
+            selected={mode === "carousel"}
+          >
+            Carousel
+          </PromptSegmentOption>
         </PromptSegmentedControl>
       </div>
 
       <div className="relative flex-1 min-h-0">
         {mode === "graphics" ? (
           <MarketingMotionPanel apiKey={apiKey} motionTarget={motionTarget} onExit={onExit} />
+        ) : mode === "carousel" ? (
+          <MavenCarouselPanel onExit={onExit} />
         ) : (
           <VibeMotionContent apiKey={apiKey} />
         )}

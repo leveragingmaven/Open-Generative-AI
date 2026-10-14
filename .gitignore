@@ -41,5 +41,10 @@ out/
 .playwright-cli/
 output/playwright/
 
+# Maven Motion Carousel render output (local renders + re-render cache)
+output/maven-motion/
+output/maven-motion-carousel-demo/
+.carousel-cache/
+
 # Agent temporary files
 .agents/
