@@ -175,7 +175,13 @@ await writeFile(resolve(outDir, 'deck.json'), JSON.stringify(DECK, null, 2), 'ut
 
 const manifest = {
   project: 'MavenSync native motion renderer — demonstration',
-  renderer: { id: renderer.id, version: renderer.version },
+  renderer: {
+    id: renderer.id,
+    version: renderer.version,
+    // The revision of the drawing code these videos came from, so the output can be
+    // checked against the sources it was rendered with (verify-frames.mjs reads it).
+    revision: native.job.result?.rendererRevision || null,
+  },
   visualPreset: args.preset,
   brand: { id: 'mavensync', colors: DECK.colors, handle: DECK.handle },
   canvas: { width: 1080, height: 1350, fps: 30, slideSeconds: 8 },

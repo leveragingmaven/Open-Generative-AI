@@ -80,6 +80,10 @@ export function createMotionCarouselWorker({
       // audited after the fact (and so the UI can show it).
       renderer: renderResult.renderer || resolvedRenderer.id || null,
       rendererVersion: renderResult.rendererVersion || resolvedRenderer.version || null,
+      // The exact revision of the drawing code that produced these files, derived from
+      // its sources. Recorded so a finished render can be proven to come from the code
+      // that is checked out, rather than from a cached frame an older version wrote.
+      rendererRevision: renderResult.rendererRevision || null,
       summary: plan.summary,
       // What the renderer actually did. The plan can only compare against the
       // fingerprints it was given, while the renderer's own cache may hold more
