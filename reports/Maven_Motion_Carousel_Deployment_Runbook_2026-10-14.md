@@ -4,8 +4,20 @@ Date: 2026-10-14 · Branch `feature/maven-motion-carousel` · HEAD **`c0b5579`**
 · Production branch `creator-ui-redesign` **still at `e8a6061` — not integrated, not deployed**
 · No Coolify state, database, or production host was read or changed by this runbook's session.
 
-The integration is a **14-commit fast-forward** (`a1345cd` + 6 motion commits + 5 verification commits
-+ the R2 storage commit and its report), so no merge commit and no conflict resolution is involved.
+The integration is a **strict fast-forward**: `origin/creator-ui-redesign` holds no commit the feature
+branch lacks, so there is no merge commit and no conflict resolution. Verify it live rather than
+counting by hand — `git rev-list --left-right --count origin/creator-ui-redesign...feature/maven-motion-carousel`
+must read `0<TAB>N` (nothing on the left):
+
+```
+a1345cd  poster-that-could-not-be-stored logging (the one pre-existing commit)
+114915e 15b6faa 5e2e011 8e6041d 558c812 a69b8d3   motion engine, queue, drawing fixes
+5b625a4 ed39596 7b4edcf df9ab14 0418670           store timestamps, allowlist, renderer docs, progress
+c0b5579 6102b31 dd25bc8                          R2 storage, its report, runbook counts
+```
+
+The number of commits grows with documentation commits on this branch; what must always hold is the
+`0` on the left — nothing on the production branch that the feature branch does not contain.
 
 This is the hand-off for the five things that must be confirmed before the production push.
 It supersedes §4/§9 of
@@ -171,15 +183,14 @@ then add customer emails as the rollout widens.
 Sequence (from the current state, after §1–§3 are confirmed):
 
 1. `git fetch origin`; confirm `origin/creator-ui-redesign` is still `e8a6061` and that nobody has
-   pushed since. The feature branch is a strict superset, so the integration is a **fast-forward of 14
-   commits** (`a1345cd` + 6 motion commits + 5 verification commits + the R2 storage commit and its
-   report) — never a merge commit, never a force:
+   pushed since, and that the integration is still a forward-only move — never a merge commit, never a
+   force:
 ```bash
+git rev-list --left-right --count origin/creator-ui-redesign...feature/maven-motion-carousel
+# expect: 0<TAB>N   (nothing on the production branch that the feature branch lacks)
+git merge-base --is-ancestor origin/creator-ui-redesign feature/maven-motion-carousel && echo fast-forward
+
 git checkout creator-ui-redesign && git merge --ff-only feature/maven-motion-carousel
-# 14 commits: a1345cd + 114915e 15b6faa 5e2e011 8e6041d 558c812 a69b8d3
-#           + 5b625a4 ed39596 7b4edcf df9ab14 0418670 c0b5579 6102b31
-# origin/creator-ui-redesign is 14 behind and 0 ahead — verified with
-#   git rev-list --left-right --count origin/creator-ui-redesign...feature/maven-motion-carousel
 ```
    `--ff-only` makes any divergence fail loudly instead of silently creating a merge.
 2. Re-run `npm test` and `npm run build` on the merged tree (they pass on `c0b5579`; the merge adds
