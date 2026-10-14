@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { S3AssetStorage } from "../../packages/studio/src/lib/intelligence/S3AssetStorage.js";
 import { planCarousel } from "../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js";
 import { InMemoryMotionCarouselJobStore } from "./motionCarouselJobStore.js";
+import { carouselObjectKey } from "./motionCarouselStorage.js";
 import {
   handleMotionCarouselPost,
   handleMotionCarouselGet,
@@ -130,4 +133,165 @@ test("the output directory is confined to a sanitized identity folder", () => {
   const dir = carouselOutputDir("../../evil/creator", ENV);
   assert.ok(dir.startsWith(ENV.MAVEN_MOTION_OUTPUT_DIR));
   assert.ok(!dir.includes(".."));
+});
+// ── Serving finished carousels from object storage ───────────────────────────
+//
+// The same `S3AssetStorage` adapter the rest of Creator OS uses, wired to an
+// in-process bucket: the endpoint is exercised against the real storage class.
+
+const R2_ENV = {
+  R2_ENDPOINT: 'https://9d6a8fc39bc8bf418dabe42f23ba2d45.r2.cloudflarestorage.com',
+  R2_BUCKET: 'mavensync-assets',
+  R2_ACCESS_KEY_ID: 'test-id',
+  R2_SECRET_ACCESS_KEY: 'test-secret',
+};
+
+function objectStorage({ objects = new Map() } = {}) {
+  const reads = [];
+  const client = {
+    async headObject({ Key }) {
+      const object = objects.get(Key);
+      if (!object) throw new Error('NotFound');
+      return { ContentType: object.contentType, ContentLength: object.body.length, Metadata: {}, ETag: 'etag' };
+    },
+    async getObject({ Key, Range }) {
+      reads.push({ key: Key, range: Range || null });
+      const object = objects.get(Key);
+      if (!object) return {};
+      if (!Range) return { Body: Readable.from([object.body]), ContentType: object.contentType, ContentLength: object.body.length };
+      const match = /^bytes=(\d+)-(\d*)$/.exec(Range);
+      const start = Number(match[1]);
+      const end = match[2] ? Number(match[2]) : object.body.length - 1;
+      const slice = object.body.subarray(start, end + 1);
+      return {
+        Body: Readable.from([slice]),
+        ContentType: object.contentType,
+        ContentLength: slice.length,
+        ContentRange: `bytes ${start}-${end}/${object.body.length}`,
+      };
+    },
+    async putObject() {},
+    async deleteObject() {},
+  };
+  return { objects, reads, storage: new S3AssetStorage({ client, bucket: 'mavensync-assets' }) };
+}
+
+/** A completed job record as the store holds it, with one durable slide. */
+function storedJob({ accountId = '1', name = 'slide-01.mp4', fingerprint = 'aaaa1111', key = null } = {}) {
+  const expected = key || carouselObjectKey({ accountId, fingerprint, file: name });
+  return {
+    id: 'mcar-1',
+    accountId,
+    result: {
+      storage: {
+        state: 'stored', mode: 'r2', objects: 1, reused: 0,
+        files: [{ slot: name.replace(/\.[^.]+$/, ''), name, kind: 'slide', contentType: 'video/mp4', bytes: 12, fingerprint, key: expected, storageReference: `storage://${expected}`, reused: false }],
+      },
+    },
+  };
+}
+
+/** A store that scopes by account exactly like the MySQL one does. */
+function jobStore(job) {
+  return { async get(jobId, { accountId } = {}) { return jobId === job.id && String(accountId) === String(job.accountId) ? job : null; } };
+}
+
+async function bytes(response) {
+  return Buffer.from(await response.arrayBuffer());
+}
+
+test('a finished carousel is served to its owner from object storage', async () => {
+  const job = storedJob();
+  const file = job.result.storage.files[0];
+  const fixture = objectStorage({ objects: new Map([[file.key, { body: Buffer.from('stored-video'), contentType: 'video/mp4' }]]) });
+  const store = jobStore(job);
+
+  const response = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'video/mp4');
+  assert.equal(response.headers.get('content-length'), String('stored-video'.length));
+  assert.equal(response.headers.get('accept-ranges'), 'bytes');
+  assert.match(response.headers.get('cache-control'), /private/);
+  assert.equal((await bytes(response)).toString(), 'stored-video');
+
+  // A range request is honoured so the full-deck video can be scrubbed/played.
+  const ranged = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { headers: { range: 'bytes=0-3' } }),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers.get('content-range'), 'bytes 0-3/12');
+  assert.equal((await bytes(ranged)).toString(), 'stor');
+
+  const head = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { method: 'HEAD' }),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('content-length'), '12');
+
+  // A malformed range is refused rather than passed through to storage.
+  const bad = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { headers: { range: 'bytes=0-3,5-6' } }),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(bad.status, 416);
+});
+
+test('another account cannot reach a stored carousel, and storage is never consulted', async () => {
+  const job = storedJob();
+  const file = job.result.storage.files[0];
+  const fixture = objectStorage({ objects: new Map([[file.key, { body: Buffer.from('stored-video'), contentType: 'video/mp4' }]]) });
+
+  const other = await handleMotionCarouselGet(
+    new Request('https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1'),
+    { identity: { accountId: '2', identityKey: 'creator-2' }, store: jobStore(job), env: ENV, storage: fixture.storage },
+  );
+  assert.equal(other.status, 404);
+  assert.equal((await other.json()).code, 'file_not_found');
+  assert.deepEqual(fixture.reads, [], 'nothing was fetched for an account that does not own the job');
+
+  // The same job, addressed by another account's key: the stored record cannot be
+  // made to point at someone else's object.
+  const foreignKey = carouselObjectKey({ accountId: '2', fingerprint: 'aaaa1111', file: 'slide-01.mp4' });
+  const tampered = objectStorage({ objects: new Map([[foreignKey, { body: Buffer.from('someone-elses-video'), contentType: 'video/mp4' }]]) });
+  const manipulated = await handleMotionCarouselGet(
+    new Request('https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1'),
+    { identity: IDENTITY, store: jobStore({ ...job, result: { storage: { files: [{ ...file, key: foreignKey, storageReference: `storage://${foreignKey}` }] } } }), env: ENV, storage: tampered.storage },
+  );
+  assert.equal(manipulated.status, 404);
+  assert.deepEqual(tampered.reads, []);
+});
+
+test('an unknown job, file or extension is a 404 and never touches storage', async () => {
+  const job = storedJob();
+  const file = job.result.storage.files[0];
+  const fixture = objectStorage({ objects: new Map([[file.key, { body: Buffer.from('stored-video'), contentType: 'video/mp4' }]]) });
+  const store = jobStore(job);
+
+  for (const url of [
+    'https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-other',
+    'https://example.test/api/motion-carousel?file=slide-09.mp4&jobId=mcar-1',
+    'https://example.test/api/motion-carousel?file=deck.env&jobId=mcar-1',
+    'https://example.test/api/motion-carousel?file=..%2F..%2F.native-cache%2Fmanifest.json&jobId=mcar-1',
+  ]) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await handleMotionCarouselGet(new Request(url), { identity: IDENTITY, store, env: ENV, storage: fixture.storage });
+    assert.equal(response.status, 404, url);
+  }
+  assert.deepEqual(fixture.reads, []);
+});
+
+test('status reports where a finished carousel will be kept', async () => {
+  const local = await (await handleMotionCarouselGet(new Request('https://example.test/api/motion-carousel'), { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV })).json();
+  assert.equal(local.storage.mode, 'local');
+  assert.equal(local.storage.durable, false);
+
+  const durable = await (await handleMotionCarouselGet(new Request('https://example.test/api/motion-carousel'), { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: { ...ENV, ...R2_ENV } })).json();
+  assert.equal(durable.storage.mode, 'r2');
+  assert.equal(durable.storage.durable, true);
+  assert.equal(durable.storage.provider, 'cloudflare-r2');
 });

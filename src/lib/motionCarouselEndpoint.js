@@ -9,6 +9,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { Readable } from 'node:stream';
 import { planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
 import {
   enqueueMotionCarouselRender,
@@ -23,9 +24,12 @@ import { MySqlMotionCarouselJobStore } from './motionCarouselJobStore.js';
 import { carouselOutputDir, carouselFileUrl } from './motionCarouselPaths.js';
 import { resolveCarouselRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
 import { describeRenderer } from './motionCarouselRendererSelection.js';
+import { carouselContentType, ownedCarouselFile, safeCarouselFileName, resolveCarouselStorageMode } from './motionCarouselStorage.js';
+import { getR2MediaStorage } from './r2MediaStorage.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
+const RANGE = /^bytes=(?:\d+-\d*|-\d+)$/;
 
 export { carouselOutputDir };
 
@@ -119,10 +123,17 @@ function planResponse(body = {}) {
 }
 
 /** GET (status/list) or GET ?file=<name> (download). */
-export async function handleMotionCarouselGet(request, { identity, store, env = process.env } = {}) {
+export async function handleMotionCarouselGet(request, { identity, store, storage = null, env = process.env } = {}) {
   const url = new URL(request.url);
   const file = url.searchParams.get('file');
-  if (file) return serveCarouselFile(file, identity, env);
+  if (file) {
+    return serveCarouselFile(file, identity, env, {
+      jobId: url.searchParams.get('jobId'),
+      request,
+      store,
+      storage,
+    });
+  }
 
   const jobId = url.searchParams.get('jobId');
   const wantsList = url.searchParams.get('jobs');
@@ -140,28 +151,103 @@ export async function handleMotionCarouselGet(request, { identity, store, env = 
   }
 
   const renderer = describeRenderer({ env, runtime: resolveCarouselRuntime(env) });
+  const storageMode = resolveCarouselStorageMode(env);
   return Response.json({
     ok: true,
     configured: renderer.configured,
     runtime: renderer.detail,
     renderer: { id: renderer.id, mode: renderer.mode, label: renderer.label },
     workerRunning: Boolean(getMotionCarouselWorker()),
+    // Where a finished carousel will be kept: the shared Creator OS object
+    // storage, or only the local working directory (development / unconfigured).
+    storage: { mode: storageMode, durable: storageMode === 'r2', provider: storageMode === 'r2' ? 'cloudflare-r2' : null },
   });
 }
 
-export async function serveCarouselFile(name, identity, env = process.env) {
-  // Only a plain file name inside the identity's own directory may be served.
-  if (basename(name) !== name || !SAFE_FILE.test(name)) {
+/**
+ * Streams a finished carousel file from the caller's own durable copy.
+ *
+ * The object is only ever addressed by recomputing its key from the job's own
+ * account and the recorded content fingerprint (`ownedCarouselFile`), so a
+ * manipulated name, a manipulated record or another account's job resolves to
+ * nothing. Range requests are supported so a full-deck MP4 plays in the browser.
+ *
+ * Returns null when there is no durable copy to serve, which leaves the local
+ * working-directory path as the fallback for development and for jobs rendered
+ * before storage was configured.
+ */
+async function serveStoredCarouselFile(name, identity, { jobId, request = null, store = null, storage = null } = {}) {
+  const accountId = identity?.accountId;
+  if (accountId == null || !jobId) return null;
+  let job = null;
+  try {
+    job = await (store || new MySqlMotionCarouselJobStore()).get(String(jobId), { accountId });
+  } catch {
+    return null;
+  }
+  const file = ownedCarouselFile(job, name);
+  if (!file) return null;
+  const range = request?.headers?.get?.('range') || null;
+  if (range && !RANGE.test(range)) return jsonError('Unsupported range.', 'invalid_range', 416);
+  let objectStorage;
+  try {
+    objectStorage = storage || getR2MediaStorage();
+  } catch {
+    return null;
+  }
+  let object;
+  try {
+    object = request?.method === 'HEAD'
+      ? await objectStorage.getMetadata(file.key)
+      : await objectStorage.getObject(file.key, range ? { range } : {});
+  } catch {
+    return null;
+  }
+  if (!object) return null;
+  const contentType = String(object.ContentType || object.contentType || file.contentType || 'application/octet-stream');
+  const headers = new Headers({
+    'content-type': contentType,
+    'cache-control': 'private, no-store',
+    'x-content-type-options': 'nosniff',
+    'accept-ranges': 'bytes',
+  });
+  if (request?.method === 'HEAD') {
+    const length = Number(object.ContentLength ?? object.sizeBytes);
+    if (Number.isSafeInteger(length) && length > 0) headers.set('content-length', String(length));
+    return new Response(null, { status: 200, headers });
+  }
+  // `ContentLength` is the length of the bytes actually being returned, so a range
+  // response keeps its own length and just adds `Content-Range`.
+  const length = Number(object.ContentLength ?? object.sizeBytes);
+  if (Number.isSafeInteger(length) && length > 0) headers.set('content-length', String(length));
+  if (object.ContentRange) headers.set('content-range', String(object.ContentRange));
+  // `getReader` marks a web stream; the S3 SDK hands back a Node stream instead.
+  const body = typeof object.Body?.getReader === 'function'
+    ? object.Body
+    : (object.Body instanceof Readable ? Readable.toWeb(object.Body) : object.Body);
+  if (!body) return null;
+  return new Response(body, { status: object.ContentRange ? 206 : 200, headers });
+}
+
+export async function serveCarouselFile(name, identity, env = process.env, { jobId = null, request = null, store = null, storage = null } = {}) {
+  // Only a plain file name may be served: no traversal, no unknown extensions.
+  const safe = safeCarouselFileName(name);
+  if (basename(name) !== name || !SAFE_FILE.test(String(name)) || !safe) {
     return jsonError('Unknown carousel file.', 'file_not_found', 404);
   }
+  // A finished render lives in Creator OS object storage; the local directory is
+  // only where it was produced (and the fallback when nothing was stored).
+  const stored = await serveStoredCarouselFile(safe, identity, { jobId, request, store, storage });
+  if (stored) return stored;
+
   const dir = carouselOutputDir(identityFolder(identity), env);
   let bytes;
   try {
-    bytes = await readFile(join(dir, name));
+    bytes = await readFile(join(dir, safe));
   } catch {
     return jsonError('Carousel file not found.', 'file_not_found', 404);
   }
-  const ext = name.split('.').pop().toLowerCase();
+  const ext = safe.split('.').pop().toLowerCase();
   return new Response(bytes, {
     status: 200,
     headers: {

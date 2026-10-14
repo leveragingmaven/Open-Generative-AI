@@ -15,6 +15,12 @@
  *   3. An entry is only trusted when the file still exists and its probed geometry
  *      matches what the cache claims.
  *
+ * The cache is local scratch space, so a replaced container loses the files it
+ * points at. An optional `restore` hook is therefore consulted when an entry's file
+ * is gone: it is expected to fetch the artifact back (Creator OS stores carousel
+ * artifacts in Cloudflare R2 under the same fingerprint) and rules 1–3 still decide
+ * whether the restored file may be trusted.
+ *
  * Node-only module.
  */
 
@@ -53,8 +59,9 @@ export function geometryMatches(claimed, probed, { tolerantFrames = 2 } = {}) {
  * @param {string} options.accountId  the server-derived account
  * @param {Function} options.loadFs   injectable `node:fs/promises`
  * @param {Function} options.probe    async (filePath) => geometry (FFprobe); optional
+ * @param {Function} options.restore  async ({ file, fingerprint }) => path|null; optional
  */
-export function createRenderCache({ outDir, accountId, loadFs, probe = null, logger = null } = {}) {
+export function createRenderCache({ outDir, accountId, loadFs, probe = null, restore = null, logger = null } = {}) {
   if (!outDir) throw new Error('A render cache needs an output directory.');
   const dir = join(outDir, CACHE_DIR);
   const file = join(dir, CACHE_FILE);
@@ -74,6 +81,23 @@ export function createRenderCache({ outDir, accountId, loadFs, probe = null, log
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * The local path for a cache entry, fetching it back when the file is gone.
+   * Returns null when the file is neither on disk nor restorable.
+   */
+  async function resolveEntryFile(entry) {
+    const path = join(outDir, entry.file);
+    if (await fileExists(path)) return path;
+    if (!restore) return null;
+    try {
+      const restoredPath = await restore({ file: entry.file, fingerprint: entry.fingerprint });
+      return restoredPath && (await fileExists(restoredPath)) ? restoredPath : null;
+    } catch {
+      // A restore that fails is a cache miss, never a render failure.
+      return null;
     }
   }
 
@@ -124,8 +148,8 @@ export function createRenderCache({ outDir, accountId, loadFs, probe = null, log
       if (!loaded) await this.load();
       const entry = manifest.slides[String(index)];
       if (!entry || entry.fingerprint !== fingerprint) return null;
-      const path = join(outDir, entry.file);
-      if (!(await fileExists(path))) return null;
+      const path = await resolveEntryFile(entry);
+      if (!path) return null;
       if (probe) {
         try {
           const probed = await probe(path);
@@ -145,8 +169,8 @@ export function createRenderCache({ outDir, accountId, loadFs, probe = null, log
       if (!loaded) await this.load();
       const entry = manifest.exports[exportKey(presetId, index)];
       if (!entry || entry.fingerprint !== fingerprint) return null;
-      const path = join(outDir, entry.file);
-      if (!(await fileExists(path))) return null;
+      const path = await resolveEntryFile(entry);
+      if (!path) return null;
       if (probe) {
         try {
           const probed = await probe(path);
@@ -166,8 +190,8 @@ export function createRenderCache({ outDir, accountId, loadFs, probe = null, log
       if (!loaded) await this.load();
       const entry = manifest.fullDeck;
       if (!entry || entry.fingerprint !== fingerprint) return null;
-      const path = join(outDir, entry.file);
-      if (!(await fileExists(path))) return null;
+      const path = await resolveEntryFile(entry);
+      if (!path) return null;
       if (probe) {
         try {
           const probed = await probe(path);

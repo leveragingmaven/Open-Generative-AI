@@ -19,7 +19,12 @@ const MIME = {
 const PREFIX = 'creator-os/production';
 const MAX_POSTER_BYTES = 1024 * 1024;
 
-function accountPath(accountId) {
+/**
+ * The account's own segment of the object namespace. Exported so every Creator OS
+ * feature that stores into the same bucket derives the same account path from the
+ * same rule instead of inventing a second one.
+ */
+export function accountPath(accountId) {
   return crypto.createHash('sha256').update(String(accountId)).digest('hex');
 }
 

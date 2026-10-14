@@ -17,6 +17,7 @@ function progressLabel(job) {
   if (job.phase === "queued") return "Queued — waiting for a renderer";
   if (job.phase === "rendering") return "Rendering slides locally…";
   if (job.phase === "postprocessing") return "Building platform exports…";
+  if (job.phase === "storing") return "Saving the finished carousel…";
   if (job.status === "completed") return "Completed";
   if (job.status === "failed") return "Failed";
   if (job.status === "canceled") return "Canceled";
@@ -289,6 +290,14 @@ export default function MavenCarouselPanel({ onExit }) {
               {result.reusedSlides?.length ? <p className="mt-1 text-[11px] text-emerald-200">Reused {result.reusedSlides.length} unchanged slide(s).</p> : null}
               {result.renderer ? (
                 <p className="mt-1 text-[11px] text-white/45">Rendered by {result.renderer}{result.rendererVersion ? ` · ${result.rendererVersion}` : ""}</p>
+              ) : null}
+              {result.storage?.state === "stored" ? (
+                <p className="mt-1 text-[11px] text-white/45">
+                  {result.storage.objects} file(s) saved to Creator OS storage
+                  {result.storage.reused ? ` · ${result.storage.reused} already stored` : ""}
+                </p>
+              ) : result.storage?.state === "local" ? (
+                <p className="mt-1 text-[11px] text-amber-200">This render was not uploaded: durable storage is not configured on this deployment.</p>
               ) : null}
               {(result.warnings || []).map((warning, i) => (
                 <p key={`w${i}`} className="mt-1 text-[11px] text-amber-200">{warning}</p>

@@ -13,6 +13,7 @@
  */
 import crypto from 'node:crypto';
 import { getCreatorDatabasePool } from './creatorAccountStore.js';
+import { publicCarouselStorageView } from './motionCarouselStorage.js';
 
 export const MOTION_CAROUSEL_JOB_STATUS = Object.freeze({
   QUEUED: 'queued',
@@ -26,6 +27,8 @@ export const MOTION_CAROUSEL_JOB_PHASE = Object.freeze({
   QUEUED: 'queued',
   RENDERING: 'rendering',
   POSTPROCESSING: 'postprocessing',
+  // Finished files are being stored durably before the job is allowed to complete.
+  STORING: 'storing',
   COMPLETED: 'completed',
   FAILED: 'failed',
   CANCELED: 'canceled',
@@ -110,6 +113,19 @@ export function createMotionCarouselJobRecord({
   };
 }
 
+/**
+ * The public view of a finished render.
+ *
+ * The durable file list keeps what a client legitimately needs (name, kind, size,
+ * content fingerprint) and drops the object keys and storage references, which are
+ * server-side addressing only.
+ */
+export function publicMotionCarouselResultView(result) {
+  if (!result || typeof result !== 'object') return result || null;
+  if (!result.storage) return result;
+  return { ...result, storage: publicCarouselStorageView(result.storage) };
+}
+
 /** The public view returned to the client: no deck or filesystem details leak. */
 export function publicMotionCarouselJobView(job) {
   if (!job) return null;
@@ -121,7 +137,7 @@ export function publicMotionCarouselJobView(job) {
     presetId: job.presetId,
     attempts: Number(job.attemptCount || 0),
     fingerprints: job.fingerprints || null,
-    result: job.result || null,
+    result: publicMotionCarouselResultView(job.result),
     failure: job.error || null,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,

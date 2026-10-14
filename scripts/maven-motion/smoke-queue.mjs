@@ -8,8 +8,15 @@
  * bundled fonts), account-scoped file storage, and the download/ownership rules
  * the API enforces.
  *
- * It writes only rows for its own two synthetic accounts and only files under
- * `MAVEN_MOTION_OUTPUT_DIR`. Point it at a scratch database, never at production.
+ * With the R2_* variables set it also proves the durable half: finished assets are
+ * uploaded through the existing Creator OS object storage, the local copies are
+ * discarded, and the files are still downloadable from the account-scoped endpoint.
+ * Without them it runs the local-disk path, and says which one it ran.
+ *
+ * It writes only rows for its own two synthetic accounts, only files under
+ * `MAVEN_MOTION_OUTPUT_DIR`, and (when storage is configured) only objects under the
+ * smoke accounts' own key prefixes. Point it at a scratch database, never at
+ * production.
  *
  *   DB_HOST=127.0.0.1 DB_PORT=3399 DB_USER=root DB_NAME=creator_smoke \
  *   MAVEN_MOTION_OUTPUT_DIR=/tmp/maven-motion-smoke \
@@ -21,6 +28,9 @@
 import { mkdtemp, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+
+import { accountPath } from '../../src/lib/creativeMediaStorage.js';
 
 import { planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
 import { MySqlMotionCarouselJobStore, MOTION_CAROUSEL_JOB_STATUS } from '../../src/lib/motionCarouselJobStore.js';
@@ -33,6 +43,8 @@ import { createMotionCarouselWorker } from '../../src/lib/motionCarouselWorker.j
 import { createConfiguredCarouselRenderer, describeRenderer } from '../../src/lib/motionCarouselRendererSelection.js';
 import { handleMotionCarouselGet, handleMotionCarouselPost } from '../../src/lib/motionCarouselEndpoint.js';
 import { carouselOutputDir } from '../../src/lib/motionCarouselPaths.js';
+import { carouselCacheManifestKey, resolveCarouselStorageMode } from '../../src/lib/motionCarouselStorage.js';
+import { getR2MediaStorage } from '../../src/lib/r2MediaStorage.js';
 
 const OWNER = { accountId: 9001, identityKey: 'ai-gency:smoke-owner', email: 'owner@smoke.test', role: 'owner' };
 const OTHER = { accountId: 9002, identityKey: 'ai-gency:smoke-other', email: 'other@smoke.test', role: 'customer' };
@@ -61,10 +73,16 @@ const env = process.env;
 if (!env.MAVEN_MOTION_OUTPUT_DIR) env.MAVEN_MOTION_OUTPUT_DIR = await mkdtemp(join(tmpdir(), 'maven-motion-smoke-'));
 const outRoot = env.MAVEN_MOTION_OUTPUT_DIR;
 const ownerDir = carouselOutputDir(OWNER.identityKey, env);
+// 'r2' means finished carousels are uploaded and the local copies are discarded;
+// 'local' means they stay on disk. Both are valid, and the checks below follow the
+// mode that is actually configured rather than assuming one.
+const storageMode = resolveCarouselStorageMode(env);
+const durable = storageMode === 'r2';
 
 console.log(`[smoke] database ${env.DB_USER || '?'}@${env.DB_HOST || '?'}:${env.DB_PORT || '3306'}/${env.DB_NAME || '?'}`);
 console.log(`[smoke] output   ${outRoot}`);
-console.log(`[smoke] renderer ${JSON.stringify(describeRenderer({ env }))}\n`);
+console.log(`[smoke] renderer ${JSON.stringify(describeRenderer({ env }))}`);
+console.log(`[smoke] storage  ${storageMode}${durable ? ' (Creator OS object storage)' : ' (local working directory only)'}\n`);
 
 const store = new MySqlMotionCarouselJobStore();
 let worker = null;
@@ -111,10 +129,20 @@ try {
   eq('job A records the native renderer', jobA.result?.renderer, 'mavensync-native');
   eq('job A rendered every slide', jobA.result?.renderedSlides?.length, deck.slides.length);
   check('job A published a download URL for every slide', jobA.result?.slideFiles?.length === deck.slides.length, JSON.stringify(jobA.result?.slideFiles));
-  check('slides, poster and full deck exist on disk', (await Promise.all([
-    'slide-01.mp4', 'slide-02.mp4', 'slide-03.mp4', 'cover.png', 'slides-still.pdf', 'full-deck.mp4',
-  ].map((name) => exists(join(ownerDir, name))))).every(Boolean), ownerDir);
+  check('job A published a durable download URL for every slide', (jobA.result?.slideFiles || []).every((url) => /&jobId=/.test(url)), JSON.stringify(jobA.result?.slideFiles?.[0]));
   check('the render scratch cache was cleaned up', !(await exists(join(ownerDir, '.carousel-cache'))));
+  if (durable) {
+    eq('job A stored every finished file', jobA.result?.storage?.state, 'stored');
+    eq('job A stored as many objects as it reports', jobA.result?.storage?.objects, jobA.result?.storage?.files?.length);
+    check('job A reports no object keys to the client', (jobA.result?.storage?.files || []).every((file) => file.key === undefined && file.storageReference === undefined));
+    check('the finished files no longer need local disk', !(await exists(join(ownerDir, 'slide-01.mp4'))) && !(await exists(join(ownerDir, 'cover.png'))), ownerDir);
+    check('the reuse index is durable for the account', await getR2MediaStorage().getMetadata(carouselCacheManifestKey(OWNER.accountId)).then((object) => Boolean(object)), carouselCacheManifestKey(OWNER.accountId));
+  } else {
+    eq('job A reports that nothing was stored durably', jobA.result?.storage?.state, 'local');
+    check('slides, poster and full deck exist on disk', (await Promise.all([
+      'slide-01.mp4', 'slide-02.mp4', 'slide-03.mp4', 'cover.png', 'slides-still.pdf', 'full-deck.mp4',
+    ].map((name) => exists(join(ownerDir, name))))).every(Boolean), ownerDir);
+  }
 
   // ── 5. Editing one slide re-renders only that slide ───────────────────────
   const edited = deckWithEditedSlide(deck, 1, 'A single edited headline');
@@ -182,14 +210,28 @@ try {
   eq('an unchanged deck reused every slide', JSON.stringify(jobF.result?.renderedSlides), '[]');
 
   // ── 10. Files are served to their owner only ──────────────────────────────
-  const asOwner = await handleMotionCarouselGet(new Request('http://smoke.test/api/motion-carousel?file=slide-01.mp4'), { identity: OWNER, store, env });
+  // The job-addressed URL is what the panel uses and what survives the local copy
+  // being discarded; the bare-name URL only resolves against local disk.
+  const slideUrl = jobA.result.slideFiles[0];
+  const asOwner = await handleMotionCarouselGet(new Request(`http://smoke.test/api/motion-carousel${slideUrl}`), { identity: OWNER, store, env });
   eq('the owner can download a slide', asOwner.status, 200);
   eq('the slide is served as video', asOwner.headers.get('content-type'), 'video/mp4');
   check('the slide download is not publicly cacheable', (asOwner.headers.get('cache-control') || '').includes('private'), asOwner.headers.get('cache-control'));
+  const slideBytes = Buffer.from(await asOwner.arrayBuffer());
+  check('the download is the finished slide', slideBytes.length > 1000, `${slideBytes.length} bytes`);
 
-  const asOther = await handleMotionCarouselGet(new Request('http://smoke.test/api/motion-carousel?file=slide-01.mp4'), { identity: OTHER, store, env });
+  const ranged = await handleMotionCarouselGet(new Request(`http://smoke.test/api/motion-carousel${slideUrl}`, { headers: { range: 'bytes=0-9' } }), { identity: OWNER, store, env });
+  eq('a range request is served', ranged.status, durable ? 206 : 200);
+
+  const asOther = await handleMotionCarouselGet(new Request(`http://smoke.test/api/motion-carousel${slideUrl}`), { identity: OTHER, store, env });
   eq('another account cannot download it', asOther.status, 404);
   eq('another account sees no file detail', (await asOther.json()).code, 'file_not_found');
+
+  if (durable) {
+    // The local working copy is gone, so this 404 proves the file came from storage.
+    const bareName = await handleMotionCarouselGet(new Request('http://smoke.test/api/motion-carousel?file=slide-01.mp4'), { identity: OWNER, store, env });
+    eq('a bare file name is not served once storage owns the file', bareName.status, 404);
+  }
 
   const traversal = await handleMotionCarouselGet(new Request('http://smoke.test/api/motion-carousel?file=..%2F..%2F.agents%2F%23%20.env'), { identity: OWNER, store, env });
   eq('a path traversal attempt is refused', traversal.status, 404);
@@ -214,6 +256,50 @@ try {
   check('the smoke test ran to completion', false, String(error?.stack || error).split('\n').slice(0, 4).join(' | '));
 } finally {
   if (worker) worker.stop();
+  // A run that stored anything must not leave test objects in a shared bucket, and
+  // the sweep is confined to the two synthetic smoke accounts' own prefixes.
+  if (durable) {
+    const swept = await sweepSmokeObjects().catch((error) => ({ error }));
+    check(
+      'the smoke run left no objects in the bucket',
+      !swept.error && swept.remaining === 0,
+      swept.error ? String(swept.error.message || swept.error) : `${swept.removed} object(s) removed`,
+    );
+  }
+}
+
+/**
+ * Deletes every object under the smoke accounts' own carousel prefixes.
+ *
+ * The shared adapter has no list operation, so this sweep talks to the bucket
+ * directly with the same env, and only ever addresses `accounts/<sha256(9001)>`
+ * and `accounts/<sha256(9002)>`. No customer key is listed or deleted.
+ */
+async function sweepSmokeObjects() {
+  const client = new S3Client({
+    region: env.R2_REGION || 'auto',
+    endpoint: new URL(env.R2_ENDPOINT).href,
+    forcePathStyle: true,
+    credentials: { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY },
+  });
+  let removed = 0;
+  for (const accountId of [OWNER.accountId, OTHER.accountId]) {
+    const prefix = `creator-os/production/accounts/${accountPath(accountId)}/`;
+    let token;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const listed = await client.send(new ListObjectsV2Command({ Bucket: env.R2_BUCKET, Prefix: prefix, ContinuationToken: token }));
+      for (const item of listed.Contents || []) {
+        // eslint-disable-next-line no-await-in-loop
+        await client.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: item.Key }));
+        removed += 1;
+      }
+      token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (token);
+  }
+  const prefix = `creator-os/production/accounts/${accountPath(OWNER.accountId)}/`;
+  const remaining = await client.send(new ListObjectsV2Command({ Bucket: env.R2_BUCKET, Prefix: prefix }));
+  return { removed, remaining: (remaining.Contents || []).length };
 }
 
 const failed = checks.filter((c) => !c.ok);

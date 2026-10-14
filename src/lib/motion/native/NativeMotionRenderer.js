@@ -15,7 +15,7 @@
  */
 
 import { basename, join } from 'node:path';
-import { readFile, writeFile, mkdir, rm, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, rename, stat } from 'node:fs/promises';
 import { loadFontRegistry, buildFontContext, fontFaceCss, allFaceAliases, presetFacesFor, fontDirectory } from './fontRegistry.js';
 import { buildNativeSpec, NativeSpecError } from './spec.js';
 import { composeSlideFrame, thumbnailFrameIndex, slideOutputName } from './timeline.js';
@@ -200,6 +200,41 @@ export function createNativeMotionRenderer({
     return rasterizerForSlide.framePng(svg);
   }
 
+  async function pathExists(path) {
+    try {
+      return (await stat(path)).isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The still image for one slide, which every slide needs whether or not its video
+   * was reused: it is the slide's own download and the cover is a copy of the
+   * first one.
+   *
+   * A reused slide may have no local still at all — the render directory is scratch
+   * space now, so the still is fetched back from where the finished carousel was
+   * stored before falling back to drawing it again.
+   */
+  async function ensureSlideStill({ spec, slideIndex, outDir, imageResolver, fontStyle, fingerprint, restore = null }) {
+    const name = `${slideOutputName(slideIndex)}.png`;
+    const target = join(outDir, name);
+    if (await pathExists(target)) return target;
+    if (restore) {
+      try {
+        const restored = await restore({ file: name, fingerprint });
+        if (restored && (await pathExists(restored))) return restored;
+      } catch {
+        // A still is cheap to redraw; a failed fetch must never fail the render.
+      }
+    }
+    const rasterizerForSlide = rasterizer || createRasterizer({ width: spec.width, height: spec.height });
+    const { svg } = composeSlideFrame({ spec, slideIndex, frameIndex: thumbnailFrameIndex(spec), fontStyle, imageResolver });
+    await writeFile(target, await rasterizerForSlide.framePng(svg));
+    return target;
+  }
+
   /**
    * Render (or selectively re-render) a deck.
    * @returns the same result shape the previous bridge returned.
@@ -237,8 +272,11 @@ export function createNativeMotionRenderer({
     };
 
     const accountId = options.accountId ?? plan?.accountId ?? '';
+    // `options.restore` fetches a cache entry's file back when the local scratch
+    // copy is gone (a replaced container). The cache still validates whatever it
+    // gets back, so a restored file is never trusted on faith.
     const cache = cacheOption
-      ? createRenderCache({ outDir, accountId, probe: cacheOption === 'verify' ? resolverProbe : null, logger })
+      ? createRenderCache({ outDir, accountId, probe: cacheOption === 'verify' ? resolverProbe : null, restore: options.restore || null, logger })
       : null;
     if (cache) await cache.load();
 
@@ -273,6 +311,11 @@ export function createNativeMotionRenderer({
       if (cached) {
         slideOutputs[index] = { name: cached.file, path: cached.path, fingerprint: slideKeys[index], duration: cached.duration, reused: true };
         reusedSlides.push(index);
+        // eslint-disable-next-line no-await-in-loop
+        await ensureSlideStill({
+          spec, slideIndex: index, outDir, imageResolver, fontStyle,
+          fingerprint: slideKeys[index], restore: options.restore || null,
+        });
         onProgress?.({ phase: 'rendering', slidesDone: index + 1, slideCount: spec.slides.length });
         continue;
       }
@@ -417,6 +460,9 @@ export function createNativeMotionRenderer({
       preset: plan?.preset || { id: spec.presetId },
       renderedSlides,
       reusedSlides,
+      // The cache key of each produced artifact. Recorded so a durable copy can be
+      // stored (and later restored) under the same content identity the cache uses.
+      cacheKeys: { slides: slideKeys, fullDeck: fullDeckKey },
       spec: { width: spec.width, height: spec.height, fps: spec.fps, frames: spec.frames, durationSeconds: spec.durationSeconds, presetId: spec.presetId },
       warnings,
       stdout: '',
@@ -429,18 +475,19 @@ export function createNativeMotionRenderer({
    * Re-frames rendered slides into a platform export. Unchanged slides reuse their
    * cached export, which is the fix for "one slide changed, every export re-encoded".
    */
-  async function postprocess({ files = [], presetId, preset = null, outDir, signal = undefined, fingerprints = null, accountId = '' } = {}) {
+  async function postprocess({ files = [], presetId, preset = null, outDir, signal = undefined, fingerprints = null, accountId = '', restore = null } = {}) {
     const target = preset || safeExportPreset(presetId);
-    if (!target || target.mode !== 'postprocess') return { outputs: [], preset: target || null };
+    if (!target || target.mode !== 'postprocess') return { outputs: [], keys: [], preset: target || null };
     const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     const suffix = target.fileSuffix || '';
     const inputs = (files || []).filter((name) => /^slide-\d+\.mp4$/i.test(basename(String(name)))).sort();
     // The same cache (and therefore the same account scope) as `render`, so an
     // export manifest is never written under a different owner than the slides.
-    const cache = cacheOption ? createRenderCache({ outDir, accountId, probe: null, logger }) : null;
+    const cache = cacheOption ? createRenderCache({ outDir, accountId, probe: null, restore, logger }) : null;
     if (cache) await cache.load();
 
     const outputs = [];
+    const keys = [];
     for (let index = 0; index < inputs.length; index += 1) {
       if (signal?.aborted) break;
       const name = basename(String(inputs[index]));
@@ -449,7 +496,7 @@ export function createNativeMotionRenderer({
       const fingerprint = hashString(`${fingerprints?.[index] ?? name}|${target.id}|${target.width}x${target.height}|${revision}`);
       // eslint-disable-next-line no-await-in-loop
       const cached = await cache?.getExport(target.id, index, fingerprint);
-      if (cached) { outputs.push(cached.path); continue; }
+      if (cached) { outputs.push(cached.path); keys.push(fingerprint); continue; }
       // eslint-disable-next-line no-await-in-loop
       await reFrame(ffmpegPath, { input: join(outDir, name), output: outputPath, width: target.width, height: target.height, signal });
       // eslint-disable-next-line no-await-in-loop
@@ -461,9 +508,10 @@ export function createNativeMotionRenderer({
         file: outputName, width: geometry.width, height: geometry.height, duration: geometry.duration, fps: geometry.fps,
       });
       outputs.push(outputPath);
+      keys.push(fingerprint);
     }
     if (cache) await cache.save();
-    return { outputs, preset: target };
+    return { outputs, keys, preset: target };
   }
 
   return {
