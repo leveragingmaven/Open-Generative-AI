@@ -37,6 +37,20 @@ export class NativeSpecError extends Error {
 }
 
 /**
+ * Every string a slide supplies, at any depth — used to check the whole slide, not
+ * only the fields the shared headline band draws.
+ */
+export function deckStringsOf(value, depth = 0) {
+  if (depth > 4) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap((item) => deckStringsOf(item, depth + 1));
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap((item) => deckStringsOf(item, depth + 1));
+  }
+  return [];
+}
+
+/**
  * Builds the render specification.
  *
  * @param {object} options
@@ -108,10 +122,14 @@ export function buildNativeSpec({
     };
   });
 
-  // Text the bundled faces cannot draw would rasterise as boxes; surface it now.
+  // Text the bundled faces cannot draw is simply not drawn by an outline renderer,
+  // so it is surfaced here rather than discovered as a blank space on a finished
+  // slide. Every string the deck supplies is checked — captions, list items, badges
+  // and labels as well as the headline — because a glyph that no bundled face has
+  // (a star rating, an arrow) renders as nothing at all.
   for (const slide of slides) {
-    const text = [slide.deckSlide.headline, slide.deckSlide.sub, slide.deckSlide.kicker].filter(Boolean).join(" ");
-    const missing = fontContext.unsupported(text);
+    // eslint-disable-next-line no-await-in-loop
+    const missing = fontContext.unsupported(deckStringsOf(slide.deckSlide).join(" "));
     if (missing.length) warnings.push(`slide ${slide.index + 1} uses characters no bundled font can draw: ${missing.join(" ")}`);
   }
 

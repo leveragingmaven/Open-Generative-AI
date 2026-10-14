@@ -22,6 +22,7 @@ import { composeSlideFrame, thumbnailFrameIndex, slideOutputName } from './timel
 import { createRasterizer, imageDataUriFromFile } from './raster.js';
 import { createRenderCache, CACHE_DIR } from './renderCache.js';
 import { buildAudioTimeline, writeWav, MOODS } from './audio.js';
+import { nativeRenderRevision } from './renderRevision.js';
 import { buildImagePdf } from './pdf.js';
 import { encodeFramesToVideo, muxAudio, muxLoopedAudio, concatVideos, reFrame, probeVideo, FfmpegError } from './ffmpeg.js';
 import { hashString } from '../../../../packages/studio/src/lib/motion/carousel/CarouselDeck.js';
@@ -38,8 +39,14 @@ export function safeExportPreset(presetId) {
 }
 
 export const NATIVE_RENDERER_ID = 'mavensync-native';
-/** Bumped whenever the drawing changes: invalidates every cached frame. */
-export const NATIVE_RENDERER_VERSION = 'native-1';
+/**
+ * Human-readable renderer version, bumped whenever the drawing changes.
+ *
+ * It is no longer the only thing that invalidates cached frames: the cache key also
+ * carries a revision derived from the renderer's own source (see renderRevision.js),
+ * so a code change can never be served from the cache as a finished slide.
+ */
+export const NATIVE_RENDERER_VERSION = 'native-2';
 export const GENERATED_AT_MARKER = '.native-motion';
 
 /** Only a plain image name beside the deck may be loaded (mirrors deck validation). */
@@ -107,10 +114,10 @@ export async function resolveDeckAudio({ deck, outDir, loadFs = null } = {}) {
   }
 }
 
-/** The cache key for one slide: content, renderer version, style and geometry. */
-export function slideCacheKey({ fingerprint, presetId, theme, fps, frames, width, height }) {
+/** The cache key for one slide: content, renderer revision, style and geometry. */
+export function slideCacheKey({ fingerprint, presetId, theme, fps, frames, width, height, revision = NATIVE_RENDERER_VERSION }) {
   return hashString([
-    NATIVE_RENDERER_VERSION, fingerprint, presetId, theme?.surface || '', theme?.accent || '',
+    revision, fingerprint, presetId, theme?.surface || '', theme?.accent || '',
     String(fps), String(frames), `${width}x${height}`,
   ].join('|'));
 }
@@ -237,6 +244,9 @@ export function createNativeMotionRenderer({
 
     const platformPreset = safeExportPreset(plan?.presetId || options.platformPresetId);
     const fingerprints = plan?.fingerprints || null;
+    // Derived from the renderer's own source, so no cached frame can outlive the
+    // drawing code that produced it.
+    const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     const slideKeys = spec.slides.map((slide, index) => slideCacheKey({
       fingerprint: fingerprints?.[index] || String(index),
       presetId: spec.presetId,
@@ -245,6 +255,7 @@ export function createNativeMotionRenderer({
       frames: spec.frames,
       width: spec.width,
       height: spec.height,
+      revision,
     }));
 
     const renderedSlides = [];
@@ -331,7 +342,7 @@ export function createNativeMotionRenderer({
     await writeFile(join(outDir, 'slides-still.pdf'), buildImagePdf(pages, { title: deck.handle || 'Carousel' }));
 
     // Full-deck video: concat when anything changed, otherwise reuse the cached one.
-    const fullDeckKey = hashString(`${slideKeys.join(',')}|${NATIVE_RENDERER_VERSION}|full`);
+    const fullDeckKey = hashString(`${slideKeys.join(',')}|${revision}|full`);
     const cachedFullDeck = await cache?.getFullDeck(fullDeckKey);
     let fullDeckPath = join(outDir, 'full-deck.mp4');
     if (cachedFullDeck && renderedSlides.length === 0) {
@@ -395,6 +406,7 @@ export function createNativeMotionRenderer({
       ok: true,
       renderer: NATIVE_RENDERER_ID,
       rendererVersion: NATIVE_RENDERER_VERSION,
+      rendererRevision: revision,
       files: names,
       slideFiles: spec.slides.map((_, index) => `${slideOutputName(index)}.mp4`),
       coverPath: 'cover.png',
@@ -420,6 +432,7 @@ export function createNativeMotionRenderer({
   async function postprocess({ files = [], presetId, preset = null, outDir, signal = undefined, fingerprints = null, accountId = '' } = {}) {
     const target = preset || safeExportPreset(presetId);
     if (!target || target.mode !== 'postprocess') return { outputs: [], preset: target || null };
+    const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     const suffix = target.fileSuffix || '';
     const inputs = (files || []).filter((name) => /^slide-\d+\.mp4$/i.test(basename(String(name)))).sort();
     // The same cache (and therefore the same account scope) as `render`, so an
@@ -433,7 +446,7 @@ export function createNativeMotionRenderer({
       const name = basename(String(inputs[index]));
       const outputName = `${name.replace(/\.mp4$/i, '')}${suffix}.mp4`;
       const outputPath = join(outDir, outputName);
-      const fingerprint = hashString(`${fingerprints?.[index] ?? name}|${target.id}|${target.width}x${target.height}|${NATIVE_RENDERER_VERSION}`);
+      const fingerprint = hashString(`${fingerprints?.[index] ?? name}|${target.id}|${target.width}x${target.height}|${revision}`);
       // eslint-disable-next-line no-await-in-loop
       const cached = await cache?.getExport(target.id, index, fingerprint);
       if (cached) { outputs.push(cached.path); continue; }

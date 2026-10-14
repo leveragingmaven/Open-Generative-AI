@@ -10,9 +10,10 @@
  */
 
 import { easeOutQuint, progress, stagger } from "./easing.js";
+import { fontViewsFor } from "./fontRegistry.js";
 import { chromeFor } from "./presets.js";
-import { svgDocument, group, lines as linesEl, n, rect, text, translate } from "./svg.js";
-import { fitText } from "./text.js";
+import { svgDocument, group, n, rect, text, translate } from "./svg.js";
+import { fitRuns, lineRuns, lineText, parseRuns } from "./text.js";
 import { CANVAS } from "./theme.js";
 
 /**
@@ -27,46 +28,53 @@ function sharedHeadline(ctx) {
 
   const tracking = ctx.type.displayTracking * 0.6;
   const size = Math.round(ctx.type.displaySize * 0.6);
-  const fitted = fitText(headline, measure, {
+  const fitted = fitRuns(parseRuns(headline), measure, {
     maxWidth: box.w, maxLines: 2, maxSize: size, minSize: Math.round(size * 0.62), letterSpacing: tracking,
   });
   const lineHeight = Math.round(fitted.size * ctx.type.displayLeading);
+  const pillInk = theme.dark ? theme.surface : "#FFFFFF";
 
   return fitted.lines.map((line, index) => {
     const start = 0.06 + stagger(index, fitted.lines.length, ctx.motion.stagger);
     const p = easeOutQuint(progress(t, start, start + ctx.motion.cut + 0.08));
     const baseline = box.y + fitted.size + index * lineHeight;
-    const lineWidth = measure(line.replace(/\[\[|\]\]/g, ""), fitted.size, tracking);
+    const lineWidth = measure(lineText(line), fitted.size, tracking);
     const id = `${ctx.id}-hl-${index}`;
-    ctx.defs.push(`<clipPath id="${id}">${rect({ x: box.x - 8, y: baseline - fitted.size * 1.1, w: Math.max(lineWidth, 40) * p, h: lineHeight * 1.2 })}</clipPath>`);
+    // The wipe has to be as wide as the highlight *pill*, not just the glyphs: a pill
+    // runs `padX` past the last word, and clipping it there left a flat, chopped end.
+    const padX = Math.max(fitted.size * 0.26, 8);
+    ctx.defs.push(`<clipPath id="${id}">${rect({ x: box.x - padX, y: baseline - fitted.size * 1.1, w: Math.max(lineWidth + padX * 2, 40) * p, h: lineHeight * 1.2 })}</clipPath>`);
 
-    const segments = line.split(/(\[\[[^\]]+\]\])/g).filter(Boolean);
+    const runs = lineRuns(line);
+    const spaceWidth = measure(" ", fitted.size, 0);
+    const pills = [];
+    const words = [];
     let cursor = box.x;
-    const pieces = [];
-    for (const segment of segments) {
-      const isPill = segment.startsWith("[[") && segment.endsWith("]]");
-      const label = isPill ? segment.slice(2, -2) : segment;
-      const width = measure(label, fitted.size, tracking);
-      if (isPill) {
-        const padX = fitted.size * 0.32;
-        const pillH = fitted.size * 1.38;
-        pieces.push(rect({
-          x: cursor - padX, y: baseline - fitted.size * 1.02, w: (width + padX * 2) * Math.max(0, (p - 0.35) / 0.65),
+    runs.forEach((run, runIndex) => {
+      const width = measure(run.text, fitted.size, tracking);
+      if (run.highlight) {
+        const pillH = fitted.size * 1.3;
+        pills.push(rect({
+          x: cursor - padX, y: baseline - fitted.size * 0.96, w: (width + padX * 2) * Math.max(0, (p - 0.35) / 0.65),
           h: pillH, rx: pillH / 2, fill: theme.accent,
         }));
-        pieces.push(text({
-          x: cursor, y: baseline, content: label, family: fonts.headline, size: fitted.size,
-          fill: theme.dark ? theme.surface : "#FFFFFF", letterSpacing: tracking,
+        words.push(text({
+          x: cursor, y: baseline, content: run.text, family: fonts.headline, size: fitted.size,
+          fill: pillInk, letterSpacing: tracking, block: "headline-highlight",
         }));
       } else {
-        pieces.push(text({ x: cursor, y: baseline, content: label, family: fonts.headline, size: fitted.size, fill: theme.ink, letterSpacing: tracking }));
+        words.push(text({
+          x: cursor, y: baseline, content: run.text, family: fonts.headline, size: fitted.size,
+          fill: theme.ink, letterSpacing: tracking, block: "headline",
+        }));
       }
-      cursor += width;
-    }
+      cursor += width + (runIndex < runs.length - 1 ? spaceWidth : 0);
+    });
     return group({
       opacity: Math.min(1, p * 1.5),
       transform: translate(0, (1 - p) * fitted.size * 0.16),
-      children: group({ "clip-path": `url(#${id})`, children: pieces }),
+      // Pills first: a highlight is always behind the words it marks.
+      children: group({ "clip-path": `url(#${id})`, children: [...pills, ...words] }),
     });
   });
 }
@@ -85,10 +93,13 @@ export function composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle = ""
   if (fontStyle) defs.push(`<style>${fontStyle}</style>`);
 
   const component = slide.component;
+  // Every run this frame lays out is recorded here: the overflow and overlap checks
+  // read real ink boxes rather than re-deriving where text should have gone.
+  const layout = [];
   const ctx = {
     id: `s${slideIndex}`,
     theme: spec.theme,
-    fonts: spec.fonts,
+    fonts: fontViewsFor(spec.fonts, layout),
     type: spec.type,
     motion: spec.motion,
     measure: spec.measures.measure,
@@ -107,7 +118,9 @@ export function composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle = ""
   const body = [];
 
   // 1. background (preset)
-  body.push(...spec.preset.background({ theme: spec.theme, t, defs, id: ctx.id, slideIndex, slideCount: spec.slides.length }));
+  body.push(...spec.preset.background({
+    theme: spec.theme, t, defs, id: ctx.id, slideIndex, slideCount: spec.slides.length, fonts: ctx.fonts,
+  }));
   // 2. chrome (kicker, counter, footer, progress rail)
   body.push(...chromeFor(spec.preset, { ...ctx, index: slideIndex, count: spec.slides.length }));
 
@@ -127,7 +140,30 @@ export function composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle = ""
   }
 
   const svg = svgDocument({ width: spec.width, height: spec.height, defs, body });
-  return { svg, warnings };
+  return { svg, warnings, layout };
+}
+
+/**
+ * Text that a frame laid out outside the canvas, with a margin to spare.
+ *
+ * This is the check that catches "the headline ran off the edge" before a customer
+ * sees it: it reads the ink boxes the outline renderer recorded, so it is measuring
+ * the glyphs that were actually drawn rather than re-guessing them.
+ */
+export function layoutOverflow(layout = [], { width = CANVAS.width, height = CANVAS.height, tolerance = 2 } = {}) {
+  const problems = [];
+  for (const run of layout) {
+    if (!run.box) continue;
+    const { left, right, top, bottom } = run.box;
+    if (left < -tolerance || right > width + tolerance || top < -tolerance || bottom > height + tolerance) {
+      problems.push({
+        block: run.block,
+        text: run.text,
+        box: { left: Math.round(left), right: Math.round(right), top: Math.round(top), bottom: Math.round(bottom) },
+      });
+    }
+  }
+  return problems;
 }
 
 /** A last-frame SVG, used as the slide thumbnail without re-rendering video. */

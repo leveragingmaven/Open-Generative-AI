@@ -137,18 +137,21 @@ test('a preset may choose a surface treatment, and it stays legible either way',
 });
 
 test('each preset is a distinct style: typography, surface and motion', () => {
+  // `spec.fonts` holds render faces (outlines + metrics), so the alias is what names
+  // the face a preset chose.
+  const aliasOf = (spec) => spec.fonts.headline.alias;
   const seen = new Set();
   for (const presetId of NATIVE_PRESET_IDS) {
     const spec = specFor({ presetId });
     assert.equal(spec.presetId, presetId);
-    seen.add(`${spec.theme.surface}|${spec.fonts.headline}|${spec.motion.cut}`);
+    seen.add(`${spec.theme.surface}|${aliasOf(spec)}|${spec.motion.cut}`);
     assert.ok(spec.type.displaySize > 60);
   }
   assert.equal(seen.size, NATIVE_PRESET_IDS.length, 'no two presets look the same');
   // The presets pick their own headline face rather than one global font.
-  assert.equal(specFor({ presetId: 'minimal_luxe' }).fonts.headline, 'MS-DMSerif-Regular');
-  assert.equal(specFor({ presetId: 'bold_editorial' }).fonts.headline, 'MS-Anton-Regular');
-  assert.equal(specFor({ presetId: 'modern_agency' }).fonts.headline, 'MS-Poppins-SemiBold');
+  assert.equal(aliasOf(specFor({ presetId: 'minimal_luxe' })), 'MS-DMSerif-Regular');
+  assert.equal(aliasOf(specFor({ presetId: 'bold_editorial' })), 'MS-Anton-Regular');
+  assert.equal(aliasOf(specFor({ presetId: 'modern_agency' })), 'MS-Poppins-SemiBold');
 });
 
 test('an unknown preset falls back instead of throwing', () => {

@@ -43,8 +43,8 @@ function baseChrome({ theme, fonts, slide, t, index, count, type }) {
     body.push(group({
       opacity: clamp01(p * 1.6), transform: translate((1 - p) * -18, 0),
       children: text({
-        x: CANVAS.margin, y: 166, content: kicker, family: fonts.mono, size: 27, weight: 500,
-        fill: theme.muted, letterSpacing: type.kickerTracking,
+        x: CANVAS.margin, y: 166, content: kicker, family: fonts.mono, size: 32, weight: 500,
+        fill: theme.muted, letterSpacing: type.kickerTracking, block: "kicker",
       }),
     }));
   }
@@ -52,7 +52,7 @@ function baseChrome({ theme, fonts, slide, t, index, count, type }) {
     opacity: clamp01(p * 1.6),
     children: text({
       x: CANVAS.width - CANVAS.margin, y: 166, content: `${String(index + 1).padStart(2, "0")} / ${String(count).padStart(2, "0")}`,
-      family: fonts.mono, size: 27, weight: 500, fill: theme.muted, anchor: "end", letterSpacing: 2,
+      family: fonts.mono, size: 32, weight: 500, fill: theme.muted, anchor: "end", letterSpacing: 3, block: "counter",
     }),
   }));
 
@@ -61,8 +61,8 @@ function baseChrome({ theme, fonts, slide, t, index, count, type }) {
     body.push(group({
       opacity: footerP,
       children: text({
-        x: CANVAS.margin, y: 1224, content: `@${handle}`, family: fonts.mono, size: 26, weight: 500,
-        fill: theme.muted, letterSpacing: 2,
+        x: CANVAS.margin, y: 1232, content: `@${handle}`, family: fonts.mono, size: 30, weight: 500,
+        fill: theme.muted, letterSpacing: 2, block: "handle",
       }),
     }));
   }
@@ -91,8 +91,8 @@ const minimalLuxe = {
   headlineFont: "editorial",
   surface: (theme) => (theme.dark ? "#14110E" : "#F6F1E8"),
   type: {
-    displaySize: 104, displayWeight: 400, displayLeading: 1.14, displayTracking: -1,
-    subSize: 34, bodySize: 32, kickerTracking: 5,
+    displaySize: 104, displayWeight: 400, displayLeading: 1.16, displayTracking: -1,
+    subSize: 40, bodySize: 36, kickerTracking: 5,
   },
   motion: { stagger: 0.1, entrance: "ease", cut: 0.34 },
   /** A calm ground: warm gradient, a hairline rule and one drifting glow. */
@@ -122,17 +122,16 @@ const boldEditorial = {
   headlineFont: "display",
   surface: (theme) => (theme.dark ? theme.surface : "#0A0A0C"),
   type: {
-    displaySize: 118, displayWeight: 700, displayLeading: 0.98, displayTracking: -2,
-    subSize: 34, bodySize: 31, kickerTracking: 7,
+    displaySize: 118, displayWeight: 700, displayLeading: 1.04, displayTracking: -2,
+    subSize: 40, bodySize: 35, kickerTracking: 7,
   },
   motion: { stagger: 0.07, entrance: "snap", cut: 0.24 },
   /** High contrast: a dark ground, a sweeping accent slab and ghost display type. */
-  background({ theme, t, defs, id, slideIndex }) {
+  background({ theme, t, defs, id }) {
     const slab = `${id}-slab`;
     defs.push(`<linearGradient id="${slab}" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${rgba(theme.accent, 0.95)}"/><stop offset="100%" stop-color="${rgba(theme.accentAlt, 0.95)}"/></linearGradient>`);
     const sweep = easeOutExpo(progress(t, 0.0, 0.34));
     const ghostP = easeOutCubic(progress(t, 0.12, 0.8));
-    const ghostText = `0${slideIndex + 1}`;
     return [
       rect({ x: 0, y: 0, w: CANVAS.width, h: CANVAS.height, fill: theme.surface }),
       // The slab enters as a hard cut, then settles to a corner accent.
@@ -140,12 +139,20 @@ const boldEditorial = {
         transform: `translate(${n((1 - sweep) * -220)} 0) rotate(-7 ${n(CANVAS.width / 2)} ${n(120)})`,
         children: rect({ x: -80, y: -60, w: CANVAS.width + 160, h: 96, fill: `url(#${slab})`, opacity: 0.92 }),
       }),
+      // A ghost display shape rather than ghost *type*: the slide number is already
+      // in the chrome, and a giant numeral competed with the copy on every layout.
       group({
-        opacity: ghostP * 0.1,
-        children: text({
-          x: CANVAS.width - CANVAS.margin + 20, y: CANVAS.height - 120, content: ghostText,
-          family: "Editorial-Display", size: 520, weight: 700, fill: theme.ink, anchor: "end", letterSpacing: -18,
-        }),
+        opacity: ghostP * 0.5,
+        children: [
+          circle({
+            cx: CANVAS.width - 150, cy: CANVAS.height - 430, r: 300,
+            fill: "none", stroke: rgba(theme.ink, 1), strokeWidth: 44, opacity: 0.05,
+          }),
+          circle({
+            cx: CANVAS.width - 150, cy: CANVAS.height - 430, r: 196,
+            fill: "none", stroke: rgba(theme.accent, 1), strokeWidth: 30, opacity: 0.07,
+          }),
+        ],
       }),
       circle({
         cx: CANVAS.width * 0.2, cy: CANVAS.height * 0.3, r: 320 + easeOutCubic(t) * 40,
@@ -164,8 +171,8 @@ const modernAgency = {
   headlineFont: "display",
   surface: (theme) => (theme.dark ? "#101218" : "#F4F5F8"),
   type: {
-    displaySize: 92, displayWeight: 600, displayLeading: 1.08, displayTracking: -1.5,
-    subSize: 32, bodySize: 33, kickerTracking: 6,
+    displaySize: 96, displayWeight: 600, displayLeading: 1.12, displayTracking: -1.5,
+    subSize: 38, bodySize: 35, kickerTracking: 6,
   },
   motion: { stagger: 0.08, entrance: "precise", cut: 0.3 },
   /** A grid system: faint columns, a card panel and a corner accent. */

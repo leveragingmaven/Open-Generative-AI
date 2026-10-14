@@ -76,6 +76,62 @@ export function runFfmpeg(binPath, args, { timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS
 }
 
 /**
+ * Decodes one frame of a finished video to PNG bytes.
+ *
+ * Used to verify the file a person downloads rather than the frames the renderer
+ * intended to write: the picture has been through the encoder, so a check on this
+ * frame is a check on the delivered artifact. Binary-safe, unlike `runFfmpeg`, whose
+ * stdout is captured as text.
+ */
+export function extractFramePng(binPath, filePath, seconds, { signal = null, timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(abortError()); return; }
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      // Seek before the input for speed; the exported slides are short and start at 0.
+      '-ss', String(Math.max(0, seconds)),
+      '-i', filePath,
+      '-frames:v', '1', '-an', '-f', 'image2pipe', '-vcodec', 'png', '-',
+    ];
+    const child = spawn(binPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const chunks = [];
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new FfmpegError(`FFmpeg timed out after ${timeoutMs}ms.`, { code: 'ffmpeg_timeout', stderr, command: [binPath, ...args] }));
+    }, timeoutMs);
+    const onAbort = () => { child.kill('SIGKILL'); };
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+
+    child.stdout.on('data', (chunk) => { chunks.push(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      reject(new FfmpegError(`Could not start FFmpeg: ${error.message}`, { code: 'ffmpeg_unavailable', stderr }));
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      if (signal?.aborted) { reject(abortError()); return; }
+      const buffer = Buffer.concat(chunks);
+      if (code !== 0 || !buffer.length) {
+        reject(new FfmpegError(`Could not read a frame at ${seconds}s (exit ${code}).`, { stderr, command: [binPath, ...args] }));
+        return;
+      }
+      resolve(buffer);
+    });
+  });
+}
+
+/**
  * Streams raw RGBA frames from `producer` into a single H.264 MP4.
  *
  * `producer(frameIndex, write)` is called for every frame; it returns the RGBA

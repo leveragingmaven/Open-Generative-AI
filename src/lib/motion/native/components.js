@@ -30,7 +30,7 @@ import {
   clamp01, easeOutBack, easeOutCubic, easeOutExpo, easeOutQuart, easeOutQuint,
   formatStat, progress, stagger,
 } from "./easing.js";
-import { fitText, wrapText } from "./text.js";
+import { fitRuns, fitText, lineRuns, lineText, parseRuns, wrapRuns, wrapText } from "./text.js";
 import {
   circle, group, line, linearGradient, lines as linesEl, n, path, rect, text, translate,
 } from "./svg.js";
@@ -43,12 +43,44 @@ function rise(t, { start = 0.06, end = 0.42, distance = 34, easing = easeOutQuin
   return { p, dy: (1 - p) * distance, opacity: clamp01(p * 1.6) };
 }
 
-/** A left-to-right clip reveal, returned as a mask id. */
-function wipe(ctx, { x, y, w, h, p, pad = 10 }) {
+/**
+ * A left-to-right clip reveal, returned as a mask id.
+ *
+ * `grow` widens the revealed region on both sides without moving it, which is how a
+ * highlight pill's rounded caps survive the wipe: the mask has to be as wide as the
+ * pill (line + padding), not just as wide as the glyphs, or the pill is cut off with
+ * two flat ends.
+ */
+function wipe(ctx, { x, y, w, h, p, pad = 10, grow = 0 }) {
   const id = `${ctx.id}-wipe-${ctx.defs.length}`;
-  const width = Math.max(0, w * clamp01(p));
+  const width = Math.max(0, (w + grow) * clamp01(p));
   ctx.defs.push(`<clipPath id="${id}">${rect({ x: x - pad, y: y - pad, w: width, h: h + pad * 2 })}</clipPath>`);
   return id;
+}
+
+/**
+ * A five-pointed star, drawn as an outline.
+ *
+ * The rating marks used to be the character `★`, which no bundled face can draw: it
+ * rendered as nothing at all, so a five-star quote showed an empty space. A path is
+ * identical in every face, every machine and every environment.
+ */
+function starPath({ cx, cy, r, fill, opacity = 1 }) {
+  const points = [];
+  for (let i = 0; i < 10; i += 1) {
+    const radius = i % 2 ? r * 0.42 : r;
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+    points.push(`${n(cx + Math.cos(angle) * radius)} ${n(cy + Math.sin(angle) * radius)}`);
+  }
+  return path({ d: `M ${points.join(" L ")} Z`, fill, opacity });
+}
+
+/** A row of rating stars, right-aligned to `right`, each `size` wide. */
+function starRow({ right, cy, size, count, fill }) {
+  const gap = size * 0.34;
+  return Array.from({ length: count }, (_, index) => starPath({
+    cx: right - size / 2 - index * (size + gap), cy, r: size / 2, fill,
+  }));
 }
 
 /** A rounded pill with centred text — used for badges and keywords. */
@@ -73,36 +105,45 @@ function chip(ctx, { x, y, label, size = 30, padX = 26, padY = 15, fill, ink, tr
 }
 
 /**
- * A headline line whose `[[keyword]]` runs become an accent pill. The pill wipes
- * in behind the words rather than fading, so the keyword lands as a highlight.
+ * A headline line whose `[[keyword]]` runs become an accent pill.
+ *
+ * Every pill is emitted before the words on the line, so a highlight is always
+ * *behind* its text; runs are laid out with their own advance plus the space
+ * between runs, so a highlighted phrase does not collide with the words before it.
  */
 function headlineLine(ctx, { x, y, line, size, fill, pillFill, pillInk, p, tracking = 0 }) {
-  const segments = String(line).split(/(\[\[[^\]]+\]\])/g).filter(Boolean);
+  const runs = lineRuns(line);
+  const spaceWidth = ctx.measure(" ", size, 0);
+  const pills = [];
+  const words = [];
   let cursor = x;
-  const body = [];
-  for (const segment of segments) {
-    const isPill = segment.startsWith("[[") && segment.endsWith("]]");
-    const label = isPill ? segment.slice(2, -2) : segment;
-    const width = ctx.measure(label, size, tracking);
-    if (isPill) {
-      const padX = size * 0.34;
-      const pillH = size * 1.4;
-      const pillP = clamp01((p - 0.3) / 0.7);
-      body.push(rect({
-        x: cursor - padX, y: y - size * 1.02, w: (width + padX * 2) * pillP, h: pillH, rx: pillH / 2, fill: pillFill,
+  runs.forEach((run, index) => {
+    const width = ctx.measure(run.text, size, tracking);
+    if (run.highlight) {
+      const padX = Math.max(size * 0.28, 8);
+      const pillH = size * 1.3;
+      const pillP = clamp01((p - 0.3) / 0.68);
+      pills.push(rect({
+        x: cursor - padX, y: y - size * 0.96, w: (width + padX * 2) * pillP, h: pillH, rx: pillH / 2, fill: pillFill,
       }));
-      body.push(text({ x: cursor, y, content: label, family: ctx.fonts.headline, size, fill: pillInk, letterSpacing: tracking }));
+      words.push(text({
+        x: cursor, y, content: run.text, family: ctx.fonts.headline, size, fill: pillInk,
+        letterSpacing: tracking, block: "headline-highlight",
+      }));
     } else {
-      body.push(text({ x: cursor, y, content: label, family: ctx.fonts.headline, size, fill, letterSpacing: tracking }));
+      words.push(text({
+        x: cursor, y, content: run.text, family: ctx.fonts.headline, size, fill,
+        letterSpacing: tracking, block: "headline",
+      }));
     }
-    cursor += width;
-  }
-  return body;
+    cursor += width + (index < runs.length - 1 ? spaceWidth : 0);
+  });
+  return [...pills, ...words];
 }
 
 /** Fits and reveals a stack of display lines with a per-line wipe. */
 function displayBlock(ctx, { headline, box, maxLines, top, lineHeight, fill, pillInk, tracking, staggerWindow }) {
-  const fitted = fitText(headline, ctx.measure, {
+  const fitted = fitRuns(parseRuns(headline), ctx.measure, {
     maxWidth: box.w, maxLines,
     maxSize: ctx.type.displaySize, minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: tracking,
   });
@@ -111,9 +152,13 @@ function displayBlock(ctx, { headline, box, maxLines, top, lineHeight, fill, pil
     const start = 0.08 + stagger(index, fitted.lines.length, staggerWindow);
     const p = easeOutQuint(progress(t0(ctx), start, start + ctx.motion.cut + 0.1));
     const baseline = top + index * lineHeight;
-    const lineWidth = ctx.measure(line.replace(/\[\[|\]\]/g, ""), fitted.size, tracking);
+    const lineWidth = ctx.measure(lineText(line), fitted.size, tracking);
+    // The wipe covers the pill padding as well as the glyphs.
+    const pillPad = Math.max(fitted.size * 0.28, 8);
     const maskId = wipe(ctx, {
-      x: box.x, y: baseline - fitted.size * 1.1, w: Math.max(lineWidth, ctx.measure("M", fitted.size)), h: lineHeight * 1.2, p,
+      x: box.x, y: baseline - fitted.size * 1.1,
+      w: Math.max(lineWidth, ctx.measure("M", fitted.size)), h: lineHeight * 1.2, p,
+      pad: pillPad, grow: pillPad * 2,
     });
     body.push(group({
       transform: translate(0, (1 - p) * fitted.size * 0.18),
@@ -143,15 +188,17 @@ export const headlineReveal = {
     const { slide, box, theme, fonts, t } = ctx;
     const sub = slide.sub ? String(slide.sub) : "";
     const lineHeight = Math.round(ctx.type.displaySize * ctx.type.displayLeading);
-    const previewFit = fitText(String(slide.headline || ""), ctx.measure, {
-      maxWidth: box.w, maxLines: 4, maxSize: ctx.type.displaySize,
+    // Two lines: a cover headline that wraps into three or four lines stops reading
+    // as display type, so the size is chosen to fit two balanced lines instead.
+    const previewFit = fitRuns(parseRuns(String(slide.headline || "")), ctx.measure, {
+      maxWidth: box.w, maxLines: 2, maxSize: ctx.type.displaySize,
       minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: ctx.type.displayTracking,
     });
     const blockH = previewFit.lines.length * lineHeight;
     const top = box.y + (box.h - blockH) / 2 + lineHeight * 0.42;
 
     const { body, fitted } = displayBlock(ctx, {
-      headline: String(slide.headline || ""), box, maxLines: 4, top, lineHeight,
+      headline: String(slide.headline || ""), box, maxLines: 2, top, lineHeight,
       fill: theme.ink, pillInk: theme.dark ? theme.surface : "#FFFFFF",
       tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
     });
@@ -260,11 +307,19 @@ export const productShowcase = {
     const price = visual.price ? String(visual.price) : "";
 
     const cardW = Math.min(box.w, 760);
-    const cardH = 540;
     const cardX = box.x + (box.w - cardW) / 2;
     const enter = easeOutQuint(progress(t, 0.06, 0.5));
     const float = Math.sin(clamp01((t - 0.32) / 0.36) * Math.PI) * 12;
     const cardY = box.y + 20 + (1 - enter) * 70 + float;
+
+    // The card gets whatever height is left after the caption and the price have their
+    // room. Sizing the card first pushed the price down into the footer chrome, where
+    // it was drawn across the progress dots — the one place text must never reach.
+    const captionRows = caption ? wrapText(caption, ctx.measureBody, { maxWidth: box.w * 0.9, size: ctx.type.bodySize }) : [];
+    const captionLead = Math.round(ctx.type.bodySize * 1.4);
+    const captionSpace = captionRows.length ? 66 + captionRows.length * captionLead : 0;
+    const priceSpace = price ? 60 + 60 : 0;
+    const cardH = Math.max(300, Math.min(540, box.y + box.h - cardY - captionSpace - priceSpace));
 
     const gradId = `${ctx.id}-card`;
     ctx.defs.push(linearGradient({
@@ -303,13 +358,16 @@ export const productShowcase = {
 
     if (badge) {
       const p = easeOutBack(progress(t, 0.5, 0.82));
+      // Popped by size and offset, not by a group scale: the pill keeps its own rounded
+      // ends and the label's ink stays where the layout says it is.
+      const badgeScale = 0.6 + p * 0.4;
       body.push(chip(ctx, {
-        x: cardX - 16, y: cardY - 24, label: badge, size: 30, fill: theme.accent,
-        ink: theme.dark ? theme.surface : "#FFFFFF", transform: `translate(0 0) scale(${n(0.6 + p * 0.4)})`,
+        x: cardX - 16 - (1 - p) * 22, y: cardY - 24 - (1 - p) * 14, label: badge,
+        size: Math.max(18, Math.round(30 * badgeScale)), fill: theme.accent,
+        ink: theme.dark ? theme.surface : "#FFFFFF", opacity: clamp01(p * 1.4),
       }).body);
     }
 
-    const captionRows = caption ? wrapText(caption, ctx.measureBody, { maxWidth: box.w * 0.9, size: ctx.type.bodySize }) : [];
     const captionY = cardY + cardH + 66;
     if (captionRows.length) {
       const p = rise(t, { start: 0.56, end: 0.86 });
@@ -351,17 +409,35 @@ export const comparison = {
       const p = easeOutQuint(progress(t, 0.08 + index * 0.08, 0.54));
       const x = box.x + index * (panelW + gap);
       const dx = (1 - p) * (index === 0 ? -70 : 70);
-      const items = Array.isArray(data.items) ? data.items.slice(0, 4) : [];
       const titleSize = 40;
       const titleRows = wrapText(String(data.title || data.label || ""), ctx.measureBody, { maxWidth: panelW - 64, size: titleSize });
-      const rows = items.map((item, itemIndex) => {
+      // Items wrap to the panel instead of being cut off, and are capped to the rows
+      // that actually fit above the panel's bottom edge.
+      const itemWidth = panelW - 32 - 76;
+      const lineHeight = 40;
+      const available = panelY + panelH - 40 - (panelY + 224);
+      const maxRows = Math.max(1, Math.floor(available / lineHeight));
+      const wrapped = (Array.isArray(data.items) ? data.items : [])
+        .map((item) => wrapText(String(item), ctx.measureBody, { maxWidth: itemWidth, size: 31 }))
+        .filter((rows) => rows.length);
+      const items = [];
+      let used = 0;
+      for (const rows of wrapped) {
+        if (used + rows.length > maxRows) break;
+        items.push(rows);
+        used += rows.length;
+      }
+      const rows = items.map((rows, itemIndex) => {
         const ip = easeOutQuint(progress(t, 0.44 + stagger(itemIndex, items.length, 0.28), 0.88));
-        const rowY = panelY + 224 + itemIndex * 74;
+        const rowY = panelY + 224 + items.slice(0, itemIndex).reduce((sum, previous) => sum + previous.length, 0) * lineHeight;
         return group({
           opacity: ip, transform: translate((1 - ip) * 22, 0),
           children: [
             circle({ cx: x + 46, cy: rowY - 10, r: 14, fill: index === 0 ? theme.accentAlt : theme.accent, opacity: 0.94 }),
-            text({ x: x + 76, y: rowY, content: String(item).slice(0, 32), family: fonts.body, size: 31, fill: theme.muted }),
+            linesEl({
+              x: x + 76, y: rowY, lines: rows, lineHeight,
+              family: fonts.body, size: 31, fill: theme.muted, block: "compare-item",
+            }),
           ],
         });
       });
@@ -414,13 +490,14 @@ export const quote = {
     const lineHeight = Math.round(fitted.size * 1.28);
     const top = box.y + 190;
 
+    // The mark is grown by drawing it at a larger size rather than by scaling a group:
+    // a group scale moves the run away from the box the layout recorded, which is how a
+    // frame ends up reporting ink where none is drawn.
     const body = [
-      group({
-        opacity: clamp01(markP),
-        transform: `translate(${n(box.x - 4)} ${n(box.y + 168)}) scale(${n(0.55 + markP * 0.45)})`,
-        children: text({
-          x: 0, y: 0, content: "\u201C", family: fonts.serif, size: 300, fill: theme.accent, opacity: 0.9,
-        }),
+      text({
+        x: box.x - 4, y: box.y + 168, content: "\u201C", family: fonts.serif,
+        size: Math.round(300 * (0.55 + markP * 0.45)), fill: theme.accent,
+        opacity: clamp01(markP) * 0.9,
       }),
     ];
 
@@ -443,11 +520,11 @@ export const quote = {
       children: [
         rect({ x: box.x + 20, y: footY - 48, w: 92, h: 5, rx: 3, fill: theme.accent }),
         ...(attribution
-          ? [text({ x: box.x + 20, y: footY, content: attribution, family: fonts.mono, size: 29, fill: theme.muted, letterSpacing: 2 })]
+          ? [text({ x: box.x + 20, y: footY, content: attribution, family: fonts.mono, size: 30, fill: theme.muted, letterSpacing: 2 })]
           : []),
-        ...(stars
-          ? [text({ x: box.x + box.w, y: footY, content: "\u2605".repeat(Math.min(5, stars)), family: fonts.bodyStrong, size: 32, fill: theme.accent, anchor: "end" })]
-          : []),
+        ...starRow({
+          right: box.x + box.w, cy: footY - 11, size: 32, count: Math.max(0, Math.min(5, stars)), fill: theme.accent,
+        }),
       ],
     }));
     return { body, shrunk: fitted.shrunk };
@@ -477,13 +554,13 @@ export const ctaCard = {
     const headline = String(slide.headline || "");
 
     const lineHeight = Math.round(ctx.type.displaySize * ctx.type.displayLeading);
-    const previewFit = fitText(headline, ctx.measure, {
-      maxWidth: box.w, maxLines: 3, maxSize: ctx.type.displaySize,
+    const previewFit = fitRuns(parseRuns(headline), ctx.measure, {
+      maxWidth: box.w, maxLines: 2, maxSize: ctx.type.displaySize,
       minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: ctx.type.displayTracking,
     });
     const top = box.y + 96;
     const { body, fitted } = displayBlock(ctx, {
-      headline, box, maxLines: 3, top, lineHeight, fill: theme.ink,
+      headline, box, maxLines: 2, top, lineHeight, fill: theme.ink,
       pillInk: theme.dark ? theme.surface : "#FFFFFF",
       tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
     });
@@ -495,14 +572,26 @@ export const ctaCard = {
     const arrowP = easeOutExpo(progress(t, 0.62, 0.96));
     const arrowX = box.x + buttonW + 24 + arrowP * 34;
 
+    // The button pulses about its own centre: a group scale would scale about the
+    // canvas origin, which drifts the button and moves its label away from the box the
+    // layout recorded (so the two could overlap on a mid-animation frame).
+    const buttonH = 104;
+    const buttonScale = (0.92 + buttonP * 0.08) * pulse;
+    const buttonCentreY = buttonY + buttonH / 2 + (1 - buttonP) * 30;
+    const scaledW = buttonW * buttonScale;
+    const scaledH = buttonH * buttonScale;
+    const labelSize = Math.max(24, 40 * buttonScale);
     body.push(group({
       opacity: clamp01(buttonP * 1.5),
-      transform: `translate(0 ${n((1 - buttonP) * 30)}) scale(${n((0.92 + buttonP * 0.08) * pulse)})`,
       children: [
-        rect({ x: box.x, y: buttonY, w: buttonW, h: 104, rx: 52, fill: theme.accent }),
+        rect({
+          x: box.x + (buttonW - scaledW) / 2, y: buttonCentreY - scaledH / 2,
+          w: scaledW, h: scaledH, rx: scaledH / 2, fill: theme.accent,
+        }),
         text({
-          x: box.x + buttonW / 2, y: buttonY + 65, content: label, family: fonts.bodyStrong,
-          size: 40, fill: theme.dark ? theme.surface : "#FFFFFF", anchor: "middle",
+          x: box.x + buttonW / 2, y: buttonCentreY + labelSize * 0.33, content: label,
+          family: fonts.bodyStrong, size: Math.round(labelSize),
+          fill: theme.dark ? theme.surface : "#FFFFFF", anchor: "middle",
         }),
       ],
     }));
@@ -523,7 +612,9 @@ export const ctaCard = {
       const p = rise(t, { start: 0.7, end: 0.96 });
       body.push(group({
         opacity: p.opacity, transform: translate(0, p.dy),
-        children: text({ x: box.x, y: buttonY + 194, content: footnote, family: fonts.mono, size: 28, fill: theme.muted, letterSpacing: 3 }),
+        // 30px is the readable floor for supporting text on a 1080px canvas; anything
+        // smaller stops being legible in a feed and was the "tiny text" on the CTA.
+        children: text({ x: box.x, y: buttonY + 194, content: footnote, family: fonts.mono, size: 30, fill: theme.muted, letterSpacing: 3 }),
       }));
     }
     return { body, shrunk: fitted.shrunk };

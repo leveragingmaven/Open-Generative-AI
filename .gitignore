@@ -44,6 +44,8 @@ output/playwright/
 # Maven Motion Carousel render output (local renders + re-render cache)
 output/maven-motion/
 output/maven-motion-carousel-demo/
+output/native-demo/
+output/inspect*/
 .carousel-cache/
 
 # Agent temporary files

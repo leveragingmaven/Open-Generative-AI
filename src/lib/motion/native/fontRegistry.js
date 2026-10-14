@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseFontMetrics } from './fontMetrics.js';
+import { parseFontOutlines } from './glyphs.js';
 
 /** The face files shipped under `public/motion-fonts`. */
 export const FONT_FILES = Object.freeze({
@@ -75,6 +76,9 @@ export async function loadFontRegistry({ dir = null, env = process.env } = {}) {
         // the bytes instead would add ~1.6 MB of base64 to every single frame.
         fileUrl: pathToFileURL(filePath).href,
         metrics: parseFontMetrics(new Uint8Array(bytes)),
+        // The outline tables are the *drawing* source too, so a face carries both
+        // and measurement and rasterisation can never disagree.
+        outlines: parseFontOutlines(new Uint8Array(bytes)),
       }];
     }),
   );
@@ -94,18 +98,30 @@ export function resetFontRegistry() {
  * headline (and optionally the serif role).
  */
 export function buildFontContext(registry, { headlineFace = 'poppinsExtraBold', serifFace = 'serifRegular' } = {}) {
-  const alias = (role) => registry[FONT_ROLE_FACES[role]]?.alias || registry.poppinsRegular.alias;
+  const face = (key) => registry[key] || registry.poppinsRegular;
+  /** Advance width **from the outline data**, so what is measured is what is drawn. */
   const measurer = (key) => {
-    const face = registry[key] || registry.poppinsRegular;
-    return (text, size, letterSpacing = 0) => face.metrics.measure(String(text ?? ''), size, letterSpacing);
+    const target = face(key);
+    return (text, size, letterSpacing = 0) => {
+      const outlines = target.outlines;
+      const glyphScale = size / outlines.unitsPerEm;
+      const chars = [...String(text ?? '')];
+      let pen = 0;
+      chars.forEach((char, index) => {
+        const glyph = outlines.outlineForCode(char.codePointAt(0));
+        pen += (glyph?.advance ?? 0) * glyphScale;
+        if (index < chars.length - 1) pen += letterSpacing;
+      });
+      return pen;
+    };
   };
   const fonts = {
-    headline: registry[headlineFace]?.alias || alias('headline'),
-    body: alias('body'),
-    bodyStrong: alias('bodyStrong'),
-    serif: registry[serifFace]?.alias || alias('serif'),
-    mono: alias('mono'),
-    heavy: alias('heavy'),
+    headline: face(headlineFace),
+    body: face('body'),
+    bodyStrong: face('bodyStrong'),
+    serif: face(serifFace),
+    mono: face('mono'),
+    heavy: face('heavy'),
   };
   return {
     fonts,
@@ -118,16 +134,23 @@ export function buildFontContext(registry, { headlineFace = 'poppinsExtraBold', 
     /** The characters no bundled face can draw, which would rasterise as boxes. */
     unsupported(text) {
       const missing = new Set();
-      for (const face of [registry[headlineFace], registry.poppinsRegular, registry.serifRegular]) {
-        for (const char of String(text ?? '')) {
-          const code = char.codePointAt(0);
-          if (code === 0x20 || code === 0x0a) continue;
-          if (!face?.metrics.supports(code)) missing.add(char);
-        }
+      for (const target of [face(headlineFace), face('body'), face('serif')]) {
+        for (const char of target.outlines.missingIn(text)) missing.add(char);
       }
       return [...missing];
     },
   };
+}
+
+/**
+ * Per-frame render faces: the same parsed faces plus the frame's layout collector.
+ *
+ * Frames share the parsed font data (it is expensive to parse) but each frame needs
+ * its own list of the runs it laid out, which is what the overflow and overlap
+ * checks read. Copying six small objects per frame is far cheaper than reparsing.
+ */
+export function fontViewsFor(fonts, layout) {
+  return Object.fromEntries(Object.entries(fonts).map(([role, target]) => [role, { ...target, layout }]));
 }
 
 /**

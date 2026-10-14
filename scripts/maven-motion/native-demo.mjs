@@ -150,6 +150,15 @@ const selective = await runRender({
 });
 console.log(`[selective] rendered [${selective.job.result?.renderedSlides}] reused [${selective.job.result?.reusedSlides}] in ${selective.seconds}s`);
 
+// The selective pass leaves the edited slide in the output directory, so the canonical
+// deck is rendered once more: same cache, so four slides are reused and only the edited
+// one is redrawn. The delivered five slides are then exactly the deck in `deck.json`,
+// which is what the frame verification compares them against.
+const restored = await runRender({
+  presetId: 'instagram_carousel', previousFingerprints: native.job.fingerprints, idempotencyKey: 'demo-native-3',
+});
+console.log(`[restored] rendered [${restored.job.result?.renderedSlides}] reused [${restored.job.result?.reusedSlides}] in ${restored.seconds}s`);
+
 const geometry = {};
 for (const file of ['slide-01.mp4', 'slide-01-2x3.mp4', 'slide-01-1x1.mp4', 'slide-01-9x16.mp4', 'full-deck.mp4']) {
   try {
@@ -160,6 +169,10 @@ for (const file of ['slide-01.mp4', 'slide-01-2x3.mp4', 'slide-01-1x1.mp4', 'sli
   }
 }
 
+// The deck the output directory actually contains, written beside the videos, so the
+// delivered files can always be verified against the input that produced them.
+await writeFile(resolve(outDir, 'deck.json'), JSON.stringify(DECK, null, 2), 'utf8');
+
 const manifest = {
   project: 'MavenSync native motion renderer — demonstration',
   renderer: { id: renderer.id, version: renderer.version },
@@ -168,7 +181,16 @@ const manifest = {
   canvas: { width: 1080, height: 1350, fps: 30, slideSeconds: 8 },
   master: { status: native.job.status, seconds: native.seconds, result: native.job.result },
   platformExports: exports,
-  selective: { seconds: selective.seconds, rendered: selective.job.result?.renderedSlides, reused: selective.job.result?.reusedSlides },
+  selective: {
+    seconds: selective.seconds,
+    rendered: selective.job.result?.renderedSlides,
+    reused: selective.job.result?.reusedSlides,
+    restoredToCanonicalDeck: {
+      seconds: restored.seconds,
+      rendered: restored.job.result?.renderedSlides,
+      reused: restored.job.result?.reusedSlides,
+    },
+  },
   geometry,
   persistence: 'in-memory (demonstration). Production uses MySqlMotionCarouselJobStore (migration 012).',
 };
