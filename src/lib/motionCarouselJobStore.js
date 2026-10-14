@@ -43,6 +43,21 @@ function json(value) {
   return value == null ? null : JSON.stringify(value);
 }
 
+/**
+ * A value that is safe to hand to MySQL for a TIMESTAMP column.
+ *
+ * Callers of the store pass `now` either as a `Date` (the worker's own defaults)
+ * or as an ISO-8601 string (the job service builds those). The driver converts a
+ * `Date` correctly, but a raw `'…T…Z'` string is rejected outright — MySQL and
+ * MariaDB both answer `Incorrect datetime value` — which turned every cancel into
+ * a 500. Timestamps are normalized here, once, so no caller has to remember.
+ */
+function sqlDate(value) {
+  if (value instanceof Date) return value;
+  const parsed = new Date(value ?? Date.now());
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 function parseJson(value, fallback = null) {
   if (value == null) return fallback;
   if (typeof value === 'object') return value;
@@ -371,13 +386,14 @@ export class MySqlMotionCarouselJobStore {
     );
     for (const row of candidates || []) {
       const leaseSeconds = Math.max(30, Math.round(leaseMs / 1000));
+      const at = sqlDate(now);
       const [updated] = await this.db.query(
         `UPDATE motion_carousel_jobs
          SET status = 'running', phase = 'rendering', progress = GREATEST(progress, 5),
              attempt_count = attempt_count + 1, started_at = COALESCE(started_at, ?),
              heartbeat_at = ?, lease_expires_at = DATE_ADD(?, INTERVAL ? SECOND), updated_at = ?
          WHERE job_id = ? AND status = 'queued'`,
-        [now, now, now, leaseSeconds, now, row.job_id],
+        [at, at, at, leaseSeconds, at, row.job_id],
       );
       if (updated.affectedRows === 1) {
         const [rows] = await this.db.query('SELECT * FROM motion_carousel_jobs WHERE job_id = ? LIMIT 1', [row.job_id]);
@@ -389,12 +405,13 @@ export class MySqlMotionCarouselJobStore {
 
   async heartbeat(jobId, { phase, progress, leaseMs = DEFAULT_LEASE_MS, now = new Date() } = {}) {
     const leaseSeconds = Math.max(30, Math.round(leaseMs / 1000));
+    const at = sqlDate(now);
     const [result] = await this.db.query(
       `UPDATE motion_carousel_jobs
        SET phase = COALESCE(?, phase), progress = COALESCE(?, progress),
            heartbeat_at = ?, lease_expires_at = DATE_ADD(?, INTERVAL ? SECOND), updated_at = ?
        WHERE job_id = ? AND status = 'running'`,
-      [phase || null, Number.isFinite(progress) ? Math.round(progress) : null, now, now, leaseSeconds, now, jobId],
+      [phase || null, Number.isFinite(progress) ? Math.round(progress) : null, at, at, leaseSeconds, at, jobId],
     );
     if (result.affectedRows !== 1) return null;
     const [rows] = await this.db.query('SELECT * FROM motion_carousel_jobs WHERE job_id = ? LIMIT 1', [jobId]);
@@ -402,13 +419,14 @@ export class MySqlMotionCarouselJobStore {
   }
 
   async complete(jobId, { result = null, fingerprints = null, now = new Date() } = {}) {
+    const at = sqlDate(now);
     const [updated] = await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = 'completed', phase = 'completed', progress = 100, result_json = ?,
            fingerprints_json = COALESCE(?, fingerprints_json), error_json = NULL,
            finished_at = ?, lease_expires_at = NULL, updated_at = ?
        WHERE job_id = ? AND status = 'running'`,
-      [json(result), json(fingerprints), now, now, jobId],
+      [json(result), json(fingerprints), at, at, jobId],
     );
     if (updated.affectedRows !== 1) return null;
     const [rows] = await this.db.query('SELECT * FROM motion_carousel_jobs WHERE job_id = ? LIMIT 1', [jobId]);
@@ -416,12 +434,13 @@ export class MySqlMotionCarouselJobStore {
   }
 
   async fail(jobId, { error = null, now = new Date() } = {}) {
+    const at = sqlDate(now);
     const [updated] = await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = 'failed', phase = 'failed', error_json = ?, finished_at = ?,
            lease_expires_at = NULL, updated_at = ?
        WHERE job_id = ? AND status IN ('queued','running')`,
-      [json(error), now, now, jobId],
+      [json(error), at, at, jobId],
     );
     if (updated.affectedRows !== 1) return null;
     const [rows] = await this.db.query('SELECT * FROM motion_carousel_jobs WHERE job_id = ? LIMIT 1', [jobId]);
@@ -429,6 +448,7 @@ export class MySqlMotionCarouselJobStore {
   }
 
   async requestCancel(jobId, { accountId, now = new Date() } = {}) {
+    const at = sqlDate(now);
     await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = CASE WHEN status = 'queued' THEN 'canceled' ELSE status END,
@@ -436,37 +456,45 @@ export class MySqlMotionCarouselJobStore {
            finished_at = CASE WHEN status = 'queued' THEN ? ELSE finished_at END,
            cancel_requested = 1, updated_at = ?
        WHERE job_id = ? AND account_id = ? AND status IN ('queued','running')`,
-      [now, now, jobId, accountId],
+      [at, at, jobId, accountId],
     );
     return this.get(jobId, { accountId });
   }
 
   async requeue(jobId, { accountId, now = new Date() } = {}) {
+    const at = sqlDate(now);
     const [updated] = await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = 'queued', phase = 'queued', progress = 0, error_json = NULL,
            finished_at = NULL, lease_expires_at = NULL, cancel_requested = 0, updated_at = ?
        WHERE job_id = ? AND account_id = ? AND status = 'failed' AND attempt_count < max_attempts`,
-      [now, jobId, accountId],
+      [at, jobId, accountId],
     );
     if (updated.affectedRows !== 1) return null;
     return this.get(jobId, { accountId });
   }
 
   async markCanceled(jobId, { accountId, now = new Date() } = {}) {
+    const at = sqlDate(now);
     await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = 'canceled', phase = 'canceled', finished_at = ?, lease_expires_at = NULL, updated_at = ?
        WHERE job_id = ? AND account_id = ? AND status IN ('queued','running')`,
-      [now, now, jobId, accountId],
+      [at, at, jobId, accountId],
     );
     return this.get(jobId, { accountId });
   }
 
   async reclaimStale({ now = new Date(), maxAttempts = null } = {}) {
-    const attempted = maxAttempts == null ? 'attempt_count' : '?';
+    // A stale render is failed only once it has used *its own* attempt budget, so
+    // the comparison must be against the row's `max_attempts`. Comparing the column
+    // to itself (`attempt_count >= attempt_count`) is a tautology that failed every
+    // interrupted render instead of requeueing it — the opposite of what recovery is
+    // for, and a divergence from the in-memory store's behaviour.
+    const attempted = maxAttempts == null ? 'max_attempts' : '?';
+    const at = sqlDate(now);
     // Placeholder order: finished_at, updated_at, lease cutoff, [attempt_count >= ?].
-    const params = maxAttempts == null ? [now, now, now] : [now, now, now, maxAttempts];
+    const params = maxAttempts == null ? [at, at, at] : [at, at, at, maxAttempts];
     const [failedRows] = await this.db.query(
       `UPDATE motion_carousel_jobs
        SET status = CASE WHEN cancel_requested = 1 THEN 'canceled' ELSE 'failed' END,
@@ -481,7 +509,7 @@ export class MySqlMotionCarouselJobStore {
       `UPDATE motion_carousel_jobs
        SET status = 'queued', phase = 'queued', progress = 0, lease_expires_at = NULL, updated_at = ?
        WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ? AND cancel_requested = 0`,
-      [now, now],
+      [at, at],
     );
     return { reclaimed: reclaimedRows.affectedRows || 0, failed: failedRows.affectedRows || 0 };
   }
