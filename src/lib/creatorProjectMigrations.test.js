@@ -12,8 +12,11 @@ const sessionProjects = readFileSync(new URL('011_design_agent_session_projects.
 
 test('the project migrations are numbered directly after the existing schema', () => {
   const names = readdirSync(migrationsDirectory).filter((name) => /^\d+_.+\.sql$/.test(name)).sort();
-  assert.deepEqual(names.slice(-2), ['010_creator_projects.sql', '011_design_agent_session_projects.sql']);
+  assert.deepEqual(names.slice(-3), ['010_creator_projects.sql', '011_design_agent_session_projects.sql', '012_motion_carousel_jobs.sql']);
   assert.equal(names.length, new Set(names).size, 'migration names must be unique');
+  // The runner applies files in numeric order, so the numbers must be contiguous.
+  const numbers = names.map((name) => Number(name.slice(0, 3)));
+  assert.deepEqual(numbers, numbers.map((_, index) => index + 1), 'migration numbers must be contiguous from 001');
 });
 
 test('both tables are created idempotently and scoped by account and creator', () => {

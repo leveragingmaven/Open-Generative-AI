@@ -1,23 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CAROUSEL_EXPORT_PRESETS,
   CAROUSEL_EXPORT_PRESET_IDS,
   CAROUSEL_BRANDS,
 } from "../../lib/motion/carousel/CarouselConstants.js";
 
+const TERMINAL = new Set(["completed", "failed", "canceled"]);
+const ACTIVE = new Set(["queued", "running"]);
+const POLL_MS = 2500;
+
+function progressLabel(job) {
+  if (!job) return "";
+  if (job.phase === "queued") return "Queued — waiting for a renderer";
+  if (job.phase === "rendering") return "Rendering slides locally…";
+  if (job.phase === "postprocessing") return "Building platform exports…";
+  if (job.status === "completed") return "Completed";
+  if (job.status === "failed") return "Failed";
+  if (job.status === "canceled") return "Canceled";
+  return job.status;
+}
+
 /**
  * Maven Motion Carousel — the Motion Design view for the local, code-rendered
  * animated carousel.
  *
  * Flow: describe the topic → Maven drafts a storyboard → review/edit and approve
- * → render locally → preview and download per-platform exports. Nothing renders
- * until the storyboard is approved. Every slide is rendered by the local engine,
- * so no paid API is used.
- *
- * It lives inside the existing Motion workspace (Marketing Studio → Motion) and
- * reuses the Creator OS API surface (/api/motion-carousel) rather than a new app.
+ * → queue a background render → watch progress → preview and download exports.
+ * Rendering runs in the Creator OS worker (never inside the HTTP request); the
+ * panel polls `/api/motion-carousel` for job status. No paid API is used.
  */
 export default function MavenCarouselPanel({ onExit }) {
   const [brief, setBrief] = useState("Make an animated carousel about MavenSync Spaces for creators");
@@ -30,10 +42,12 @@ export default function MavenCarouselPanel({ onExit }) {
   const [clarifications, setClarifications] = useState([]);
   const [warnings, setWarnings] = useState([]);
   const [approved, setApproved] = useState(false);
-  const [renderResult, setRenderResult] = useState(null);
+  const [job, setJob] = useState(null);
+  const [lastFingerprints, setLastFingerprints] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [rendererStatus, setRendererStatus] = useState(null);
+  const idempotency = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -55,8 +69,26 @@ export default function MavenCarouselPanel({ onExit }) {
     return data;
   }, []);
 
+  // Poll the job until it reaches a terminal state.
+  useEffect(() => {
+    const jobId = job?.jobId;
+    if (!jobId || !ACTIVE.has(job.status)) return undefined;
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/motion-carousel?jobId=${encodeURIComponent(jobId)}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active || !data.job) return;
+        setJob(data.job);
+        if (data.job.status === "completed" && data.job.fingerprints) setLastFingerprints(data.job.fingerprints);
+      } catch { /* transient; the next tick retries */ }
+    }, POLL_MS);
+    return () => { active = false; clearInterval(timer); };
+  }, [job?.jobId, job?.status]);
+
   const planStoryboard = useCallback(async () => {
-    setBusy("plan"); setError(null); setRenderResult(null);
+    setBusy("plan"); setError(null); setJob(null); setApproved(false);
     try {
       const data = await post({
         action: "plan",
@@ -70,7 +102,6 @@ export default function MavenCarouselPanel({ onExit }) {
       setStoryboard(data.storyboard);
       setClarifications(data.clarifications || []);
       setWarnings(data.warnings || []);
-      setApproved(false);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -80,39 +111,58 @@ export default function MavenCarouselPanel({ onExit }) {
 
   const editHeadline = useCallback((index, value) => {
     setApproved(false);
-    setDeck((current) => {
-      if (!current) return current;
-      return { ...current, slides: current.slides.map((slide, i) => (i === index ? { ...slide, headline: value } : slide)) };
-    });
+    setDeck((current) => current ? { ...current, slides: current.slides.map((slide, i) => (i === index ? { ...slide, headline: value } : slide)) } : current);
   }, []);
 
   const render = useCallback(async () => {
     if (!deck || !approved) return;
-    setBusy("render"); setError(null); setRenderResult(null);
+    setBusy("render"); setError(null);
+    idempotency.current += 1;
     try {
       const data = await post({
         action: "render",
         deck,
         presetId,
-        previousFingerprints: renderResult?.fingerprints || null,
+        previousFingerprints: lastFingerprints,
+        idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
       });
-      setRenderResult(data);
+      setJob(data.job);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, renderResult]);
+  }, [post, deck, approved, presetId, lastFingerprints]);
+
+  const cancel = useCallback(async () => {
+    if (!job?.jobId) return;
+    setError(null);
+    try {
+      const data = await post({ action: "cancel", jobId: job.jobId });
+      setJob(data.job);
+    } catch (err) { setError(err.message); }
+  }, [post, job]);
+
+  const retry = useCallback(async () => {
+    if (!job?.jobId) return;
+    setError(null);
+    try {
+      const data = await post({ action: "retry", jobId: job.jobId });
+      setJob(data.job);
+    } catch (err) { setError(err.message); }
+  }, [post, job]);
 
   const slideCount = deck?.slides?.length || 0;
   const presetOptions = useMemo(() => CAROUSEL_EXPORT_PRESET_IDS.map((id) => CAROUSEL_EXPORT_PRESETS[id]), []);
+  const result = job?.status === "completed" ? job.result : null;
+  const running = job ? ACTIVE.has(job.status) : false;
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-app-bg overflow-auto">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div>
           <h2 className="text-sm font-semibold text-white">Maven Motion Carousel</h2>
-          <p className="text-xs text-white/60">Animated multi-slide carousel rendered locally — no paid API.</p>
+          <p className="text-xs text-white/60">Animated multi-slide carousel, rendered in the background — no paid API.</p>
         </div>
         {onExit ? (
           <button type="button" onClick={onExit} className="text-xs rounded px-3 py-1.5 bg-white/10 text-white/80 hover:bg-white/20">Close</button>
@@ -121,20 +171,14 @@ export default function MavenCarouselPanel({ onExit }) {
 
       {rendererStatus && rendererStatus.configured === false ? (
         <div className="mx-4 mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          Local renderer not configured. Set <code>MAVEN_MOTION_ENGINE</code> to the carousel engine path on the server to render.
+          Local renderer not configured. Set <code>MAVEN_MOTION_ENGINE</code> on the server; renders stay queued until then.
         </div>
       ) : null}
 
       <div className="grid gap-4 px-4 pb-6 md:grid-cols-2">
-        {/* Brief */}
         <section className="rounded-lg border border-white/10 bg-black/20 p-3">
           <label className="block text-xs font-medium text-white/70 mb-1">What is the carousel about?</label>
-          <textarea
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-            rows={3}
-            className="w-full rounded bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-white"
-          />
+          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} className="w-full rounded bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-white" />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/70">
             <label className="block">
               Brand
@@ -165,7 +209,6 @@ export default function MavenCarouselPanel({ onExit }) {
           </button>
         </section>
 
-        {/* Storyboard */}
         <section className="rounded-lg border border-white/10 bg-black/20 p-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold text-white/80">Storyboard {slideCount ? `(${slideCount} slides)` : ""}</h3>
@@ -182,11 +225,7 @@ export default function MavenCarouselPanel({ onExit }) {
                     <span className="uppercase tracking-wide">{slide.kicker}</span>
                     <span className="ml-auto">{slide.visual?.type}</span>
                   </div>
-                  <input
-                    value={slide.headline}
-                    onChange={(e) => editHeadline(index, e.target.value)}
-                    className="mt-1 w-full rounded bg-black/40 border border-white/10 px-2 py-1 text-sm text-white"
-                  />
+                  <input value={slide.headline} onChange={(e) => editHeadline(index, e.target.value)} className="mt-1 w-full rounded bg-black/40 border border-white/10 px-2 py-1 text-sm text-white" />
                   <p className="mt-1 text-[11px] text-white/50">{storyboard?.slides?.[index]?.motion}</p>
                 </li>
               ))}
@@ -203,11 +242,9 @@ export default function MavenCarouselPanel({ onExit }) {
             </ul>
           ) : null}
           <div className="mt-3 flex gap-2">
-            <button type="button" onClick={() => setApproved(true)} disabled={!deck || busy !== null} className="flex-1 rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
-              Approve storyboard
-            </button>
-            <button type="button" onClick={render} disabled={!approved || busy !== null} className="flex-1 rounded bg-fuchsia-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
-              {busy === "render" ? "Rendering…" : "Render carousel"}
+            <button type="button" onClick={() => setApproved(true)} disabled={!deck || busy !== null} className="flex-1 rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Approve storyboard</button>
+            <button type="button" onClick={render} disabled={!approved || busy !== null || running} className="flex-1 rounded bg-fuchsia-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+              {busy === "render" ? "Queueing…" : "Render carousel"}
             </button>
           </div>
           {!approved && deck ? <p className="mt-2 text-[11px] text-white/50">Approve the storyboard before rendering.</p> : null}
@@ -216,23 +253,41 @@ export default function MavenCarouselPanel({ onExit }) {
 
       {error ? <div className="mx-4 mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</div> : null}
 
-      {renderResult ? (
+      {job ? (
         <section className="mx-4 mb-6 rounded-lg border border-white/10 bg-black/20 p-3">
-          <h3 className="text-xs font-semibold text-white/80">Rendered — {renderResult.preset?.label}</h3>
-          <p className="mt-1 text-[11px] text-white/60">{renderResult.summary} Rendering is local; publish manually.</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {renderResult.slideFiles?.map((url, i) => (
-              <a key={`s${i}`} href={url} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slide {i + 1}</a>
-            ))}
-            {renderResult.exports?.map((url, i) => (
-              <a key={`e${i}`} href={url} download className="rounded bg-fuchsia-600/70 px-2 py-1 text-[11px] text-white hover:bg-fuchsia-600">{renderResult.preset?.ratio} export {i + 1}</a>
-            ))}
-            {renderResult.cover ? <a href={renderResult.cover} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">cover.png</a> : null}
-            {renderResult.pdf ? <a href={renderResult.pdf} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slides-still.pdf</a> : null}
-            {renderResult.fullDeck ? <a href={renderResult.fullDeck} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">full-deck.mp4</a> : null}
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-white/80">Render — {progressLabel(job)}</h3>
+            <span className="text-[11px] text-white/50">{job.status} · attempt {job.attempts}</span>
           </div>
-          {renderResult.renderedSlides?.length < slideCount ? (
-            <p className="mt-2 text-[11px] text-emerald-200">Reused {renderResult.reusedSlides?.length} unchanged slide(s).</p>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-white/10">
+            <div className="h-full bg-fuchsia-500 transition-all" style={{ width: `${job.progress || 0}%` }} />
+          </div>
+          {running ? (
+            <button type="button" onClick={cancel} className="mt-3 rounded bg-white/10 px-3 py-1.5 text-xs text-white hover:bg-white/20">Cancel render</button>
+          ) : null}
+          {job.status === "failed" ? (
+            <div className="mt-3">
+              <p className="text-[11px] text-red-200">{job.failure?.message || "The render failed."}</p>
+              <button type="button" onClick={retry} className="mt-2 rounded bg-white/10 px-3 py-1.5 text-xs text-white hover:bg-white/20">Retry</button>
+            </div>
+          ) : null}
+          {result ? (
+            <div className="mt-3">
+              <p className="text-[11px] text-white/60">{result.summary} Publishing is manual; no social API is connected.</p>
+              {result.reusedSlides?.length ? <p className="mt-1 text-[11px] text-emerald-200">Reused {result.reusedSlides.length} unchanged slide(s).</p> : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(result.slideFiles || []).map((url, i) => (
+                  <a key={`s${i}`} href={url} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slide {i + 1}</a>
+                ))}
+                {(result.exports || []).map((url, i) => (
+                  <a key={`e${i}`} href={url} download className="rounded bg-fuchsia-600/70 px-2 py-1 text-[11px] text-white hover:bg-fuchsia-600">{job.result?.preset?.ratio || "export"} {i + 1}</a>
+                ))}
+                {result.cover ? <a href={result.cover} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">cover.png</a> : null}
+                {result.pdf ? <a href={result.pdf} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slides-still.pdf</a> : null}
+                {result.fullDeck ? <a href={result.fullDeck} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">full-deck.mp4</a> : null}
+              </div>
+              {result.cover ? <img src={result.cover} alt="Carousel cover" className="mt-3 w-40 rounded border border-white/10" /> : null}
+            </div>
           ) : null}
         </section>
       ) : null}

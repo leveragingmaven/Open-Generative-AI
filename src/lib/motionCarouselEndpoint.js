@@ -1,55 +1,55 @@
 /**
  * Server handler for the Maven Motion Carousel endpoint.
  *
- * Framework-free (plain `Response`) so it can be unit-tested with Node, with a
- * thin HTTP route in `app/api/motion-carousel/route.js`. It is the only HTTP
- * surface that renders a carousel: it plans a storyboard, validates and renders
- * an approved deck with the local engine, and serves the produced files.
- *
- * Safety: no shell, engine path from the environment only, deck validated before
- * rendering, slides capped, output confined to a per-identity directory, and
- * downloads restricted to plain file names inside that directory.
+ * Framework-free (plain `Response`) with a thin HTTP route in
+ * `app/api/motion-carousel/route.js`. It plans storyboards, enqueues durable
+ * background renders, reports job status/progress, cancels and retries, and
+ * serves produced files. Rendering itself happens in the worker, never inside the
+ * HTTP request.
  */
-import { mkdir, readFile } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
-import { validateDeck, isDeckRenderable } from '../../packages/studio/src/lib/motion/carousel/CarouselDeck.js';
-import { buildCarouselRenderPlan } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderPlan.js';
 import {
-  createLocalCarouselRenderer,
-  resolveCarouselRuntime,
-  describeRuntime,
-} from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
-import { CAROUSEL_MAX_SLIDES } from '../../packages/studio/src/lib/motion/carousel/CarouselConstants.js';
+  enqueueMotionCarouselRender,
+  getMotionCarouselJob,
+  listMotionCarouselJobs,
+  cancelMotionCarouselJob,
+  retryMotionCarouselJob,
+  MotionCarouselJobError,
+} from './motionCarouselJobService.js';
+import { startMotionCarouselWorker, getMotionCarouselWorker } from './motionCarouselWorkerRuntime.js';
+import { MySqlMotionCarouselJobStore } from './motionCarouselJobStore.js';
+import { carouselOutputDir, carouselFileUrl } from './motionCarouselPaths.js';
+import { resolveCarouselRuntime, describeRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
+
+export { carouselOutputDir };
 
 function jsonError(message, code, status) {
   return Response.json({ error: message, code }, { status });
 }
 
-/** Per-identity output directory; the identity key is sanitized to a safe folder name. */
-export function carouselOutputDir(identityKey, env = process.env) {
-  const root = String(env?.MAVEN_MOTION_OUTPUT_DIR || '').trim() || join(process.cwd(), 'output', 'maven-motion');
-  const safe = String(identityKey || 'anonymous').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'anonymous';
-  return join(root, safe);
+function jobErrorResponse(error) {
+  if (error instanceof MotionCarouselJobError) {
+    return Response.json({ error: error.message, code: error.code, ...(error.validation ? { validation: error.validation } : {}) }, { status: error.status || 400 });
+  }
+  return jsonError(String(error?.message || 'The carousel request failed.'), 'carousel_request_failed', 500);
 }
 
 function identityFolder(identity) {
   return String(identity?.identityKey || identity?.accountId || 'anonymous');
 }
 
-function fileUrl(name) {
-  return `/api/motion-carousel?file=${encodeURIComponent(name)}`;
+// Tests inject a store; production resolves the MySQL-backed one (a memoised pool).
+function resolveStore(store) {
+  return store || new MySqlMotionCarouselJobStore();
 }
 
-function urlOrNull(name) {
-  return name ? fileUrl(name) : null;
-}
-
-/** POST { action: 'plan' | 'render' }. */
-export async function handleMotionCarouselPost(request, { identity, renderer = null, env = process.env } = {}) {
+/** POST { action: 'plan' | 'render' | 'cancel' | 'retry' }. */
+export async function handleMotionCarouselPost(request, { identity, store, renderer = null, env = process.env, startWorker = startMotionCarouselWorker } = {}) {
   let body;
   try {
     body = await request.json();
@@ -58,7 +58,33 @@ export async function handleMotionCarouselPost(request, { identity, renderer = n
   }
   const action = String(body?.action || '');
   if (action === 'plan') return planResponse(body);
-  if (action === 'render') return renderResponse(body, identity, renderer, env);
+  try {
+    if (action === 'render') {
+      // Lazily start the in-process worker the first time a render is requested.
+      startWorker({ store: store || null, renderer, env });
+      const { job, deduped } = await enqueueMotionCarouselRender({
+        store: resolveStore(store),
+        identity,
+        deck: body.deck,
+        presetId: body.presetId || 'instagram_carousel',
+        brief: body.brief || null,
+        idempotencyKey: body.idempotencyKey || null,
+        previousFingerprints: Array.isArray(body.previousFingerprints) ? body.previousFingerprints : null,
+        env,
+      });
+      return Response.json({ ok: true, action: 'render', deduped, job });
+    }
+    if (action === 'cancel') {
+      const job = await cancelMotionCarouselJob({ store: resolveStore(store), identity, jobId: body.jobId });
+      return Response.json({ ok: true, action: 'cancel', job });
+    }
+    if (action === 'retry') {
+      const job = await retryMotionCarouselJob({ store: resolveStore(store), identity, jobId: body.jobId });
+      return Response.json({ ok: true, action: 'retry', job });
+    }
+  } catch (error) {
+    return jobErrorResponse(error);
+  }
   return jsonError(`Unknown action "${action}".`, 'unknown_action', 400);
 }
 
@@ -91,65 +117,34 @@ function planResponse(body = {}) {
   }
 }
 
-async function renderResponse(body = {}, identity, injectedRenderer, env) {
-  const deck = body.deck;
-  if (!deck || !Array.isArray(deck.slides) || !deck.slides.length) {
-    return jsonError('A carousel deck with at least one slide is required to render.', 'deck_required', 400);
-  }
-  if (deck.slides.length > CAROUSEL_MAX_SLIDES) {
-    return jsonError(`A carousel can hold at most ${CAROUSEL_MAX_SLIDES} slides.`, 'too_many_slides', 400);
-  }
-  const validation = validateDeck(deck);
-  if (!isDeckRenderable(validation)) {
-    return Response.json({ error: 'The carousel deck did not validate; nothing was rendered.', code: 'deck_invalid', validation }, { status: 422 });
-  }
-  const runtime = resolveCarouselRuntime(env);
-  const renderer = injectedRenderer || createLocalCarouselRenderer({ runtime });
-  if (typeof renderer.isConfigured === 'function' && !renderer.isConfigured()) {
-    return Response.json({ error: describeRuntime(runtime), code: 'renderer_not_configured' }, { status: 503 });
-  }
-  const plan = buildCarouselRenderPlan({
-    deck,
-    presetId: body.presetId || 'instagram_carousel',
-    previousHashes: Array.isArray(body.previousFingerprints) ? body.previousFingerprints : null,
-    draft: Boolean(body.draft),
-  });
-  const outDir = carouselOutputDir(identityFolder(identity), env);
-  await mkdir(outDir, { recursive: true });
-  const result = await renderer.render({ deck, outDir, plan });
-  let exports = [];
-  if (plan.postprocess.length) {
-    const processed = await renderer.postprocess({ files: result.files, presetId: plan.presetId, outDir });
-    exports = (processed.outputs || []).map((path) => fileUrl(basename(path)));
-  }
-  return Response.json({
-    ok: result.ok,
-    action: 'render',
-    preset: plan.preset,
-    summary: plan.summary,
-    renderedSlides: plan.slidesToRender,
-    reusedSlides: plan.slidesToReuse,
-    fingerprints: plan.fingerprints,
-    cover: urlOrNull(result.coverPath),
-    pdf: urlOrNull(result.pdfPath),
-    fullDeck: urlOrNull(result.fullDeckPath),
-    tall: urlOrNull(result.tallPath),
-    slideFiles: result.slideFiles.map(fileUrl),
-    files: result.files.map(fileUrl),
-    exports,
-    publishing: 'manual only; no social API connected',
-  });
-}
-
-/** GET (status) or GET ?file=<name> (download). */
-export async function handleMotionCarouselGet(request, { identity, env = process.env } = {}) {
+/** GET (status/list) or GET ?file=<name> (download). */
+export async function handleMotionCarouselGet(request, { identity, store, env = process.env } = {}) {
   const url = new URL(request.url);
   const file = url.searchParams.get('file');
-  if (!file) {
-    const runtime = resolveCarouselRuntime(env);
-    return Response.json({ ok: true, configured: runtime.configured, runtime: describeRuntime(runtime) });
+  if (file) return serveCarouselFile(file, identity, env);
+
+  const jobId = url.searchParams.get('jobId');
+  const wantsList = url.searchParams.get('jobs');
+  try {
+    if (jobId) {
+      const job = await getMotionCarouselJob({ store: resolveStore(store), identity, jobId });
+      return Response.json({ ok: true, job });
+    }
+    if (wantsList) {
+      const jobs = await listMotionCarouselJobs({ store: resolveStore(store), identity, limit: Number(wantsList) || 20 });
+      return Response.json({ ok: true, jobs });
+    }
+  } catch (error) {
+    return jobErrorResponse(error);
   }
-  return serveCarouselFile(file, identity, env);
+
+  const runtime = resolveCarouselRuntime(env);
+  return Response.json({
+    ok: true,
+    configured: runtime.configured,
+    runtime: describeRuntime(runtime),
+    workerRunning: Boolean(getMotionCarouselWorker()),
+  });
 }
 
 export async function serveCarouselFile(name, identity, env = process.env) {
@@ -174,3 +169,5 @@ export async function serveCarouselFile(name, identity, env = process.env) {
     },
   });
 }
+
+export { carouselFileUrl };

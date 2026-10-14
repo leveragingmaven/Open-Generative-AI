@@ -3,6 +3,7 @@ import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planCarousel } from "../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js";
+import { InMemoryMotionCarouselJobStore } from "./motionCarouselJobStore.js";
 import {
   handleMotionCarouselPost,
   handleMotionCarouselGet,
@@ -12,87 +13,95 @@ import {
 
 const ENV = { MAVEN_MOTION_OUTPUT_DIR: join(tmpdir(), "maven-motion-endpoint-test") };
 const DECK = planCarousel({ brief: "make an animated carousel about MavenSync Spaces" }).deck;
+const IDENTITY = { accountId: "1", identityKey: "creator-1" };
 
-function postRequest(body) {
-  return new Request("https://example.test/api/motion-carousel", {
+// Never start a real (MySQL-backed) worker in tests.
+const noWorker = () => null;
+
+function post(body, { store = new InMemoryMotionCarouselJobStore(), identity = IDENTITY } = {}) {
+  const request = new Request("https://example.test/api/motion-carousel", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-}
-
-function fakeRenderer({ configured = true } = {}) {
-  return {
-    isConfigured: () => configured,
-    render: async () => ({
-      ok: true,
-      files: ["slide-01.mp4", "slide-02.mp4", "cover.png", "full-deck.mp4"],
-      slideFiles: ["slide-01.mp4", "slide-02.mp4"],
-      coverPath: "cover.png",
-      pdfPath: null,
-      fullDeckPath: "full-deck.mp4",
-      tallPath: null,
-      durationMs: 12,
-    }),
-    postprocess: async () => ({ outputs: ["/x/slide-01-2x3.mp4", "/x/slide-02-2x3.mp4"] }),
-  };
+  return handleMotionCarouselPost(request, { identity, store, env: ENV, startWorker: noWorker });
 }
 
 test("plan action returns a deck, storyboard and preset", async () => {
-  const response = await handleMotionCarouselPost(postRequest({ action: "plan", brief: "an animated carousel about cold brew", platform: "pinterest_pin" }), { identity: { identityKey: "creator-1" }, env: ENV });
+  const response = await post({ action: "plan", brief: "an animated carousel about cold brew", platform: "pinterest_pin" });
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.ok, true);
   assert.equal(body.preset.id, "pinterest_pin");
   assert.ok(body.deck.slides.length >= 3);
-  assert.ok(body.storyboard.slides.length === body.deck.slides.length);
 });
 
-test("unknown actions and missing decks are rejected", async () => {
-  const unknown = await handleMotionCarouselPost(postRequest({ action: "explode" }), { identity: {}, env: ENV });
-  assert.equal(unknown.status, 400);
-  const noDeck = await handleMotionCarouselPost(postRequest({ action: "render" }), { identity: {}, env: ENV });
-  assert.equal(noDeck.status, 400);
-});
-
-test("render refuses a deck that does not validate", async () => {
-  const response = await handleMotionCarouselPost(postRequest({ action: "render", deck: { look: "solid", slides: [{ headline: "no visual", visual: { type: "hologram" } }] } }), { identity: {}, renderer: fakeRenderer(), env: ENV });
-  assert.equal(response.status, 422);
-  const body = await response.json();
-  assert.equal(body.code, "deck_invalid");
-});
-
-test("render reports an unconfigured local renderer honestly", async () => {
-  const response = await handleMotionCarouselPost(postRequest({ action: "render", deck: DECK }), { identity: {}, renderer: fakeRenderer({ configured: false }), env: ENV });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).code, "renderer_not_configured");
-});
-
-test("render returns files, fingerprints and export urls", async () => {
-  const response = await handleMotionCarouselPost(postRequest({ action: "render", deck: DECK, presetId: "pinterest_pin" }), { identity: { identityKey: "creator-1" }, renderer: fakeRenderer(), env: ENV });
+test("render enqueues a background job instead of rendering inline", async () => {
+  const store = new InMemoryMotionCarouselJobStore();
+  const response = await post({ action: "render", deck: DECK, presetId: "pinterest_pin", idempotencyKey: "k1" }, { store });
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.ok, true);
-  assert.equal(body.slideFiles.length, 2);
-  assert.match(body.slideFiles[0], /^\/api\/motion-carousel\?file=/);
-  assert.equal(body.exports.length, 2);
-  assert.equal(body.fingerprints.length, DECK.slides.length);
+  assert.equal(body.action, "render");
+  assert.equal(body.job.status, "queued");
+  assert.equal(body.job.presetId, "pinterest_pin");
+  assert.equal(body.deduped, false);
+  assert.equal((await store.list({ accountId: "1" })).length, 1);
 });
 
-test("download rejects traversal and unknown extensions", async () => {
-  const traversal = await serveCarouselFile("../deck.json", { identityKey: "creator-1" }, ENV);
-  assert.equal(traversal.status, 404);
-  const badExt = await serveCarouselFile("secret.env", { identityKey: "creator-1" }, ENV);
-  assert.equal(badExt.status, 404);
-  const missing = await serveCarouselFile("slide-99.mp4", { identityKey: "creator-1" }, ENV);
-  assert.equal(missing.status, 404);
+test("render is deduped on the idempotency key", async () => {
+  const store = new InMemoryMotionCarouselJobStore();
+  const first = await (await post({ action: "render", deck: DECK, idempotencyKey: "same" }, { store })).json();
+  const second = await (await post({ action: "render", deck: DECK, idempotencyKey: "same" }, { store })).json();
+  assert.equal(first.job.jobId, second.job.jobId);
+  assert.equal(second.deduped, true);
+});
+
+test("render rejects an invalid deck and an unauthenticated caller", async () => {
+  const invalid = await post({ action: "render", deck: { look: "solid", slides: [{ headline: "no visual", visual: { type: "hologram" } }] } });
+  assert.equal(invalid.status, 422);
+  assert.equal((await invalid.json()).code, "deck_invalid");
+  const anonymous = await post({ action: "render", deck: DECK }, { identity: {} });
+  assert.equal(anonymous.status, 401);
+});
+
+test("unknown actions are rejected", async () => {
+  assert.equal((await post({ action: "explode" })).status, 400);
+});
+
+test("job status is served by id and scoped to the owner", async () => {
+  const store = new InMemoryMotionCarouselJobStore();
+  const { job } = await (await post({ action: "render", deck: DECK }, { store })).json();
+  const mine = await handleMotionCarouselGet(new Request(`https://example.test/api/motion-carousel?jobId=${job.jobId}`), { identity: IDENTITY, store, env: ENV });
+  assert.equal((await mine.json()).job.jobId, job.jobId);
+  const other = await handleMotionCarouselGet(new Request(`https://example.test/api/motion-carousel?jobId=${job.jobId}`), { identity: { accountId: "2", identityKey: "creator-2" }, store, env: ENV });
+  assert.equal(other.status, 404);
+});
+
+test("cancel and retry actions drive the job lifecycle", async () => {
+  const store = new InMemoryMotionCarouselJobStore();
+  const { job } = await (await post({ action: "render", deck: DECK }, { store })).json();
+  const canceled = await (await post({ action: "cancel", jobId: job.jobId }, { store })).json();
+  assert.equal(canceled.job.status, "canceled");
+  // A failed job can be retried.
+  const store2 = new InMemoryMotionCarouselJobStore();
+  const first = await (await post({ action: "render", deck: DECK }, { store: store2 })).json();
+  const claimed = await store2.claimNext();
+  await store2.fail(claimed.id, { error: { code: "render_failed", message: "boom" } });
+  const retried = await (await post({ action: "retry", jobId: first.job.jobId }, { store: store2 })).json();
+  assert.equal(retried.job.status, "queued");
 });
 
 test("GET without a file reports renderer status", async () => {
-  const response = await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), { identity: {}, env: ENV });
+  const response = await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV });
   const body = await response.json();
   assert.equal(body.ok, true);
-  assert.equal(typeof body.configured, "boolean");
+  assert.equal(body.configured, false);
+  assert.equal(typeof body.runtime, "string");
+});
+
+test("download rejects traversal and unknown extensions", async () => {
+  assert.equal((await serveCarouselFile("../deck.json", IDENTITY, ENV)).status, 404);
+  assert.equal((await serveCarouselFile("secret.env", IDENTITY, ENV)).status, 404);
+  assert.equal((await serveCarouselFile("slide-99.mp4", IDENTITY, ENV)).status, 404);
 });
 
 test("the output directory is confined to a sanitized identity folder", () => {

@@ -45,6 +45,41 @@ export function wordCount(text) {
   return String(text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
+/**
+ * An image a slide may reference must live beside the deck. The engine resolves
+ * an image path as-is when it is absolute and expands `~` (engine.py `resolve`),
+ * so an absolute or parent-relative value would let a caller read an arbitrary
+ * server file into a slide they can then download. Mirrored here so the Creator
+ * OS refuses such a deck before it is ever queued.
+ */
+export function isSafeImageReference(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  if (text.startsWith("~")) return false;
+  if (/^[a-zA-Z]:[\\/]/.test(text)) return false; // Windows drive absolute
+  if (/^[\\/]/.test(text)) return false; // POSIX absolute, UNC, or root-relative
+  if (text.split(/[\\/]+/).includes("..")) return false; // parent traversal
+  return true;
+}
+
+function unsafeImageFields(value, path = "visual") {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => unsafeImageFields(entry, `${path}[${index}]`));
+  }
+  if (isPlainObject(value)) {
+    const places = [];
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === "image" && typeof entry === "string" && entry.trim() && !isSafeImageReference(entry)) {
+        places.push(`${path}.image`);
+      } else {
+        places.push(...unsafeImageFields(entry, `${path}.${key}`));
+      }
+    }
+    return places;
+  }
+  return [];
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -186,6 +221,9 @@ function validateSlide(slide, index, total, deckWarnings) {
         warnings.push(`visual "${type}" expects ${min}-${max} ${field} (got ${Array.isArray(value) ? value.length : 0})`);
       }
     }
+  }
+  for (const where of unsafeImageFields(visual)) {
+    errors.push(`${where} must name a file beside the deck (no absolute paths, \"~\" or \"..\")`);
   }
   if (type === "cta" && index !== total - 1) warnings.push("a call-to-action slide works best last");
   if (type !== "cta" && index === total - 1) deckWarnings.push(`${label} is last but is not a cta; decks usually end on one`);

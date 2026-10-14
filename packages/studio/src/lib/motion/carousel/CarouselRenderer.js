@@ -128,7 +128,7 @@ export function createLocalCarouselRenderer({
      * Renders (or selectively re-renders) a deck.
      * @param {{deck, outDir, deckPath, plan}} args
      */
-    async render({ deck, outDir, deckPath = null, plan = null } = {}) {
+    async render({ deck, outDir, deckPath = null, plan = null, signal = undefined } = {}) {
       if (!this.isConfigured()) {
         throw new CarouselRendererUnavailableError("Local Maven Motion renderer is not configured (set MAVEN_MOTION_ENGINE).");
       }
@@ -153,7 +153,7 @@ export function createLocalCarouselRenderer({
         tall: Boolean(plan?.renderOptions?.tall ?? preset.fullDeckTall),
       });
       const startedAt = Date.now();
-      const result = await execFile(runtime.pythonPath, [runtime.enginePath, "render", ...args], { timeout: timeoutMs });
+      const result = await execFile(runtime.pythonPath, [runtime.enginePath, "render", ...args], { timeout: timeoutMs, ...(signal ? { signal } : {}) });
       const listed = await readOutputDir(outDir);
       const reported = parseEngineOutput(result.stdout);
       const files = [...new Set([...listed, ...reported])].filter((name) => /\.(mp4|png|pdf)$/i.test(name));
@@ -179,16 +179,17 @@ export function createLocalCarouselRenderer({
      * Re-frames rendered slides into an exact export size with FFmpeg. Used by
      * "postprocess" presets (Pinterest 2:3, square 1:1, Reel 9:16 per slide).
      */
-    async postprocess({ files = [], presetId, outDir } = {}) {
+    async postprocess({ files = [], presetId, outDir, signal = undefined } = {}) {
       const preset = getCarouselExportPreset(presetId || "instagram_carousel");
       if (preset.mode !== "postprocess") return { outputs: [], preset };
       const inputs = files.filter((name) => /^slide-\d+\.mp4$/i.test(name));
       const outputs = [];
       for (const name of inputs) {
+        if (signal?.aborted) break;
         const suffix = preset.fileSuffix || "";
         const output = `${outDir}/${name.replace(/\.mp4$/i, "")}${suffix}.mp4`;
         const args = buildPostprocessArgs({ input: `${outDir}/${name}`, output, width: preset.width, height: preset.height });
-        await execFile(runtime.ffmpegPath, args, { timeout: timeoutMs });
+        await execFile(runtime.ffmpegPath, args, { timeout: timeoutMs, ...(signal ? { signal } : {}) });
         outputs.push(output);
       }
       return { outputs, preset };

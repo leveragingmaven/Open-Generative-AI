@@ -8,6 +8,7 @@ import {
   fingerprintMap,
   hashString,
   stableStringify,
+  isSafeImageReference,
 } from "./CarouselDeck.js";
 
 const VALID_DECK = {
@@ -93,6 +94,22 @@ test("a deck-level appearance change invalidates every slide", () => {
   const before = fingerprintMap(normalizeDeck(VALID_DECK));
   const after = fingerprintMap(normalizeDeck({ ...VALID_DECK, colors: "ocean" }));
   assert.notDeepEqual(after, before);
+});
+
+test("validateDeck refuses an image path outside the deck directory", () => {
+  for (const image of ["/etc/passwd", "~/secret.png", "C:\\Users\\me\\.ssh\\id_rsa", "../outside.png", "a/../../b.png", "\\\\server\\share\\x.png"]) {
+    const deck = { ...VALID_DECK, slides: VALID_DECK.slides.map((s, i) => (i === 0 ? { ...s, visual: { type: "image", image } } : s)) };
+    const validation = validateDeck(deck);
+    assert.equal(isDeckRenderable(validation), false, `${image} must be rejected`);
+    assert.ok(validation.slides[0].errors.some((e) => /must name a file beside the deck/.test(e)), `${image} must report a path error`);
+  }
+});
+
+test("validateDeck still accepts an image beside the deck", () => {
+  const deck = { ...VALID_DECK, slides: VALID_DECK.slides.map((s, i) => (i === 0 ? { ...s, visual: { type: "image", image: "shop.jpg" } } : s)) };
+  assert.equal(isDeckRenderable(validateDeck(deck)), true);
+  assert.equal(isSafeImageReference("assets/bottle.png"), true);
+  assert.equal(isSafeImageReference("../bottle.png"), false);
 });
 
 test("stableStringify is key-order independent and hashString is deterministic", () => {
