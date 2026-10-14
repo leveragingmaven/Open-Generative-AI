@@ -21,7 +21,8 @@ import {
 import { startMotionCarouselWorker, getMotionCarouselWorker } from './motionCarouselWorkerRuntime.js';
 import { MySqlMotionCarouselJobStore } from './motionCarouselJobStore.js';
 import { carouselOutputDir, carouselFileUrl } from './motionCarouselPaths.js';
-import { resolveCarouselRuntime, describeRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
+import { resolveCarouselRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
+import { describeRenderer } from './motionCarouselRendererSelection.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
@@ -138,11 +139,12 @@ export async function handleMotionCarouselGet(request, { identity, store, env = 
     return jobErrorResponse(error);
   }
 
-  const runtime = resolveCarouselRuntime(env);
+  const renderer = describeRenderer({ env, runtime: resolveCarouselRuntime(env) });
   return Response.json({
     ok: true,
-    configured: runtime.configured,
-    runtime: describeRuntime(runtime),
+    configured: renderer.configured,
+    runtime: renderer.detail,
+    renderer: { id: renderer.id, mode: renderer.mode, label: renderer.label },
     workerRunning: Boolean(getMotionCarouselWorker()),
   });
 }

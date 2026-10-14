@@ -12,7 +12,8 @@
  */
 import { createMotionCarouselWorker } from './motionCarouselWorker.js';
 import { MySqlMotionCarouselJobStore } from './motionCarouselJobStore.js';
-import { createLocalCarouselRenderer, resolveCarouselRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
+import { resolveCarouselRuntime } from '../../packages/studio/src/lib/motion/carousel/CarouselRenderer.js';
+import { createConfiguredCarouselRenderer, describeRenderer } from './motionCarouselRendererSelection.js';
 
 let singleton = null;
 
@@ -20,11 +21,13 @@ export function startMotionCarouselWorker({ store = null, renderer = null, runti
   if (singleton) return singleton;
   if (!force && String(env?.MOTION_CAROUSEL_WORKER || '').toLowerCase() === 'off') return null;
   const resolvedRuntime = runtime || resolveCarouselRuntime(env);
-  if (!resolvedRuntime.configured) return null;
+  // The native renderer is always available (sharp + FFmpeg ship with the app), so
+  // this only refuses when the explicitly-selected engine has no path configured.
+  if (!describeRenderer({ env, runtime: resolvedRuntime }).configured) return null;
   try {
     const worker = createMotionCarouselWorker({
       store: store || new MySqlMotionCarouselJobStore(),
-      renderer: renderer || createLocalCarouselRenderer({ runtime: resolvedRuntime }),
+      renderer: renderer || createConfiguredCarouselRenderer({ env, runtime: resolvedRuntime }),
       runtime: resolvedRuntime,
       env,
     });

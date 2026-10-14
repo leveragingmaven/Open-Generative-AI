@@ -94,8 +94,30 @@ test("GET without a file reports renderer status", async () => {
   const response = await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV });
   const body = await response.json();
   assert.equal(body.ok, true);
-  assert.equal(body.configured, false);
+  // The MavenSync native renderer is the default and needs no operator path, so a
+  // deployment with nothing configured still reports itself as render-capable.
+  assert.equal(body.configured, true);
+  assert.equal(body.renderer.mode, "native");
+  assert.equal(body.renderer.id, "mavensync-native");
   assert.equal(typeof body.runtime, "string");
+});
+
+test("the third-party engine is only selected when it is explicitly asked for", async () => {
+  const native = await (await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV })).json();
+  assert.equal(native.renderer.mode, "native");
+
+  // Asking for the engine without a path must NOT enable it: native stays.
+  const askedWithoutPath = await (await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), {
+    identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: { ...ENV, MAVEN_MOTION_RENDERER: "engine" },
+  })).json();
+  assert.equal(askedWithoutPath.renderer.mode, "native");
+
+  // With a path it is selected, and reports itself as the isolated engine.
+  const engine = await (await handleMotionCarouselGet(new Request("https://example.test/api/motion-carousel"), {
+    identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(),
+    env: { ...ENV, MAVEN_MOTION_RENDERER: "engine", MAVEN_MOTION_ENGINE: "/opt/carousel.py" },
+  })).json();
+  assert.equal(engine.renderer.mode, "engine");
 });
 
 test("download rejects traversal and unknown extensions", async () => {

@@ -246,6 +246,9 @@ export function planCarousel({
 
   const deck = {
     look: resolvedLook,
+    // Recorded so a render (and any future engine) knows whether these colours are
+    // MavenSync's own or the customer's, without re-deriving it from the palette.
+    brand: brandPlan.id,
     colors,
     music: resolvedMusic,
     handle: brandPlan.handle || undefined,

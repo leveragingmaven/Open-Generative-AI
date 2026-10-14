@@ -6,6 +6,7 @@ import {
   CAROUSEL_EXPORT_PRESET_IDS,
   CAROUSEL_BRANDS,
 } from "../../lib/motion/carousel/CarouselConstants.js";
+import { CAROUSEL_VISUAL_STYLES, CAROUSEL_DEFAULT_VISUAL_STYLE } from "../../lib/motion/carousel/CarouselVisualStyles.js";
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 const ACTIVE = new Set(["queued", "running"]);
@@ -37,6 +38,7 @@ export default function MavenCarouselPanel({ onExit }) {
   const [handle, setHandle] = useState("");
   const [brandColors, setBrandColors] = useState("");
   const [presetId, setPresetId] = useState("instagram_carousel");
+  const [visualPreset, setVisualPreset] = useState(CAROUSEL_DEFAULT_VISUAL_STYLE);
   const [deck, setDeck] = useState(null);
   const [storyboard, setStoryboard] = useState(null);
   const [clarifications, setClarifications] = useState([]);
@@ -121,7 +123,9 @@ export default function MavenCarouselPanel({ onExit }) {
     try {
       const data = await post({
         action: "render",
-        deck,
+        // The visual style travels on the deck, which the queue already persists and
+        // passes to the renderer — so no new job field and no schema change.
+        deck: { ...deck, preset: visualPreset },
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -132,7 +136,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, lastFingerprints]);
+  }, [post, deck, approved, presetId, visualPreset, lastFingerprints]);
 
   const cancel = useCallback(async () => {
     if (!job?.jobId) return;
@@ -171,7 +175,7 @@ export default function MavenCarouselPanel({ onExit }) {
 
       {rendererStatus && rendererStatus.configured === false ? (
         <div className="mx-4 mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          Local renderer not configured. Set <code>MAVEN_MOTION_ENGINE</code> on the server; renders stay queued until then.
+          No carousel renderer is available on this server, so renders stay queued. {rendererStatus.runtime}
         </div>
       ) : null}
 
@@ -195,11 +199,19 @@ export default function MavenCarouselPanel({ onExit }) {
               Brand colours (comma separated, customer brand)
               <input value={brandColors} onChange={(e) => setBrandColors(e.target.value)} placeholder="#FF2D87, #D4A858" className="mt-1 w-full rounded bg-black/30 border border-white/10 px-2 py-1.5 text-white" />
             </label>
-            <label className="block col-span-2">
+            <label className="block">
               Export preset
               <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="mt-1 w-full rounded bg-black/30 border border-white/10 px-2 py-1.5 text-white">
                 {presetOptions.map((preset) => (
                   <option key={preset.id} value={preset.id}>{preset.label} · {preset.ratio}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              Visual style
+              <select value={visualPreset} onChange={(e) => setVisualPreset(e.target.value)} className="mt-1 w-full rounded bg-black/30 border border-white/10 px-2 py-1.5 text-white">
+                {CAROUSEL_VISUAL_STYLES.map((style) => (
+                  <option key={style.id} value={style.id}>{style.label}</option>
                 ))}
               </select>
             </label>
@@ -275,6 +287,12 @@ export default function MavenCarouselPanel({ onExit }) {
             <div className="mt-3">
               <p className="text-[11px] text-white/60">{result.summary} Publishing is manual; no social API is connected.</p>
               {result.reusedSlides?.length ? <p className="mt-1 text-[11px] text-emerald-200">Reused {result.reusedSlides.length} unchanged slide(s).</p> : null}
+              {result.renderer ? (
+                <p className="mt-1 text-[11px] text-white/45">Rendered by {result.renderer}{result.rendererVersion ? ` · ${result.rendererVersion}` : ""}</p>
+              ) : null}
+              {(result.warnings || []).map((warning, i) => (
+                <p key={`w${i}`} className="mt-1 text-[11px] text-amber-200">{warning}</p>
+              ))}
               <div className="mt-3 flex flex-wrap gap-2">
                 {(result.slideFiles || []).map((url, i) => (
                   <a key={`s${i}`} href={url} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slide {i + 1}</a>
