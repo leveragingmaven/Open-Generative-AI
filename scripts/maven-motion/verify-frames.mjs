@@ -13,7 +13,7 @@
  *
  * Exit code is non-zero when any frame fails a check, so it can gate a release.
  */
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 
@@ -86,9 +86,21 @@ for (const presetId of args.presets.split(',').filter(Boolean)) {
       let bytes;
       try {
         // eslint-disable-next-line no-await-in-loop
+        const info = await stat(file);
+        if (!info.isFile() || info.size === 0) throw new Error('the file is missing or empty');
+        // eslint-disable-next-line no-await-in-loop
         bytes = await extractFramePng(runtime.ffmpegPath, file, at, { signal: null });
       } catch (error) {
-        failures.push({ presetId, slide: index + 1, label, problems: [{ kind: 'decode', detail: error.message }] });
+        // Reported like any other problem, with its detail, so "nothing could be read"
+        // is never a silent result.
+        const problems = [{
+          kind: 'decode',
+          block: '-',
+          text: `${basename(file)} @${at.toFixed(2)}s`,
+          detail: error.message,
+        }];
+        failures.push({ presetId, slide: index + 1, label, at: Number(at.toFixed(2)), problems });
+        console.log(`FAIL ${presetId} slide ${index + 1} @${at.toFixed(2)}s (${label}) — ${error.message}`);
         continue;
       }
       // eslint-disable-next-line no-await-in-loop
