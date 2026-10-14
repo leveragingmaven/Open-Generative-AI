@@ -135,3 +135,47 @@ test("recover fails an interrupted job that exhausted its attempts", async () =>
   assert.deepEqual(result.failed, [job.jobId]);
   assert.equal((await store.get(job.jobId, { accountId: "1" })).status, MOTION_CAROUSEL_JOB_STATUS.FAILED);
 });
+
+/** Emits the exact progress sequence the native renderer emits, per slide. */
+function progressRenderer(onEmit) {
+  return {
+    async render({ onProgress } = {}) {
+      const frames = 240;
+      for (let slide = 0; slide < DECK.slides.length; slide += 1) {
+        for (let frame = 0; frame < frames; frame += 24) {
+          await onProgress?.({ phase: "rendering", slideIndex: slide, frameIndex: frame, frames, slideCount: DECK.slides.length });
+          onEmit?.();
+        }
+        await onProgress?.({ phase: "rendering", slidesDone: slide + 1, slideCount: DECK.slides.length });
+      }
+      return { ok: true, files: ["slide-01.mp4"], slideFiles: ["slide-01.mp4"], coverPath: null, pdfPath: null, fullDeckPath: null, tallPath: null, durationMs: 1 };
+    },
+    async postprocess() { return { outputs: [] }; },
+  };
+}
+
+test("reported progress only moves forward and counts finished slides", async () => {
+  const store = new InMemoryMotionCarouselJobStore();
+  const reported = [];
+  const heartbeat = store.heartbeat.bind(store);
+  store.heartbeat = async (jobId, options = {}) => {
+    if (Number.isFinite(options.progress)) reported.push({ phase: options.phase, progress: options.progress });
+    return heartbeat(jobId, options);
+  };
+  const { job } = await enqueueMotionCarouselRender({ store, identity: IDENTITY, deck: DECK });
+  await workerFor(store, progressRenderer(), fakeFs()).drain();
+
+  const rendering = reported.filter((entry) => entry.phase === "rendering").map((entry) => entry.progress);
+  assert.ok(rendering.length > 10, `expected many progress updates, got ${rendering.length}`);
+  for (let i = 1; i < rendering.length; i += 1) {
+    assert.ok(
+      rendering[i] >= rendering[i - 1],
+      `progress went backwards: ${rendering[i - 1]}% then ${rendering[i]}%`,
+    );
+  }
+  // A frame update carries no slidesDone; reading it as zero reset the bar to the
+  // start of the render range on every slide, so the last update has to be the top.
+  assert.equal(rendering.at(-1), 70, "the render phase tops out at 70% before postprocessing");
+  assert.equal(reported.at(-1).progress, 80, "postprocessing reports 80%");
+  assert.equal((await store.get(job.jobId, { accountId: "1" })).progress, 100, "the finished job is at 100%");
+});

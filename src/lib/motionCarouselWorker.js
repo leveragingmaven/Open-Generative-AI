@@ -132,12 +132,22 @@ export function createMotionCarouselWorker({
       await store.heartbeat(job.id, { phase: MOTION_CAROUSEL_JOB_PHASE.RENDERING, progress: 15, leaseMs });
       // Renderers that can report finer progress pass it through here; the render
       // itself still runs outside the HTTP request.
+      //
+      // Two things keep the reported percentage honest. Slides completed so far are
+      // accumulated here, because a frame update carries a frame index but no
+      // `slidesDone` of its own — reading it as zero made the bar fall back to the
+      // start of the range on every slide. And the value only ever moves forward: a
+      // progress indicator that goes backwards is worse than one that moves slowly,
+      // which is what a customer watching the panel would otherwise have seen.
+      const slideCount = job.deck?.slides?.length || 1;
+      let slidesDone = 0;
+      let reported = 15;
       const onProgress = async (update) => {
+        if (Number.isFinite(update?.slidesDone)) slidesDone = Math.max(slidesDone, update.slidesDone);
         const fraction = update?.frames ? (update.frameIndex || 0) / update.frames : 0;
-        const slidesDone = update?.slidesDone ?? 0;
-        const slideCount = update?.slideCount || job.deck?.slides?.length || 1;
-        const progressValue = 15 + Math.round(((slidesDone + fraction) / slideCount) * 55);
-        await store.heartbeat(job.id, { phase: MOTION_CAROUSEL_JOB_PHASE.RENDERING, progress: Math.min(70, progressValue), leaseMs }).catch(() => {});
+        const progressValue = 15 + Math.round(((slidesDone + Math.min(1, Math.max(0, fraction))) / slideCount) * 55);
+        reported = Math.min(70, Math.max(reported, progressValue));
+        await store.heartbeat(job.id, { phase: MOTION_CAROUSEL_JOB_PHASE.RENDERING, progress: reported, leaseMs }).catch(() => {});
       };
       const renderResult = await resolvedRenderer.render({ deck: job.deck, outDir, plan, signal: controller.signal, onProgress, options: { accountId: job.accountId } });
 
