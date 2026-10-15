@@ -141,12 +141,46 @@ function headlineLine(ctx, { x, y, line, size, fill, pillFill, pillInk, p, track
   return [...pills, ...words];
 }
 
-/** Fits and reveals a stack of display lines with a per-line wipe. */
-function displayBlock(ctx, { headline, box, maxLines, top, lineHeight, fill, pillInk, tracking, staggerWindow }) {
-  const fitted = fitRuns(parseRuns(headline), ctx.measure, {
-    maxWidth: box.w, maxLines,
-    maxSize: ctx.type.displaySize, minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: tracking,
-  });
+/** A stable pick from `count` options, so each headline varies without randomness. */
+function variantFor(text, count) {
+  let hash = 0;
+  for (const ch of String(text)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % count;
+}
+
+/**
+ * Fits a display headline into its box: `maxLines` at the preset size when possible,
+ * otherwise more lines at a smaller size with the leading tightened so the block
+ * stays inside the box. `overflow` is set only when even that cannot fit, so the
+ * renderer can report it rather than drawing text off the canvas.
+ */
+function layoutDisplay(ctx, headline, box, { maxLines = 2, tracking = 0, lineHeight }) {
+  const runs = parseRuns(headline);
+  const base = {
+    maxWidth: box.w, maxSize: ctx.type.displaySize,
+    minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: tracking,
+  };
+  let fitted = fitRuns(runs, ctx.measure, { ...base, maxLines });
+  if (fitted.lines.length > maxLines) {
+    fitted = fitRuns(runs, ctx.measure, {
+      ...base, maxLines: 4, minSize: Math.round(ctx.type.displaySize * 0.4), hardFloor: 20,
+    });
+  }
+  const leading = Math.min(lineHeight, Math.floor(box.h / Math.max(1, fitted.lines.length)));
+  return { fitted, lineHeight: leading, overflow: fitted.lines.length > 4 };
+}
+
+/**
+ * Reveals a stack of display lines. Each headline picks one of two entrance styles
+ * from its own text, so neighbouring slides do not share the same motion. Lines hold
+ * on screen after their reveal: a fade-out would leave the final frame with no ink.
+ */
+function displayBlock(ctx, { headline, box, layout, top, fill, pillInk, tracking, staggerWindow }) {
+  const { fitted, lineHeight } = layout;
+  const variant = variantFor(headline, 4);
+  const dropIn = variant >= 2;
+  
+  
   const body = [];
   fitted.lines.forEach((line, index) => {
     const start = 0.08 + stagger(index, fitted.lines.length, staggerWindow);
@@ -155,21 +189,21 @@ function displayBlock(ctx, { headline, box, maxLines, top, lineHeight, fill, pil
     const lineWidth = ctx.measure(lineText(line), fitted.size, tracking);
     // The wipe covers the pill padding as well as the glyphs.
     const pillPad = Math.max(fitted.size * 0.28, 8);
-    const maskId = wipe(ctx, {
+    const enterDy = dropIn ? -(1 - p) * fitted.size * 0.6 : (1 - p) * fitted.size * 0.18;
+    
+    const content = headlineLine(ctx, {
+      x: box.x, y: baseline, line, size: fitted.size, tracking, fill,
+      pillFill: theme0(ctx).accent, pillInk, p,
+    });
+    const maskId = dropIn ? null : wipe(ctx, {
       x: box.x, y: baseline - fitted.size * 1.1,
       w: Math.max(lineWidth, ctx.measure("M", fitted.size)), h: lineHeight * 1.2, p,
       pad: pillPad, grow: pillPad * 2,
     });
     body.push(group({
-      transform: translate(0, (1 - p) * fitted.size * 0.18),
+      transform: translate(0, enterDy),
       opacity: clamp01(p * 1.5),
-      children: group({
-        "clip-path": `url(#${maskId})`,
-        children: headlineLine(ctx, {
-          x: box.x, y: baseline, line, size: fitted.size, tracking, fill,
-          pillFill: theme0(ctx).accent, pillInk, p,
-        }),
-      }),
+      children: maskId ? group({ "clip-path": `url(#${maskId})`, children: content }) : content,
     }));
   });
   return { body, fitted };
@@ -187,18 +221,19 @@ export const headlineReveal = {
   draw(ctx) {
     const { slide, box, theme, fonts, t } = ctx;
     const sub = slide.sub ? String(slide.sub) : "";
-    const lineHeight = Math.round(ctx.type.displaySize * ctx.type.displayLeading);
     // Two lines: a cover headline that wraps into three or four lines stops reading
     // as display type, so the size is chosen to fit two balanced lines instead.
-    const previewFit = fitRuns(parseRuns(String(slide.headline || "")), ctx.measure, {
-      maxWidth: box.w, maxLines: 2, maxSize: ctx.type.displaySize,
-      minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: ctx.type.displayTracking,
+    const headline = String(slide.headline || "");
+    const layout = layoutDisplay(ctx, headline, box, {
+      maxLines: 2, tracking: ctx.type.displayTracking,
+      lineHeight: Math.round(ctx.type.displaySize * ctx.type.displayLeading),
     });
-    const blockH = previewFit.lines.length * lineHeight;
+    const { lineHeight } = layout;
+    const blockH = layout.fitted.lines.length * lineHeight;
     const top = box.y + (box.h - blockH) / 2 + lineHeight * 0.42;
 
     const { body, fitted } = displayBlock(ctx, {
-      headline: String(slide.headline || ""), box, maxLines: 2, top, lineHeight,
+      headline, box, layout, top,
       fill: theme.ink, pillInk: theme.dark ? theme.surface : "#FFFFFF",
       tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
     });
@@ -215,7 +250,7 @@ export const headlineReveal = {
         }),
       }));
     }
-    return { body, shrunk: fitted.shrunk, warnAt: fitted.atFloor ? String(slide.headline) : null };
+    return { body, shrunk: fitted.shrunk, warnAt: layout.overflow || fitted.atFloor ? headline : null };
   },
 };
 
@@ -553,19 +588,19 @@ export const ctaCard = {
     const label = String(visual.ctaLabel || CTA_LABELS[action] || action.charAt(0).toUpperCase() + action.slice(1));
     const headline = String(slide.headline || "");
 
-    const lineHeight = Math.round(ctx.type.displaySize * ctx.type.displayLeading);
-    const previewFit = fitRuns(parseRuns(headline), ctx.measure, {
-      maxWidth: box.w, maxLines: 2, maxSize: ctx.type.displaySize,
-      minSize: Math.round(ctx.type.displaySize * 0.5), letterSpacing: ctx.type.displayTracking,
+    const layout = layoutDisplay(ctx, headline, box, {
+      maxLines: 2, tracking: ctx.type.displayTracking,
+      lineHeight: Math.round(ctx.type.displaySize * ctx.type.displayLeading),
     });
+    const { lineHeight } = layout;
     const top = box.y + 96;
     const { body, fitted } = displayBlock(ctx, {
-      headline, box, maxLines: 2, top, lineHeight, fill: theme.ink,
+      headline, box, layout, top, fill: theme.ink,
       pillInk: theme.dark ? theme.surface : "#FFFFFF",
       tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
     });
 
-    const buttonY = top + previewFit.lines.length * lineHeight + 88;
+    const buttonY = top + layout.fitted.lines.length * lineHeight + 88;
     const buttonW = Math.min(box.w, ctx.measureBody(label, 40) + 132);
     const buttonP = easeOutBack(progress(t, 0.44, 0.8));
     const pulse = 1 + Math.sin(clamp01((t - 0.62) / 0.38) * Math.PI * 2) * 0.02;

@@ -59,9 +59,10 @@ export function extractTopic(brief) {
 
 export function detectSlideCount(brief, fallback = CAROUSEL_DEFAULT_SLIDE_COUNT) {
   const text = String(brief || "").toLowerCase();
-  const digits = text.match(/\b(\d{1,2})\s*slides?\b/);
+  // "five-slide" and "five slide" both count; so does "7 slides".
+  const digits = text.match(/\b(\d{1,2})[\s-]*slides?\b/);
   if (digits) return clampSlides(Number(digits[1]));
-  const words = text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\s*slides?\b/);
+  const words = text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)[\s-]*slides?\b/);
   if (words) return clampSlides(NUMBER_WORDS[words[1]]);
   return fallback;
 }
@@ -112,6 +113,107 @@ function detectCtaAction(keyword, brief) {
   if (/\blink\b|link in bio/.test(text)) return "link";
   if (keyword && keyword !== "LINK") return "comment";
   return "link";
+}
+
+// A slide header at the start of a line: "Slide 1 — The Hook", "Slide 2: The Problem".
+const SLIDE_HEADER = /^(?:slide|scene|card)\s*(\d{1,2})\s*[—–:.\-]?\s*(.*)$/i;
+// Brief boundaries that may sit mid-line, with or without whitespace before them:
+// "...chatbot.\"Slide 3", "...Experience.\"CTA: ...", "...Visual direction: ...".
+const SLIDE_HEADER_INLINE = /\s*(?=(?:slide|scene|card)\s*\d{1,2}\s*[—–:.\-])/gi;
+const CTA_INLINE = /\s*(?=\b(?:cta|call to action)\s*:)/gi;
+const DIRECTION_INLINE = /\s*(?=\b(?:visual|motion|design|style)\s+direction\s*:|\bpreserve\s+all\b)/gi;
+// A closing quote glued to the next word starts a new line: "Create it."Highlight ...
+const QUOTE_GLUED = /([.!?])(["”])(?=[A-Za-z])/g;
+// The slide title ends where the first quote starts: "Slide 1 — The Hook\"Your AI..."
+const HEADER_THEN_QUOTE = /^((?:slide|scene|card)\s*\d{1,2}\s*[—–:.\-]?[^"“\n]*?)(?=["“])/gim;
+const DIRECTION_LINE = /^(?:visual|motion|design|style)\s+direction\b|^preserve\b|^notes?\s*:/i;
+const CTA_LINE = /^(?:cta|call to action|button)\s*:\s*(.+)$/i;
+const QUOTED = /["“”]([^"“”]+)["“”]/;
+const HIGHLIGHT_LINE = /^highlights?\s+(.+?)\.?$/i;
+const LIST_SPLIT = /\s*,\s*(?:and\s+)?|\s+and\s+/i;
+
+/**
+ * Reads explicit slide-by-slide copy from a brief. Each "Slide N" block yields a
+ * headline (the first quoted line, else the first line), an optional CTA line and
+ * body text. Creative-direction sections end the list. Copy is returned verbatim
+ * and in document order.
+ */
+export function parseExplicitSlides(brief) {
+  const text = String(brief || "")
+    .replace(/\r/g, "")
+    .replace(SLIDE_HEADER_INLINE, "\n")
+    .replace(CTA_INLINE, "\n")
+    .replace(DIRECTION_INLINE, "\n")
+    .replace(QUOTE_GLUED, "$1$2\n")
+    .replace(HEADER_THEN_QUOTE, "$1\n");
+  const blocks = [];
+  let current = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const header = line.match(SLIDE_HEADER);
+    if (header) {
+      current = { number: Number(header[1]), title: header[2].replace(/[.:]$/, "").trim(), lines: [] };
+      blocks.push(current);
+      continue;
+    }
+    if (DIRECTION_LINE.test(line)) {
+      current = null;
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  return blocks
+    .map((block) => {
+      let headline = null;
+      let cta = null;
+      const body = [];
+      for (const line of block.lines) {
+        const ctaMatch = line.match(CTA_LINE);
+        if (ctaMatch) {
+          cta = ctaMatch[1].trim().replace(/^["“”]+|["“”]+$/g, "").trim();
+          continue;
+        }
+        const quoted = line.match(QUOTED);
+        if (!headline && quoted) {
+          headline = quoted[1].trim();
+          const rest = line.replace(QUOTED, "").trim();
+          if (rest) body.push(rest);
+          continue;
+        }
+        body.push(line);
+      }
+      if (!headline && body.length) headline = body.shift();
+      return { number: block.number, title: block.title, headline, cta, body: body.join(" ").trim() || null };
+    })
+    .filter((block) => block.headline);
+}
+
+/** Turns parsed user copy into deck slides. Nothing here rewrites the copy. */
+function explicitSkeleton(parsedSlides, action, keyword) {
+  const total = parsedSlides.length;
+  return parsedSlides.map((parsed, index) => {
+    const isLast = index === total - 1;
+    const highlight = parsed.body ? parsed.body.match(HIGHLIGHT_LINE) : null;
+    let visual;
+    if (isLast) {
+      visual = { type: "cta", action, keyword, ...(parsed.cta ? { ctaLabel: parsed.cta } : {}) };
+    } else if (highlight) {
+      visual = { type: "list", items: highlight[1].split(LIST_SPLIT).map((item) => item.trim()).filter(Boolean) };
+    } else if (parsed.body) {
+      // Body copy is shown as the slide's supporting line.
+      visual = { type: "list", items: [] };
+    } else {
+      visual = { type: "product", caption: "" };
+    }
+    return {
+      role: index === 0 ? "hook" : isLast ? "cta" : "detail",
+      kicker: parsed.title ? parsed.title.toUpperCase() : `SLIDE ${index + 1}`,
+      headline: parsed.headline,
+      ...(parsed.body ? { sub: parsed.body } : {}),
+      visual,
+    };
+  });
 }
 
 /**
@@ -225,12 +327,18 @@ export function planCarousel({
   const resolvedMusic = music || detectMusic(brief, resolvedLook);
   const presetId = platform || detectPlatform(brief);
   const preset = getCarouselExportPreset(presetId);
-  const count = clampSlides(slideCount ?? detectSlideCount(brief));
+  const explicit = parseExplicitSlides(brief);
+  // Detailed copy wins: when the brief spells out slides, they are used exactly as
+  // written and in order. Generated suggestions are only for simple topics.
+  const useExplicit = explicit.length >= 2;
+  const count = useExplicit ? explicit.length : clampSlides(slideCount ?? detectSlideCount(brief));
   const keyword = detectKeyword(brief);
   const action = detectCtaAction(keyword, brief);
   const brandPlan = planBrand({ brand, brandColors, handle });
 
-  const skeleton = buildStorySkeleton(topic, count, keyword, action, facts);
+  const skeleton = useExplicit
+    ? explicitSkeleton(explicit, action, keyword)
+    : buildStorySkeleton(topic, count, keyword, action, facts);
   const colors = brandPlan.colors.length ? brandPlan.colors : defaultColorsFor(resolvedLook);
 
   const storyboardSlides = skeleton.map((slide, index) => ({
@@ -238,6 +346,7 @@ export function planCarousel({
     role: slide.role,
     kicker: slide.kicker,
     headline: slide.headline,
+    ...(slide.sub ? { sub: slide.sub } : {}),
     visualType: slide.visual.type,
     visual: slide.visual,
     motion: MOTION_BY_TYPE[slide.visual.type] || "animates on the beat",
@@ -255,12 +364,16 @@ export function planCarousel({
     slides: skeleton.map((slide) => ({
       kicker: slide.kicker,
       headline: slide.headline,
+      ...(slide.sub ? { sub: slide.sub } : {}),
       visual: slide.visual,
     })),
   };
 
   const clarifications = [];
-  if (!facts.statistic && !facts.quote) {
+  if (useExplicit) {
+    clarifications.push(`Using the ${explicit.length} slides from your brief exactly as written, in order.`);
+    if (explicit.length > CAROUSEL_MAX_SLIDES) clarifications.push(`Your brief has ${explicit.length} slides; the maximum is ${CAROUSEL_MAX_SLIDES}.`);
+  } else if (!facts.statistic && !facts.quote) {
     clarifications.push("No real statistic or customer quote was supplied, so slides use process graphics instead of numbers. Provide a verified number or quote to add a proof slide.");
   }
   if (action === "comment" || action === "dm") {
@@ -269,7 +382,7 @@ export function planCarousel({
   if (!brandPlan.handle && brand !== "mavensync") {
     clarifications.push("Add a handle so the slides can show your name or @account.");
   }
-  clarifications.push("Headlines are drafts generated from your topic. Review and edit them before rendering.");
+  if (!useExplicit) clarifications.push("Headlines are drafts generated from your topic. Review and edit them before rendering.");
 
   const validation = validateDeck(deck);
   const warnings = [...validation.errors, ...validation.warnings];

@@ -27,14 +27,14 @@ test("normalizeDeck fills deck defaults and guarantees a visual", () => {
   const deck = normalizeDeck({ slides: [{ headline: "A short hook line" }] });
   assert.equal(deck.look, "solid");
   assert.equal(deck.colors, "pop");
-  assert.equal(deck.music, "upbeat");
+  assert.equal(deck.music, "none");
   assert.deepEqual(deck.slides[0].visual, { type: "icon", icon: "sparkle" });
 });
 
 test("normalizeDeck uses marker defaults for the marker look", () => {
   const deck = normalizeDeck({ look: "marker", slides: [{ headline: "Hand drawn hook" }] });
   assert.equal(deck.colors, "canary");
-  assert.equal(deck.music, "chill");
+  assert.equal(deck.music, "none");
 });
 
 test("a valid deck is renderable with no errors", () => {

@@ -107,8 +107,11 @@ export function defaultColorsFor(look) {
   return look === "marker" ? "canary" : "pop";
 }
 
-export function defaultMusicFor(look) {
-  return look === "marker" ? "chill" : "upbeat";
+// No music unless asked for: the built-in beds are synthesized, so a default bed
+// would ship low-quality audio on every carousel. Licensed or uploaded tracks are
+// attached explicitly via deck.audio.
+export function defaultMusicFor(_look) {
+  return "none";
 }
 
 /**
