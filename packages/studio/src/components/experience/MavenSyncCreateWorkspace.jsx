@@ -98,6 +98,14 @@ const PRODUCTION_STUDIOS = [
     route: "/studio/vibe-motion",
   },
   {
+    id: "motion-carousel",
+    name: "Motion Carousel",
+    description: "Plan a five-slide carousel, render it, and send it to Publishing.",
+    icon: "motion",
+    route: "/studio/motion-carousel",
+    ownerOnly: true,
+  },
+  {
     id: "clipping",
     name: "AI Clipping",
     description: "Create short clips from longer media with the existing clipping workflow.",
@@ -145,7 +153,7 @@ function ProductionStudioCard({ studio }) {
   );
 }
 
-export default function MavenSyncCreateWorkspace() {
+export default function MavenSyncCreateWorkspace({ motionCarouselAllowed = false } = {}) {
   return (
     <ExperiencePage>
       <WorkspaceHeader
@@ -178,7 +186,7 @@ export default function MavenSyncCreateWorkspace() {
 
       <WorkspaceSection title="Creative Production" description="Specialized production surfaces for characters, cinema, motion, transformation, and editing.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {PRODUCTION_STUDIOS.map((studio) => <ProductionStudioCard key={studio.id} studio={studio} />)}
+          {PRODUCTION_STUDIOS.filter((studio) => !studio.ownerOnly || motionCarouselAllowed).map((studio) => <ProductionStudioCard key={studio.id} studio={studio} />)}
         </div>
       </WorkspaceSection>
 

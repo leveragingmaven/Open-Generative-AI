@@ -199,7 +199,7 @@ export default function MavenCarouselPanel({ onExit }) {
   const running = job ? ACTIVE.has(job.status) : false;
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-app-bg overflow-auto">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-app-bg">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div>
           <h2 className="text-sm font-semibold text-white">Maven Motion Carousel</h2>

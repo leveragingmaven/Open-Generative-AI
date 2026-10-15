@@ -58,7 +58,9 @@ const AI_WORKSPACES = AI_WORKSPACE_IDS
 // Less-prominent creative tools re-exposed on the Dashboard (drawn from the Tools group).
 // Knowledge Center, Memory, and MCP/CLI/Routing stay reachable via the Workspaces dropdown but
 // are not production surfaces, so they are excluded from the dashboard cards.
-const CREATIVE_TOOLS_EXCLUDED = new Set(["knowledge-center", "memory", "mcp-cli", "routing", "motion-carousel"]);
+const CREATIVE_TOOLS_EXCLUDED = new Set(["knowledge-center", "memory", "mcp-cli", "routing"]);
+// Owner-only tools: shown only when the server-side owner probe succeeds.
+const OWNER_ONLY_TOOL_IDS = new Set(["motion-carousel"]);
 const CREATIVE_TOOLS = WORKSPACE_MENU_GROUPS
   .find((group) => group.id === "tools")
   ?.tabIds
@@ -139,7 +141,8 @@ function ActivityFeed({ items }) {
   );
 }
 
-export default function MavenSyncDashboard() {
+export default function MavenSyncDashboard({ motionCarouselAllowed = false } = {}) {
+  const creativeTools = CREATIVE_TOOLS.filter((item) => motionCarouselAllowed || !OWNER_ONLY_TOOL_IDS.has(item.id));
   const { activeCampaign } = useActiveCampaign();
   const [campaigns, setCampaigns] = useState([]);
   const [assets, setAssets] = useState([]);
@@ -208,10 +211,10 @@ export default function MavenSyncDashboard() {
         </div>
       </WorkspaceSection>
 
-      {CREATIVE_TOOLS.length > 0 && (
+      {creativeTools.length > 0 && (
         <WorkspaceSection title="Creative Tools" description="Specialized production surfaces and existing creative tools.">
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {CREATIVE_TOOLS.map((item) => <WorkspaceToolCard key={item.id} item={item} />)}
+            {creativeTools.map((item) => <WorkspaceToolCard key={item.id} item={item} />)}
           </div>
         </WorkspaceSection>
       )}

@@ -658,9 +658,9 @@ const [characterTarget, setCharacterTarget] = useState(null);
   if (isStudioHome) {
     activeWorkspaceContent = <MavenHomeDashboard apiKey={studioApiKey} onOpenSettings={openSettings} />;
   } else if (isOverviewWorkspace) {
-    activeWorkspaceContent = <MavenSyncDashboard />;
+    activeWorkspaceContent = <MavenSyncDashboard motionCarouselAllowed={motionCarouselAllowed} />;
   } else if (isCreateWorkspace) {
-    activeWorkspaceContent = <MavenSyncCreateWorkspace />;
+    activeWorkspaceContent = <MavenSyncCreateWorkspace motionCarouselAllowed={motionCarouselAllowed} />;
   } else if (isIntelligenceWorkspace) {
     activeWorkspaceContent = <MavenSyncIntelligenceWorkspace />;
   } else {

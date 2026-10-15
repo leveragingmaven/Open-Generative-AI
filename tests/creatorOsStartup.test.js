@@ -9,8 +9,13 @@ const navigationSource = readFileSync(new URL("../packages/studio/src/studioNavi
 test("Studio startup does not retain the unbounded global spinner gate", () => {
   assert.doesNotMatch(shellSource, /if \(!hasMounted\)/);
   assert.doesNotMatch(shellSource, /setHasMounted/);
-  assert.match(shellSource, /<MavenSyncDashboard \/>/);
+  assert.match(shellSource, /<MavenSyncDashboard motionCarouselAllowed=\{motionCarouselAllowed\} \/>/);
   assert.match(shellSource, /<RecoverableErrorBoundary/);
+});
+
+test("Motion Carousel is owner-gated on Create and Dashboard surfaces only via the server probe", () => {
+  assert.match(shellSource, /<MavenSyncCreateWorkspace motionCarouselAllowed=\{motionCarouselAllowed\} \/>/);
+  assert.match(shellSource, /fetch\('\/api\/motion-carousel'/);
 });
 
 test("Studio home mounts the simple Dashboard and /studio/overview preserves the Workspace overview", () => {
@@ -18,7 +23,7 @@ test("Studio home mounts the simple Dashboard and /studio/overview preserves the
   const mountBlock = shellSource.match(/let activeWorkspaceContent = null;[\s\S]*?} else if \(isCreateWorkspace\)/);
   assert.ok(mountBlock, "expected the workspace content mount block");
   const homeIndex = mountBlock[0].indexOf("<MavenHomeDashboard apiKey={studioApiKey} onOpenSettings={openSettings} />");
-  const overviewIndex = mountBlock[0].indexOf("<MavenSyncDashboard />");
+  const overviewIndex = mountBlock[0].indexOf("<MavenSyncDashboard motionCarouselAllowed={motionCarouselAllowed} />");
   assert.ok(homeIndex !== -1, "expected MavenHomeDashboard with shell settings on the slugless studio home");
   assert.ok(overviewIndex !== -1, "expected MavenSyncDashboard preserved for the overview workspace");
   assert.ok(homeIndex < overviewIndex, "home must map to the Dashboard and overview to the Workspace overview");
