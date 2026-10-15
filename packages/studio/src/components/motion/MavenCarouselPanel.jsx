@@ -175,6 +175,34 @@ export default function MavenCarouselPanel({ onExit }) {
     }
   }, [post, job, brief, publishingCenter, activeCampaign?.id, activeCampaign?.name]);
 
+  // The full-deck MP4 goes to Publishing as its own video draft, never mixed into the slide carousel.
+  const sendVideoToPublishing = useCallback(async () => {
+    if (!job?.jobId) return;
+    const guardKey = `${job.jobId}:video`;
+    if (carouselDraftsSentRef.current[guardKey]) { setPublishingNotice("The full-deck video is already in Publishing as a draft."); return; }
+    setSendingToPublishing(true); setPublishingNotice(null); setError(null);
+    try {
+      const data = await post({ action: "publish-video", jobId: job.jobId });
+      const assets = data.assets || [];
+      const draft = publishingCenter.createDraft({
+        assetIds: assets.map((asset) => asset.id),
+        assets,
+        caption: brief,
+        title: `${brief.trim().slice(0, 70) || "Motion carousel"} (video)`,
+        campaignId: activeCampaign?.id || null,
+        campaignName: activeCampaign?.name || null,
+        platforms: [],
+        scheduledAt: null,
+      }, {});
+      carouselDraftsSentRef.current[guardKey] = draft.id;
+      setPublishingNotice("Added the full-deck video to Publishing as a video draft. Review it there before scheduling.");
+    } catch (err) {
+      setError(`Could not send the video to Publishing: ${err.message}`);
+    } finally {
+      setSendingToPublishing(false);
+    }
+  }, [post, job, brief, publishingCenter, activeCampaign?.id, activeCampaign?.name]);
+
   const cancel = useCallback(async () => {
     if (!job?.jobId) return;
     setError(null);
@@ -343,6 +371,11 @@ export default function MavenCarouselPanel({ onExit }) {
                 {result.storage?.state === "stored" ? (
                   <button type="button" onClick={sendToPublishing} disabled={sendingToPublishing} className="rounded bg-[var(--ms-color-gold-primary)] px-3 py-1.5 text-xs font-medium text-[#0b0a09] hover:opacity-90 disabled:opacity-50">
                     {sendingToPublishing ? "Sending…" : "Send to Publishing"}
+                  </button>
+                ) : null}
+                {result.storage?.state === "stored" && result.fullDeck ? (
+                  <button type="button" onClick={sendVideoToPublishing} disabled={sendingToPublishing} className="rounded bg-[var(--ms-color-panel-hover)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--ms-color-border-emphasized)] disabled:opacity-50">
+                    {sendingToPublishing ? "Sending…" : "Send video to Publishing"}
                   </button>
                 ) : null}
                 {(result.slideFiles || []).map((url, i) => (
