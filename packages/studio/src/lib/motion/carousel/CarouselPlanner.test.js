@@ -176,6 +176,85 @@ test("a labelled slide keeps its label as the kicker and its body as the copy", 
   assert.equal(deck.slides[1].headline, "Batch your posts");
 });
 
+// Numbered five-slide brief, the shape the Creator OS panel receives for a business prompt.
+const NUMBERED_BUSINESS_BRIEF = [
+  "Make a beautiful 5-slide animated Instagram carousel about **starting your own business**.",
+  "Use Instagram portrait 4:5 format. No music or voiceover. Keep my wording exactly.",
+  "",
+  "1. Starting your own business is a bigger step than most people admit.",
+  "2. Pick one problem you understand better than anyone.",
+  "3. Test the idea with five real customers before you build.",
+  "4. Keep the first version small so you can learn fast.",
+  "5. Follow for more founder lessons.",
+].join("\n");
+
+test("numbered five-slide copy is used exactly, in order, with no template headings", () => {
+  const { deck, storyboard } = planCarousel({ brief: NUMBERED_BUSINESS_BRIEF, brandColors: [] });
+  assert.deepEqual(
+    deck.slides.map((s) => s.headline),
+    [
+      "Starting your own business is a bigger step than most people admit.",
+      "Pick one problem you understand better than anyone.",
+      "Test the idea with five real customers before you build.",
+      "Keep the first version small so you can learn fast.",
+      "Follow for more founder lessons.",
+    ],
+  );
+  assert.equal(storyboard.slides.length, 5);
+  const allText = deck.slides.flatMap((s) => [s.kicker, s.headline, s.sub]).filter(Boolean).join(" | ");
+  assert.doesNotMatch(allText, /\[\[|\]\]|\*\*|#|Meet |Why |Three steps|What you get|Comment /);
+  assert.doesNotMatch(allText, /beautiful 5-slide/);
+  for (const slide of deck.slides) assert.ok(!/^SLIDE \d/.test(slide.kicker || ""));
+  assert.equal(deck.music, "none");
+});
+
+const EXACT_SIGNS_BRIEF = [
+  "Create a beautiful 5-slide animated Instagram carousel about 5 Signs You're Ready to Start Your Own Business.",
+  "Use deep charcoal, champagne gold, and neon pink. Make each slide visually interesting with smooth animations.",
+  "1. You're tired of waiting for the perfect time.",
+  "2. You have ideas you can't stop thinking about.",
+  "3. You want more freedom and flexibility.",
+  "4. You're ready to learn as you go.",
+  "5. Your next chapter starts with one step.",
+  "Use Instagram portrait 4:5 format. No music or voiceover. Keep my wording exactly.",
+].join("\n");
+const EXACT_SIGNS_HEADLINES = [
+  "You're tired of waiting for the perfect time.",
+  "You have ideas you can't stop thinking about.",
+  "You want more freedom and flexibility.",
+  "You're ready to learn as you go.",
+  "Your next chapter starts with one step.",
+];
+
+function assertExactSignsDeck(deck) {
+  assert.deepEqual(deck.slides.map((s) => s.headline), EXACT_SIGNS_HEADLINES);
+  const allText = deck.slides.flatMap((s) => [s.kicker, s.headline, s.sub]).filter(Boolean).join(" | ");
+  assert.doesNotMatch(allText, /\[\[|\]\]|\*|#|Meet |Why |Three steps|What you get|Comment |Use Instagram|No music/);
+  assert.doesNotMatch(allText, /beautiful 5-slide|deep charcoal/);
+  assert.equal(deck.music, "none");
+  assert.equal(deck.slides[4].visual.type, "cta");
+}
+
+test("exact Signs-of-readiness prompt yields its five statements in order (line-broken and one-line)", () => {
+  assertExactSignsDeck(planCarousel({ brief: EXACT_SIGNS_BRIEF, brandColors: [] }).deck);
+  assertExactSignsDeck(planCarousel({ brief: EXACT_SIGNS_BRIEF.replace(/\n/g, " "), brandColors: [] }).deck);
+});
+
+test("ordinary prompt without numbered slides never exposes placeholders or Markdown", () => {
+  const { deck, storyboard } = planCarousel({ brief: "Create an Instagram carousel about starting a bakery.", brandColors: [] });
+  const allText = [
+    ...deck.slides.flatMap((s) => [s.kicker, s.headline, s.sub]),
+    ...storyboard.slides.flatMap((s) => [s.kicker, s.headline, s.sub]),
+  ].filter(Boolean).join(" | ");
+  assert.doesNotMatch(allText, /\[\[|\]\]|\*|#/);
+  assert.match(allText, /bakery/);
+});
+
+test("numbers in prose do not turn a brief into slides", () => {
+  const { deck } = planCarousel({ brief: "Make a 3 slide carousel about 2024 trends.\nSave 10. Share 20." });
+  assert.ok(deck.slides.every((s) => !/^Slide \d/.test(s.headline || "")));
+});
+
 const FIVE_SLIDE_BRIEF = [
   "Slide 1: Creating content shouldn't take all day.",
   "Slide 2: Turn one idea into multiple posts.",

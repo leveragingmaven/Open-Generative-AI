@@ -49,6 +49,14 @@ const MOTION_BY_TYPE = Object.freeze({
   cta: "keyword types in, then the reward appears",
 });
 
+function stripMarkdown(text) {
+  return String(text || "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*+/g, "")
+    .replace(/^#{1,6}\s*/gm, "");
+}
+
 function firstSentence(text) {
   const trimmed = String(text || "").trim();
   const match = trimmed.match(/^[^.!?\n]+[.!?]?/);
@@ -57,7 +65,7 @@ function firstSentence(text) {
 
 /** Strips leading imperative filler so the topic reads on a slide. */
 export function extractTopic(brief) {
-  let topic = firstSentence(brief)
+  let topic = firstSentence(stripMarkdown(brief))
     .replace(/^\s*(please\s+)?(can you\s+|could you\s+)?/i, "")
     .replace(/^\s*(make|create|build|design|render|generate|produce)\s+(me\s+)?(?:(?:an|a|the)\s+)?/i, "")
     .replace(/^\s*(?:animated|live|motion)?\s*carousel\s*(?:about|for|on|of)?\s*/i, "")
@@ -141,10 +149,16 @@ const HEADER_THEN_QUOTE = /^((?:slide|scene|card)\s*\d{1,2}\s*[—–:.\-]?[^"�
 // after it, up to the next slide header, is production direction, never slide copy.
 const GLOBAL_LABEL_LINE = /^(?:global|format|design|visual|motion|style|branding|brand|music|audio|voice ?over|colou?rs?|palette|export|platform|aspect ratio|notes?|preserve|requirements?|constraints?|instructions?|handle)\b[^:\n]{0,40}:/i;
 const GLOBAL_BARE_LINE = /^(?:no (?:background )?music|no voice ?over|mavensync branding|preserve\b)/i;
+// Creative direction written after the numbered copy, e.g. "Use Instagram portrait 4:5 format."
+const DIRECTION_LINE = /^(?:use|keep|make|add|set|apply|format)\b.*\b(?:format|portrait|landscape|square|music|voice ?over|animations?|colou?rs?|palette|fonts?|wording|exactly|style|branding)\b/i;
 const CTA_LINE = /^(?:cta|call to action|button)\s*:\s*(.+)$/i;
 const QUOTED = /["“”]([^"“”]+)["“”]/;
 const HIGHLIGHT_LINE = /^highlights?\s+(.+?)\.?$/i;
 const LIST_SPLIT = /\s*,\s*(?:and\s+)?|\s+and\s+/i;
+// Numbered copy written on one line: "...animations. 2. You have ideas" starts a new line.
+const NUMBER_BREAK = /(?<=[.!?"”])[ \t]+(?=\d{1,2}[.)][ \t]+\S)/g;
+// A production instruction after the copy, e.g. "...one step. Use Instagram portrait 4:5 format."
+const DIRECTION_BREAK = /(?<=[.!?])[ \t]+(?=(?:use|keep|make|add|set|apply)\b[^.\n]*\b(?:format|portrait|landscape|square|music|voice ?over|animations?|wording)\b)/gi;
 
 /**
  * Removes Markdown syntax from one brief line without changing its words.
@@ -180,6 +194,21 @@ function isShortLabel(text) {
   return words > 0 && words <= 4 && !/[.!?]$/.test(trimmed) && !QUOTED.test(trimmed);
 }
 
+// Numbered copy: "1. Hook" ... "5. Close". Only a run that counts up from 1 is read as
+// slides, so ordinary numbers in prose are left alone.
+const NUMBERED_LINE = /^(\d{1,2})[.)]\s+(\S.*)$/;
+function numberSlideLines(lines) {
+  const hits = [];
+  lines.forEach((line, index) => {
+    const match = line.match(NUMBERED_LINE);
+    if (match) hits.push({ index, number: Number(match[1]), rest: match[2] });
+  });
+  if (hits.length < 2 || hits.some((hit, k) => hit.number !== k + 1)) return lines;
+  const out = [...lines];
+  for (const hit of hits) out[hit.index] = `Slide ${hit.number}: ${hit.rest}`;
+  return out;
+}
+
 /**
  * Reads explicit slide-by-slide copy from a brief. Each "Slide N" block yields a
  * headline (the first quoted line, else the first line), an optional CTA line and
@@ -187,10 +216,12 @@ function isShortLabel(text) {
  * and in document order.
  */
 export function parseExplicitSlides(brief) {
-  const text = String(brief || "")
-    .replace(/\r/g, "")
-    .split("\n")
-    .map(normalizeBriefLine)
+  const text = numberSlideLines(
+    String(brief || "")
+      .replace(/\r/g, "").replace(NUMBER_BREAK, "\n").replace(DIRECTION_BREAK, "\n")
+      .split("\n")
+      .map(normalizeBriefLine),
+  )
     .join("\n")
     .replace(SLIDE_HEADER_INLINE, "\n")
     .replace(CTA_INLINE, "\n")
@@ -210,7 +241,7 @@ export function parseExplicitSlides(brief) {
       blocks.push(current);
       continue;
     }
-    if (GLOBAL_LABEL_LINE.test(line) || GLOBAL_BARE_LINE.test(line)) {
+    if (GLOBAL_LABEL_LINE.test(line) || GLOBAL_BARE_LINE.test(line) || DIRECTION_LINE.test(line)) {
       current = null;
       continue;
     }
@@ -289,13 +320,13 @@ function explicitSkeleton(parsedSlides, action, keyword, { slideLabels = false }
  * the topic words so nothing factual is asserted; the user edits before approval.
  */
 function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
-  const shortTopic = topic.replace(/\[\[|\]\]/g, "");
+  const shortTopic = topic.replace(/\[\[|\]\]|\*/g, "");
   const skeleton = [];
   // Cover / hook.
   skeleton.push({
     role: "hook",
     kicker: "THE HOOK",
-    headline: `Meet [[${shortTopic}]]`,
+    headline: `Meet ${shortTopic}`,
     headlineFallback: `What is ${shortTopic}?`,
     visual: { type: "icon", icon: "rocket", chips: ["Why it matters", "How it works", "Next step"] },
   });
@@ -303,7 +334,7 @@ function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
   skeleton.push({
     role: "value",
     kicker: "WHY IT MATTERS",
-    headline: `Why [[${shortTopic}]] matters now`,
+    headline: `Why ${shortTopic} matters now`,
     visual: { type: "list", items: [
       { text: "The problem it solves", icon: "target" },
       { text: "Who it is for", icon: "users" },
@@ -314,7 +345,7 @@ function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
   skeleton.push({
     role: "how",
     kicker: "HOW IT WORKS",
-    headline: `Three steps to [[${shortTopic}]]`,
+    headline: `Three steps to ${shortTopic}`,
     visual: { type: "steps", steps: ["Start here", "Do the work", "See the result"] },
   });
   // Proof — only real facts may animate a number, so a stat/quote slide is added
@@ -323,28 +354,28 @@ function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
     skeleton.push({
       role: "proof",
       kicker: "THE PROOF",
-      headline: `The number that [[matters]]`,
+      headline: `The number that matters`,
       visual: { type: "stat", value: String(facts.statistic.value), label: String(facts.statistic.label || "Add a label") },
     });
   } else if (facts.quote) {
     skeleton.push({
       role: "proof",
       kicker: "IN THEIR WORDS",
-      headline: `What people [[say]]`,
+      headline: `What people say`,
       visual: { type: "quote", text: String(facts.quote.text), name: facts.quote.name || null, role: facts.quote.role || null },
     });
   } else {
     skeleton.push({
       role: "detail",
       kicker: "WHAT YOU GET",
-      headline: `What you get with [[${shortTopic}]]`,
+      headline: `What you get with ${shortTopic}`,
       visual: { type: "checklist", title: "Make it yours", items: ["Your first benefit", "Your second benefit", "Your third benefit"] },
     });
   }
   // Extra detail slides, appended until there are enough body slides.
   const detailVariants = [
-    { role: "detail", kicker: "GOOD TO KNOW", headline: `Before you try [[${shortTopic}]]`, visual: { type: "compare", mode: "vs", left: { title: "Before", items: ["The old way"] }, right: { title: "After", items: ["The new way"] } } },
-    { role: "detail", kicker: "WHAT CHANGES", headline: `Old way vs [[new way]]`, visual: { type: "chat", messages: [{ from: "them", text: "How does this work?" }, { from: "me", text: "Like this." }] } },
+    { role: "detail", kicker: "GOOD TO KNOW", headline: `Before you try ${shortTopic}`, visual: { type: "compare", mode: "vs", left: { title: "Before", items: ["The old way"] }, right: { title: "After", items: ["The new way"] } } },
+    { role: "detail", kicker: "WHAT CHANGES", headline: `Old way vs new way`, visual: { type: "chat", messages: [{ from: "them", text: "How does this work?" }, { from: "me", text: "Like this." }] } },
   ];
   let variant = 0;
   while (skeleton.length < Math.max(1, count - 1)) {
@@ -357,7 +388,7 @@ function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
   const cta = {
     role: "cta",
     kicker: "NEXT STEP",
-    headline: `Comment [[${keyword}]] to get the details`,
+    headline: `Comment ${keyword} to get the details`,
     visual: { type: "cta", action, keyword, reward: `${shortTopic} details`.slice(0, 24), icon: "gift" },
   };
   return [...body, cta];
