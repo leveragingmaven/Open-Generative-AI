@@ -58,7 +58,7 @@ const AI_WORKSPACES = AI_WORKSPACE_IDS
 // Less-prominent creative tools re-exposed on the Dashboard (drawn from the Tools group).
 // Knowledge Center, Memory, and MCP/CLI/Routing stay reachable via the Workspaces dropdown but
 // are not production surfaces, so they are excluded from the dashboard cards.
-const CREATIVE_TOOLS_EXCLUDED = new Set(["knowledge-center", "memory", "mcp-cli", "routing"]);
+const CREATIVE_TOOLS_EXCLUDED = new Set(["knowledge-center", "memory", "mcp-cli", "routing", "motion-carousel"]);
 const CREATIVE_TOOLS = WORKSPACE_MENU_GROUPS
   .find((group) => group.id === "tools")
   ?.tabIds

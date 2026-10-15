@@ -66,6 +66,7 @@ const MavenSyncCreateWorkspace = workspaceImport(() => import('../packages/studi
 const MavenSyncIntelligenceWorkspace = workspaceImport(() => import('../packages/studio/src/components/experience/MavenSyncIntelligenceWorkspace.jsx'), 'Intelligence');
 const ComingSoonStudio = workspaceImport(() => import('../packages/studio/src/components/ComingSoonStudio.jsx'), 'Workspace');
 const DesignAgentStudio = workspaceImport(() => import('../packages/studio/src/components/DesignAgentStudio.jsx'), 'Design Studio');
+const MavenCarouselPanel = workspaceImport(() => import('../packages/studio/src/components/motion/MavenCarouselPanel.jsx'), 'Motion Carousel');
 
 // Renders the Active Campaign name in the Creative OS header when one is set.
 function CampaignHeaderLabel() {
@@ -104,7 +105,7 @@ function WorkspacesMenu({ onNavigate, enabledTabIds = null, activeWorkspaceId = 
             .map((id) => EXPERIENCE_WORKSPACE_BY_ID[id])
             .filter(Boolean)
             .map((workspace) => ({ id: workspace.id, label: workspace.label, route: workspace.route, icon: TAB_BY_ID[workspace.tabIds?.[0]]?.icon || WORKSPACE_ICON })),
-          ...(group.tabIds || [])
+          ...(group.tabIds || []).filter((id) => id !== 'motion-carousel' || enabledTabIds?.has(id))
             .map((id) => TAB_BY_ID[id])
             .filter(Boolean)
             .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, route: `/studio/${tab.id}` })),
@@ -203,7 +204,17 @@ export default function StandaloneShell({ agencyMode = false, allowedTabIds = nu
   // The route registry is authoritative for destinations reachable from the
   // global Workspaces menu. Do not turn a valid /studio/:tab URL into the
   // first enabled tab (historically Image Studio) because of Agency config.
-  const visibleTabs = useMemo(() => TABS.filter((tab) => tab.id !== 'apps'), []);
+  // Motion Carousel is owner-only: the server decides (GET /api/motion-carousel is 403 for
+  // everyone else), and the tab stays hidden until that probe succeeds.
+  const [motionCarouselAllowed, setMotionCarouselAllowed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetch('/api/motion-carousel', { credentials: 'same-origin' })
+      .then((response) => { if (active) setMotionCarouselAllowed(response.ok); })
+      .catch(() => { if (active) setMotionCarouselAllowed(false); });
+    return () => { active = false; };
+  }, []);
+  const visibleTabs = useMemo(() => TABS.filter((tab) => tab.id !== 'apps' && (tab.id !== 'motion-carousel' || motionCarouselAllowed)), [motionCarouselAllowed]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
 const isStudioHome = slug.length === 0 && !idFromParams;
   const isOverviewWorkspace = !idFromParams && slug[0] === 'overview';
@@ -678,6 +689,9 @@ const [characterTarget, setCharacterTarget] = useState(null);
       case 'audio':
         if (visibleTabIds.has('audio')) activeWorkspaceContent = <AudioStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('audio')} onGenerationError={makeErrorCallback('audio')} />;
         break;
+      case 'motion-carousel':
+        if (visibleTabIds.has('motion-carousel') && motionCarouselAllowed) activeWorkspaceContent = <MavenCarouselPanel onExit={() => router.push('/studio')} />;
+        break;
       case 'marketing':
         if (visibleTabIds.has('marketing')) activeWorkspaceContent = <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />;
         break;
@@ -727,7 +741,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   const usesCreativeStudioFrame = new Set([
     'image', 'video', 'clipping', 'vibe-motion', 'lipsync', 'body-swap',
-    'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer',
+    'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer', 'motion-carousel',
   ]).has(activeWorkspaceTab);
   const studioContent = (isStudioHome || isOverviewWorkspace || isCreateWorkspace || isIntelligenceWorkspace)
     ? activeWorkspaceContent
