@@ -356,6 +356,8 @@ export default function MavenCarouselPanel({ onExit }) {
                 {result.fullDeck ? <a href={result.fullDeck} download className="rounded bg-[var(--ms-color-panel-hover)] px-2 py-1 text-[11px] text-white hover:bg-[var(--ms-color-border-emphasized)]">full-deck.mp4</a> : null}
               </div>
               {result.cover ? <img src={result.cover} alt="Carousel cover" className="mt-3 w-40 rounded border border-[var(--ms-color-border-subtle)]" /> : null}
+              {result.slideFiles?.length ? (<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Slide previews">{result.slideFiles.map((url, i) => (<figure key={`p${i}`} className="min-w-0"><video src={url} muted loop autoPlay playsInline preload="metadata" aria-label={`Slide ${i + 1} preview`} className="w-full rounded border border-[var(--ms-color-border-subtle)] bg-black" /><figcaption className="mt-1 text-[11px] text-[var(--ms-color-text-muted)]">Slide {i + 1}</figcaption></figure>))}</div>) : null}
+              {result.fullDeck ? (<div className="mt-3"><video src={result.fullDeck} controls playsInline preload="metadata" aria-label="Full carousel playback" className="w-full max-h-[420px] rounded border border-[var(--ms-color-border-subtle)] bg-black" /></div>) : null}
             </div>
           ) : null}
         </section>
