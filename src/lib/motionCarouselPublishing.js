@@ -50,6 +50,43 @@ async function readObjectBytes(object, maxBytes = MAX_SLIDE_BYTES) {
   throw new Error('slide_unreadable');
 }
 
+/**
+ * Reads the full-deck video while enforcing the byte cap as it streams. The read stops as soon as
+ * the cap is exceeded, so a body with no declared length never buffers past the limit. A body that
+ * cannot be streamed is refused rather than read whole.
+ */
+async function readVideoBytesWithinLimit(object, maxBytes) {
+  const body = object?.Body;
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    if (body.length > maxBytes) throw new Error('video_too_large');
+    return Buffer.from(body);
+  }
+  const chunks = [];
+  let total = 0;
+  const take = (chunk) => {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error('video_too_large');
+    chunks.push(Buffer.from(chunk));
+  };
+  if (typeof body?.[Symbol.asyncIterator] === 'function') {
+    for await (const chunk of body) take(chunk);
+  } else if (typeof body?.getReader === 'function') {
+    const reader = body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        take(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } else {
+    throw new Error('video_unreadable');
+  }
+  return Buffer.concat(chunks);
+}
+
 /** Loads a finished carousel owned by the signed-in account, or returns the failure Response. */
 async function loadFinishedCarousel(body, { identity, store }) {
   if (!identity?.accountId || !identity?.identityKey) return failure('creator_os_auth_required', 'Creator OS authentication required.', 401);
@@ -177,9 +214,9 @@ export async function publishMotionCarouselVideo(body = {}, {
     const object = await objectStorage.getObject(file.key, {});
     if (!object) return failure('carousel_file_unavailable', 'The full-deck video is no longer available. Re-render the carousel and try again.', 409);
     if (Number(object.ContentLength) > MAX_DECK_VIDEO_BYTES) return tooLarge();
-    bytes = await readObjectBytes(object, MAX_DECK_VIDEO_BYTES);
+    bytes = await readVideoBytesWithinLimit(object, MAX_DECK_VIDEO_BYTES);
   } catch (err) {
-    if (err?.message === 'slide_too_large') return tooLarge();
+    if (err?.message === 'video_too_large') return tooLarge();
     return failure('carousel_file_unavailable', 'The full-deck video could not be read.', 409);
   }
   if (bytes.length > MAX_DECK_VIDEO_BYTES) return tooLarge();

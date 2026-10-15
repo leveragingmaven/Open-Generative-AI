@@ -164,6 +164,34 @@ test('a streamed full-deck MP4 over 100 MB is refused with the same 422 and leav
   assert.equal(saves.length, 0);
 });
 
+test('an endless full-deck MP4 with no ContentLength stops reading at the 100 MB cap, returns 422, and writes nothing', async () => {
+  const { store } = finishedCarousel([deckFile]);
+  let pulled = 0;
+  let closed = false;
+  let wholeBodyRead = false;
+  // The AWS SDK body also exposes transformToByteArray, which reads the whole object at once.
+  const endless = {
+    transformToByteArray: async () => { wholeBodyRead = true; return new Uint8Array(0); },
+    async *[Symbol.asyncIterator]() {
+      try {
+        for (;;) { pulled += 1; yield Buffer.alloc(10 * MB); }
+      } finally {
+        closed = true;
+      }
+    },
+  };
+  const { storage, repository, puts, saves } = fakes({ [deckFile.key]: { Body: endless } });
+  const response = await publishMotionCarouselVideo({ jobId: 'job-1' }, { identity: OWNER, store, storage, repository });
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).code, 'carousel_video_too_large');
+  // The read must stop just past the cap (11 x 10 MB), not keep pulling the stream.
+  assert.ok(pulled <= 11, `expected at most 11 chunks pulled, got ${pulled}`);
+  assert.equal(closed, true);
+  assert.equal(wholeBodyRead, false);
+  assert.equal(puts.length, 0);
+  assert.equal(saves.length, 0);
+});
+
 test('the PNG slide handoff still returns ordered image assets with PNG content type', async () => {
   const slide1 = storedFile(OWNER.accountId, 'thumb-1.png', 'thumb-1');
   const slide2 = storedFile(OWNER.accountId, 'thumb-2.png', 'thumb-2');
