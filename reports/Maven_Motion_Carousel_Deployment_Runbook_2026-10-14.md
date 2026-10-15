@@ -205,10 +205,27 @@ git checkout creator-ui-redesign && git merge --ff-only feature/maven-motion-car
    `401` signed out and `403 motion_carousel_not_enabled` for a normal account.
 7. Owner walkthrough in Motion Design → Carousel (§5 step 4).
 
+## 4a. Release delta and rollback target (verified 2026-10-15)
+
+Verified with Git (no push, no merge, no deploy):
+
+- Production `origin/creator-ui-redesign` is `8c2ea6d`. It is an ancestor of `origin/feature/maven-motion-carousel`, so the release is a fast-forward.
+- Release delta (`8c2ea6d..fc86dd6`), three commits, code only and no migrations:
+  - `7dac04a` Keep user-supplied carousel copy and stop shipping default music
+  - `fc86dd6` feat(motion): preview finished carousel slides and play the full deck
+  - `320e7d4` runbook update (docs only)
+- `git merge-tree` dry run of production onto the feature head: clean, exit 0.
+- `migrations/` is unchanged in the delta. Migration `012` is already in production's code at `8c2ea6d`. Whether it has been applied to the production database is **not verified** and must be checked with the §2 query.
+- **Rollback target for this release: `8c2ea6d`**, the commit production runs now. Rolling back to it reverts only the three commits above.
+- `e8a6061` is **not** the right rollback. It is an ancestor of `8c2ea6d`, so rolling back to it would also revert the Publishing and Creative Library fixes (`8e26f75`, `a534cf6`, `93094c2`, `4694bda`) and the owner-only tab and restyle commits. Use it only for a full-release rollback, and only with that approval.
+- The Coolify image tag for `8c2ea6d` is **not in the repository and was not verified**. Record it in Coolify before the deploy.
+- The R2 variables and the owner allowlist are unverified on the app service. Check them before the deploy.
+- Browser verification of the preview and playback UI is **not done**, so the desktop and mobile checks remain a gate.
+
 Rollback:
 
-- **Application only (usual case):** redeploy the previous commit/image tag in Coolify
-  (`rhjv2y22cij48fvpkj8jqvr0:e8a60619…`) or `git revert` the release and push it. The schema is
+- **Application only (usual case):** redeploy the image for `8c2ea6d` (the commit production runs now; its Coolify image tag must be recorded first) or `git revert` the three-commit release and push it.
+- Pre-release tag `rhjv2y22cij48fvpkj8jqvr0:e8a60619…` in the older text is a historical reference. Do not roll back to it without the approval above. The schema is
   purely additive and stays; migration 012 is forward-only and must never be edited or deleted.
 - **Feature off without a deploy:** clear `MAVEN_MOTION_OWNER_ALLOWLIST` (and set
   `MOTION_CAROUSEL_WORKER=off` if a dedicated worker exists). The route then refuses everyone, no
