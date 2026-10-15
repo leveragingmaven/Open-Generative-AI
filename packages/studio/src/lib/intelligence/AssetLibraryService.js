@@ -54,10 +54,20 @@ export function mergeCreativeLibraryAssets(localAssets = [], durableAssets = [])
   return [...merged.values()];
 }
 
-export async function fetchDurableCreativeAssets({ fetchImpl = globalThis?.fetch, campaignId } = {}) {
+const DURABLE_ASSET_FETCH_TIMEOUT_MS = 15000;
+
+export async function fetchDurableCreativeAssets({ fetchImpl = globalThis?.fetch, campaignId, timeoutMs = DURABLE_ASSET_FETCH_TIMEOUT_MS } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("durable_asset_fetch_unavailable");
   const query = campaignId ? `?campaignId=${encodeURIComponent(campaignId)}` : "";
-  const response = await fetchImpl(`/api/creative-assets${query}`, { credentials: "same-origin" });
+  // A request that never settles must not hold the Publishing Center in its loading state forever.
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  try {
+    response = await fetchImpl(`/api/creative-assets${query}`, { credentials: "same-origin", signal: controller?.signal });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!response.ok) throw new Error(`durable_asset_fetch_failed:${response.status}`);
   const payload = await response.json();
   return Array.isArray(payload?.assets) ? payload.assets.map(normalizeCreativeLibraryAsset) : [];

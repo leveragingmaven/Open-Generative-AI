@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AssetLibraryService, deleteCreativeLibraryAsset, fetchDurableCreativeAssets, isAssetReferencedByPublishingDrafts, mergeCreativeLibraryAssets, normalizeCreativeLibraryAsset, withoutCreativeLibraryAsset } from "./AssetLibraryService.js";
 
+test("durable asset fetch aborts a request that never settles so the caller can recover", async () => {
+  const fetchImpl = (_url, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(new Error("aborted")));
+  });
+  await assert.rejects(fetchDurableCreativeAssets({ fetchImpl, timeoutMs: 10 }), /aborted/);
+});
+
 test("normalizes durable output references for Creative Library rendering", () => {
   const asset = normalizeCreativeLibraryAsset({ id: "asset-1", storageReference: "https://cdn.example.test/image.png", metadata: { assetType: "generated", modality: "image" } });
   assert.deepEqual(asset.generatedFiles, ["https://cdn.example.test/image.png"]);
