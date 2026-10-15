@@ -170,7 +170,9 @@ function objectStorage({ objects = new Map() } = {}) {
         ContentRange: `bytes ${start}-${end}/${object.body.length}`,
       };
     },
-    async putObject() {},
+    async putObject({ Key, Body, ContentType }) {
+      objects.set(Key, { body: Buffer.from(Body), contentType: ContentType });
+    },
     async deleteObject() {},
   };
   return { objects, reads, storage: new S3AssetStorage({ client, bucket: 'mavensync-assets' }) };
@@ -294,4 +296,54 @@ test('status reports where a finished carousel will be kept', async () => {
   assert.equal(durable.storage.mode, 'r2');
   assert.equal(durable.storage.durable, true);
   assert.equal(durable.storage.provider, 'cloudflare-r2');
+});
+
+/** A completed job with one stored still per slide; slide 2 is listed first to prove ordering. */
+function publishableJob(slideCount = 2) {
+  const files = [];
+  for (let n = 1; n <= slideCount; n += 1) {
+    const name = `slide-${String(n).padStart(2, '0')}.png`;
+    const fingerprint = `ff${String(n).padStart(6, '0')}`;
+    const key = carouselObjectKey({ accountId: '1', fingerprint, file: name });
+    files.push({ slot: `thumb-${n}`, name, kind: 'thumbnail', contentType: 'image/png', bytes: 4, fingerprint, key, storageReference: `storage://${key}`, reused: false });
+  }
+  files.reverse();
+  return { id: 'mcar-pub', accountId: '1', status: 'completed', result: { storage: { state: 'stored', mode: 'r2', objects: files.length, reused: 0, files } } };
+}
+
+function publishStubs(job) {
+  const objects = new Map(job.result.storage.files.map((file) => [file.key, { body: Buffer.from('png!'), contentType: 'image/png' }]));
+  const fixture = objectStorage({ objects });
+  const saved = [];
+  const repository = { db: {}, async saveOnConnection(_connection, asset) { saved.push(asset); return { ...asset }; } };
+  return { storage: fixture.storage, repository, saved };
+}
+
+function publish(body, { job, storage, repository }) {
+  const request = new Request('https://example.test/api/motion-carousel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return handleMotionCarouselPost(request, { identity: IDENTITY, store: jobStore(job), env: ENV, startWorker: noWorker, storage, repository });
+}
+
+test('publish registers finished slides as account-owned library assets in slide order', async () => {
+  const job = publishableJob(2);
+  const stubs = publishStubs(job);
+  const response = await publish({ action: 'publish', jobId: job.id }, { job, ...stubs });
+  const body = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(body.count, 2);
+  assert.deepEqual(body.assets.map((asset) => asset.title), ['Carousel slide 1', 'Carousel slide 2']);
+  assert.ok(body.assets.every((asset) => /^\/api\/creative-assets\/media\?assetId=asset_[a-f0-9]{64}$/.test(asset.url)));
+  assert.ok(stubs.saved.every((asset) => asset.storageReference.startsWith('storage://creator-os/production/accounts/')));
+});
+
+test('publish refuses a carousel longer than Instagram allows, and an unfinished one', async () => {
+  const long = publishableJob(11);
+  const longStubs = publishStubs(long);
+  const tooLong = await publish({ action: 'publish', jobId: long.id }, { job: long, ...longStubs });
+  assert.equal(tooLong.status, 422);
+  assert.equal(longStubs.saved.length, 0);
+
+  const running = { ...publishableJob(2), status: 'running' };
+  const notReady = await publish({ action: 'publish', jobId: running.id }, { job: running, ...publishStubs(running) });
+  assert.equal(notReady.status, 409);
 });

@@ -7,6 +7,8 @@ import {
   CAROUSEL_BRANDS,
 } from "../../lib/motion/carousel/CarouselConstants.js";
 import { CAROUSEL_VISUAL_STYLES, CAROUSEL_DEFAULT_VISUAL_STYLE } from "../../lib/motion/carousel/CarouselVisualStyles.js";
+import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 const ACTIVE = new Set(["queued", "running"]);
@@ -50,7 +52,11 @@ export default function MavenCarouselPanel({ onExit }) {
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [rendererStatus, setRendererStatus] = useState(null);
+  const [publishingNotice, setPublishingNotice] = useState(null);
+  const [sendingToPublishing, setSendingToPublishing] = useState(false);
   const idempotency = useRef(0);
+  const { activeCampaign } = useActiveCampaign();
+  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +144,32 @@ export default function MavenCarouselPanel({ onExit }) {
       setBusy(null);
     }
   }, [post, deck, approved, presetId, visualPreset, lastFingerprints]);
+
+  // Registers the finished slides as library assets (server, in order) and opens one
+  // carousel draft in Publishing. The existing composer handles accounts and scheduling.
+  const sendToPublishing = useCallback(async () => {
+    if (!job?.jobId) return;
+    setSendingToPublishing(true); setPublishingNotice(null); setError(null);
+    try {
+      const data = await post({ action: "publish", jobId: job.jobId });
+      const assets = data.assets || [];
+      publishingCenter.createDraft({
+        assetIds: assets.map((asset) => asset.id),
+        assets,
+        caption: brief,
+        title: brief.trim().slice(0, 80) || "Motion carousel",
+        campaignId: activeCampaign?.id || null,
+        campaignName: activeCampaign?.name || null,
+        platforms: [],
+        scheduledAt: null,
+      }, {});
+      setPublishingNotice(`Added ${assets.length} slides to Publishing as one carousel draft. Review it there before scheduling.`);
+    } catch (err) {
+      setError(`Could not send to Publishing: ${err.message}`);
+    } finally {
+      setSendingToPublishing(false);
+    }
+  }, [post, job, brief, publishingCenter, activeCampaign?.id, activeCampaign?.name]);
 
   const cancel = useCallback(async () => {
     if (!job?.jobId) return;
@@ -286,7 +318,7 @@ export default function MavenCarouselPanel({ onExit }) {
           ) : null}
           {result ? (
             <div className="mt-3">
-              <p className="text-[11px] text-white/60">{result.summary} Publishing is manual; no social API is connected.</p>
+              <p className="text-[11px] text-white/60">{result.summary}</p>
               {result.reusedSlides?.length ? <p className="mt-1 text-[11px] text-emerald-200">Reused {result.reusedSlides.length} unchanged slide(s).</p> : null}
               {result.renderer ? (
                 <p className="mt-1 text-[11px] text-white/45">Rendered by {result.renderer}{result.rendererVersion ? ` · ${result.rendererVersion}` : ""}</p>
@@ -302,7 +334,13 @@ export default function MavenCarouselPanel({ onExit }) {
               {(result.warnings || []).map((warning, i) => (
                 <p key={`w${i}`} className="mt-1 text-[11px] text-amber-200">{warning}</p>
               ))}
+              {publishingNotice ? <p className="mt-2 text-[11px] text-emerald-200">{publishingNotice}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2">
+                {result.storage?.state === "stored" ? (
+                  <button type="button" onClick={sendToPublishing} disabled={sendingToPublishing} className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+                    {sendingToPublishing ? "Sending…" : "Send to Publishing"}
+                  </button>
+                ) : null}
                 {(result.slideFiles || []).map((url, i) => (
                   <a key={`s${i}`} href={url} download className="rounded bg-white/10 px-2 py-1 text-[11px] text-white hover:bg-white/20">slide {i + 1}</a>
                 ))}

@@ -26,6 +26,7 @@ import { resolveCarouselRuntime } from '../../packages/studio/src/lib/motion/car
 import { describeRenderer } from './motionCarouselRendererSelection.js';
 import { carouselContentType, ownedCarouselFile, safeCarouselFileName, resolveCarouselStorageMode } from './motionCarouselStorage.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
+import { publishMotionCarouselSlides } from './motionCarouselPublishing.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
@@ -54,7 +55,7 @@ function resolveStore(store) {
 }
 
 /** POST { action: 'plan' | 'render' | 'cancel' | 'retry' }. */
-export async function handleMotionCarouselPost(request, { identity, store, renderer = null, env = process.env, startWorker = startMotionCarouselWorker } = {}) {
+export async function handleMotionCarouselPost(request, { identity, store, renderer = null, env = process.env, startWorker = startMotionCarouselWorker, storage = null, repository = null } = {}) {
   let body;
   try {
     body = await request.json();
@@ -63,6 +64,7 @@ export async function handleMotionCarouselPost(request, { identity, store, rende
   }
   const action = String(body?.action || '');
   if (action === 'plan') return planResponse(body);
+  if (action === 'publish') return publishMotionCarouselSlides(body, { identity, store, storage, repository });
   try {
     if (action === 'render') {
       // Lazily start the in-process worker the first time a render is requested.
