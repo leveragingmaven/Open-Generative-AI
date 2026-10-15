@@ -34,9 +34,9 @@ function samplePlan() {
   });
 }
 
-// The first non-CTA slide still showing a planner placeholder (not user-written content).
+// The first body slide (not the cover, not the CTA) still showing a planner placeholder.
 function placeholderIndex(plan) {
-  const index = plan.deck.slides.findIndex((slide, i) => i < plan.deck.slides.length - 1 && ['icon', 'steps', 'checklist'].includes(slide.visual?.type));
+  const index = plan.deck.slides.findIndex((slide, i) => i >= 1 && i < plan.deck.slides.length - 1 && ['icon', 'steps', 'checklist'].includes(slide.visual?.type));
   assert.ok(index >= 0, 'sample plan has a placeholder slide before the CTA');
   return index;
 }
@@ -86,6 +86,21 @@ test('choices are rejected for the CTA slide, unknown images, bad visuals and du
   );
   assert.equal(result.applied, 1);
   assert.equal(result.rejected, 4);
+});
+
+test('the cover slide never receives a photo, in AI choices or the deterministic fallback', () => {
+  const plan = samplePlan();
+  // Slide 0 is a placeholder here, so only the cover rule can stop it.
+  assert.ok(['icon', 'steps', 'checklist'].includes(plan.deck.slides[0].visual.type));
+  const images = [{ storageReference: 'storage://k/one.jpg' }];
+  const result = applyLayoutChoices(
+    { deck: plan.deck, storyboard: plan.storyboard },
+    [{ index: 0, visual: 'image', imageIndex: 0 }],
+    images,
+  );
+  assert.equal(result.applied, 0);
+  assert.equal(result.rejected, 1);
+  assert.ok(deterministicLayoutChoices(plan.deck, 3).every((choice) => choice.index >= 1));
 });
 
 test("a list, stat or quote written by the user is never replaced by a photo", () => {

@@ -29,7 +29,7 @@ export function buildLayoutMessages({ brief = "", slides = [], images = [] } = {
   const instructions = [
     "You are laying out an Instagram carousel that uses the user's uploaded photos.",
     "Decide which body slides should show which uploaded image.",
-    "Rules: never choose the last slide (it is the call to action). Use only image numbers listed below.",
+    "Rules: never choose slide 0 (the cover, which cannot show a photo) or the last slide (the call to action). Use only image numbers listed below.",
     "Use visual \"product\" for a clear product or object photo, and \"image\" for a scene or lifestyle photo.",
     "You may leave a slide alone by omitting it. Do not write or change any slide text.",
     "Reply with JSON only, shaped as {\"slides\":[{\"index\":<slide number>,\"visual\":\"image\"|\"product\",\"imageIndex\":<image number>}]}.",
@@ -71,7 +71,8 @@ export function deterministicLayoutChoices(deck, imageCount = 0) {
   const slides = deck?.slides || [];
   const lastIndex = slides.length - 1;
   const choices = [];
-  for (let index = 0; index < lastIndex && choices.length < imageCount; index += 1) {
+  // Slide 0 is the cover, which always draws its headline, so it can never show a photo.
+  for (let index = 1; index < lastIndex && choices.length < imageCount; index += 1) {
     if (PLACEHOLDER_VISUALS.includes(slides[index]?.visual?.type)) {
       choices.push({ index, visual: "image", imageIndex: choices.length });
     }
@@ -98,7 +99,8 @@ export function applyLayoutChoices({ deck, storyboard, music = "none" } = {}, ch
     const index = Number(choice?.index);
     const imageIndex = Number(choice?.imageIndex);
     const visual = String(choice?.visual || "");
-    const valid = Number.isInteger(index) && index >= 0 && index < lastIndex
+    // The cover (0) and the CTA (last) never take a photo.
+    const valid = Number.isInteger(index) && index >= 1 && index < lastIndex
       && Number.isInteger(imageIndex) && imageIndex >= 0 && imageIndex < images.length
       && AI_LAYOUT_VISUALS.includes(visual)
       && images[imageIndex]?.storageReference
