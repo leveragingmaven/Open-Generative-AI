@@ -54,6 +54,8 @@ export default function MavenCarouselPanel({ onExit }) {
   const [rendererStatus, setRendererStatus] = useState(null);
   const [publishingNotice, setPublishingNotice] = useState(null);
   const [sendingToPublishing, setSendingToPublishing] = useState(false);
+  // One carousel draft per finished job: repeat clicks reuse it instead of adding duplicate drafts.
+  const carouselDraftsSentRef = useRef({});
   const idempotency = useRef(0);
   const { activeCampaign } = useActiveCampaign();
   const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
@@ -149,11 +151,12 @@ export default function MavenCarouselPanel({ onExit }) {
   // carousel draft in Publishing. The existing composer handles accounts and scheduling.
   const sendToPublishing = useCallback(async () => {
     if (!job?.jobId) return;
+    if (carouselDraftsSentRef.current[job.jobId]) { setPublishingNotice("This carousel is already in Publishing as a draft."); return; }
     setSendingToPublishing(true); setPublishingNotice(null); setError(null);
     try {
       const data = await post({ action: "publish", jobId: job.jobId });
       const assets = data.assets || [];
-      publishingCenter.createDraft({
+      const draft = publishingCenter.createDraft({
         assetIds: assets.map((asset) => asset.id),
         assets,
         caption: brief,
@@ -163,6 +166,7 @@ export default function MavenCarouselPanel({ onExit }) {
         platforms: [],
         scheduledAt: null,
       }, {});
+      carouselDraftsSentRef.current[job.jobId] = draft.id;
       setPublishingNotice(`Added ${assets.length} slides to Publishing as one carousel draft. Review it there before scheduling.`);
     } catch (err) {
       setError(`Could not send to Publishing: ${err.message}`);

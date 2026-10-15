@@ -15,6 +15,10 @@ import { cleanOAuthReturnUrl, connectionUrl, parseOAuthReturn } from "../lib/pub
 import { useNearViewport } from "../lib/assets/useNearViewport.js";
 import { CREATIVE_LIBRARY_PAGE_SIZE, libraryPageRemaining, libraryPageWindow } from "../lib/assets/libraryPaging.js";
 import { fetchDurableCreativeAssets } from "../lib/intelligence/AssetLibraryService.js";
+import { withTimeout } from "../lib/publishing/boundedRequest.js";
+
+// Provider history can stall; bound it so the rest of the Publishing Center still loads.
+const REMOTE_HISTORY_TIMEOUT_MS = 15000;
 import { publishingLibraryAssets } from "../lib/publishing/publishingLibraryAssets.js";
 import { attachmentFromLibraryAsset, draftAttachmentAvailability, libraryPickerEntries } from "../lib/publishing/publishingLibraryPicker.js";
 import { publishingDraftMediaAsset, publishingQueueCard, publishingQueueMedia, publishingSaveAvailability } from "../lib/publishing/publishingQueueCard.js";
@@ -424,7 +428,7 @@ export default function PublishingStudio() {
       setLibraryDegraded(durableFailed);
       let remoteHistory = [];
       try {
-        remoteHistory = await center.getRemoteHistory();
+        remoteHistory = await withTimeout(center.getRemoteHistory(), REMOTE_HISTORY_TIMEOUT_MS, "Maven Social scheduled posts did not respond in time.");
         setRemoteHistoryError(null);
         setScheduleSyncedAt(new Date().toISOString());
       } catch (error) {
