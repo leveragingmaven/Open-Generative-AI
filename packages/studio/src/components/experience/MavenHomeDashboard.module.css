@@ -856,5 +856,5 @@
   .sidebar { flex-basis: 54px; }
   .composerTools .modelPill { max-width: 140px; overflow: hidden; }
   .composerTools .modelPill svg:last-child { display: none; }
-  .suggestions .pill:nth-child(4) { display: none; }
+  /* Audio quick action stays visible on small screens; the chip row wraps. */
 }
