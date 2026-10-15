@@ -1,7 +1,8 @@
 # Maven Motion Carousel — deployment runbook (owner-only rollout)
 
 Date: 2026-10-14 · Branch `feature/maven-motion-carousel` · HEAD **`c0b5579`** (pushed to `origin`)
-· Production branch `creator-ui-redesign` **still at `e8a6061` — not integrated, not deployed**
+· **Updated 2026-10-15 (production state):** production branch `creator-ui-redesign` is at **`8c2ea6d`** (four direct pushes on Oct 14, 21:44–23:02). The Coolify deployment of `8c2ea6d` succeeded per the owner. Earlier references to `e8a6061` are superseded.
+· Local feature HEAD for this handoff: **`fc86dd6`** (UI fixes: owner tab, Creator OS dark tokens, slide previews, full-deck playback). `origin/feature/maven-motion-carousel` is at `4694bda`; `fc86dd6` is not yet pushed. Not merged into production.
 · No Coolify state, database, or production host was read or changed by this runbook's session.
 
 The integration is a **strict fast-forward**: `origin/creator-ui-redesign` holds no commit the feature
@@ -182,7 +183,7 @@ then add customer emails as the rollout widens.
 
 Sequence (from the current state, after §1–§3 are confirmed):
 
-1. `git fetch origin`; confirm `origin/creator-ui-redesign` is still `e8a6061` and that nobody has
+1. `git fetch origin`; confirm `origin/creator-ui-redesign` is still `8c2ea6d` and that nobody has
    pushed since, and that the integration is still a forward-only move — never a merge commit, never a
    force:
 ```bash
@@ -225,7 +226,7 @@ Coolify (record the values; they are not in the repository):
       `dyep1e5w9z6qj65z33ifkco3` also appears in an older report. Exactly one should watch
       `creator-ui-redesign` and serve `create.mavensync.space`.
 - [ ] Watched branch is `creator-ui-redesign`; "Auto Deploy" state recorded; currently running commit
-      recorded (should be `e8a6061` before the push).
+      recorded (should be `8c2ea6d` before the next push).
 - [ ] Build uses the repository `Dockerfile`; the image is `node:20-alpine` with `apk add ffmpeg`.
 - [ ] Healthcheck path is `/api/health`; `/api/ready` is additionally monitored.
 - [ ] The four `R2_*` variables are present in the app service (the values the rest of Creator OS already uses) and `MOTION_CAROUSEL_STORAGE=required` is set.
