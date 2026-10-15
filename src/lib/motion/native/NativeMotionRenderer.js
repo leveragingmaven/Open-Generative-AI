@@ -284,9 +284,12 @@ export function createNativeMotionRenderer({
     const fingerprints = plan?.fingerprints || null;
     // Derived from the renderer's own source, so no cached frame can outlive the
     // drawing code that produced it.
+    // Sound is part of each slide's MP4, so the audio mode must be part of its cache key.
+    const mood = MOODS[deck.music] ? deck.music : 'none';
+    const accents = typeof deck.sfx === 'boolean' ? deck.sfx : mood !== 'none';
     const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     const slideKeys = spec.slides.map((slide, index) => slideCacheKey({
-      fingerprint: fingerprints?.[index] || String(index),
+      fingerprint: `${fingerprints?.[index] || String(index)}|audio=${mood}:${accents ? 1 : 0}`,
       presetId: spec.presetId,
       theme: spec.theme,
       fps: spec.fps,
@@ -300,7 +303,6 @@ export function createNativeMotionRenderer({
     const reusedSlides = [];
     const warnings = [...spec.warnings, ...imageWarnings];
     const slideOutputs = new Array(spec.slides.length).fill(null);
-    const mood = MOODS[deck.music] ? deck.music : 'none';
 
     for (let index = 0; index < spec.slides.length; index += 1) {
       if (signal?.aborted) throw Object.assign(new Error('The render was cancelled.'), { name: 'AbortError', code: 'canceled' });
@@ -334,7 +336,7 @@ export function createNativeMotionRenderer({
 
       // Audio bed for this slide, muxed with a stream copy of the picture.
       // eslint-disable-next-line no-await-in-loop
-      const audio = buildAudioTimeline({ mood, slideCount: 1, slideSeconds: spec.durationSeconds });
+      const audio = buildAudioTimeline({ mood, slideCount: 1, slideSeconds: spec.durationSeconds, accents });
       if (!audio.silent && options.audio !== false && !uploadedAudio.path) {
         const wavPath = join(outDir, `.${slideOutputName(index)}.wav`);
         // eslint-disable-next-line no-await-in-loop
@@ -397,7 +399,7 @@ export function createNativeMotionRenderer({
         outPath: rawFull,
         signal,
       });
-      const fullAudio = buildAudioTimeline({ mood, slideCount: spec.slides.length, slideSeconds: spec.durationSeconds });
+      const fullAudio = buildAudioTimeline({ mood, slideCount: spec.slides.length, slideSeconds: spec.durationSeconds, accents });
       if (uploadedAudio.path && options.audio !== false) {
         await muxLoopedAudio(ffmpegPath, {
           videoPath: rawFull,

@@ -568,24 +568,14 @@ export const quote = {
 
 // ── 6. call-to-action end card ────────────────────────────────────────────────
 
-/** Friendly button copy for the deck's own cta vocabulary. */
-const CTA_LABELS = Object.freeze({
-  link: "Get the link",
-  save: "Save this post",
-  follow: "Follow for more",
-  dm: "Send a DM",
-  comment: "Comment below",
-});
-
 /** The closing card: a pulsing button, a sweeping arrow and the handle. */
 export const ctaCard = {
   id: "ctaCard",
   draw(ctx) {
     const { visual = {}, slide, box, theme, fonts, t } = ctx;
-    const action = String(visual.action || "get started").replace(/_/g, " ").toLowerCase();
-    // A deck may name its own button copy; otherwise the deck's action vocabulary
-    // maps to something a person would actually tap.
-    const label = String(visual.ctaLabel || CTA_LABELS[action] || action.charAt(0).toUpperCase() + action.slice(1));
+    // Only copy the user wrote appears on the card. The action keyword is planning
+    // metadata, so no default button text is invented for it.
+    const label = String(visual.ctaLabel || "").trim();
     const headline = String(slide.headline || "");
 
     const layout = layoutDisplay(ctx, headline, box, {
@@ -616,7 +606,7 @@ export const ctaCard = {
     const scaledW = buttonW * buttonScale;
     const scaledH = buttonH * buttonScale;
     const labelSize = Math.max(24, 40 * buttonScale);
-    body.push(group({
+    if (label) body.push(group({
       opacity: clamp01(buttonP * 1.5),
       children: [
         rect({
@@ -630,7 +620,7 @@ export const ctaCard = {
         }),
       ],
     }));
-    body.push(group({
+    if (label) body.push(group({
       opacity: arrowP * 0.9,
       children: [
         line({ x1: arrowX - 30, y1: buttonY + 52, x2: arrowX, y2: buttonY + 52, stroke: theme.accent, strokeWidth: 5 }),

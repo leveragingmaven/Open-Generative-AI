@@ -17,6 +17,17 @@ import {
 } from "./CarouselConstants.js";
 import { defaultColorsFor, defaultMusicFor, wordCount, validateDeck } from "./CarouselDeck.js";
 
+// Motion text is written for music. Without music, beat wording would describe a
+// rhythm the video does not have, so it is replaced with plain sequencing.
+function motionFor(type, music) {
+  const base = MOTION_BY_TYPE[type] || "animates in sequence";
+  if (music !== "none") return base;
+  return base
+    .replace(/ on the beat/g, " smoothly")
+    .replace(/ one per beat/g, " one after another")
+    .replace(/ per beat/g, " in sequence");
+}
+
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 
 // A short description of what each graphic animates, reused in the storyboard so
@@ -88,7 +99,7 @@ export function detectLook(brief) {
 
 export function detectMusic(brief, look) {
   const text = String(brief || "").toLowerCase();
-  if (/\b(no music|silent|without music|mute)\b/.test(text)) return "none";
+  if (/\b(no (background )?music|no voice ?over|silent|without music|mute)\b/.test(text)) return "none";
   if (/\b(chill|calm|lo.?fi|relaxed)\b/.test(text)) return "chill";
   if (/\b(bold|punchy|dramatic|powerful)\b/.test(text)) return "bold";
   if (/\b(upbeat|energetic|fun|bright)\b/.test(text)) return "upbeat";
@@ -126,11 +137,48 @@ const DIRECTION_INLINE = /\s*(?=\b(?:visual|motion|design|style)\s+direction\s*:
 const QUOTE_GLUED = /([.!?])(["”])(?=[A-Za-z])/g;
 // The slide title ends where the first quote starts: "Slide 1 — The Hook\"Your AI..."
 const HEADER_THEN_QUOTE = /^((?:slide|scene|card)\s*\d{1,2}\s*[—–:.\-]?[^"“\n]*?)(?=["“])/gim;
-const DIRECTION_LINE = /^(?:visual|motion|design|style)\s+direction\b|^preserve\b|^notes?\s*:/i;
+// A global-instructions section ("Format: ...", "Design: ...", "Music: ..."). Everything
+// after it, up to the next slide header, is production direction, never slide copy.
+const GLOBAL_LABEL_LINE = /^(?:global|format|design|visual|motion|style|branding|brand|music|audio|voice ?over|colou?rs?|palette|export|platform|aspect ratio|notes?|preserve|requirements?|constraints?|instructions?|handle)\b[^:\n]{0,40}:/i;
+const GLOBAL_BARE_LINE = /^(?:no (?:background )?music|no voice ?over|mavensync branding|preserve\b)/i;
 const CTA_LINE = /^(?:cta|call to action|button)\s*:\s*(.+)$/i;
 const QUOTED = /["“”]([^"“”]+)["“”]/;
 const HIGHLIGHT_LINE = /^highlights?\s+(.+?)\.?$/i;
 const LIST_SPLIT = /\s*,\s*(?:and\s+)?|\s+and\s+/i;
+
+/**
+ * Removes Markdown syntax from one brief line without changing its words.
+ * Headings and bullets are formatting: a slide header keeps its text, and any other
+ * heading or bullet becomes a "Notes:" line, which ends the slide it follows.
+ */
+function normalizeBriefLine(raw) {
+  let line = String(raw || "").trim();
+  const heading = line.match(/^#{1,6}\s*(.*)$/);
+  const bullet = line.match(/^[-*•]\s+(.*)$/);
+  if (heading) line = heading[1];
+  else if (bullet) line = bullet[1];
+  line = line
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/(^|[\s(])\*(?!\s)([^*]+?)\*(?=$|[\s).,!?:;])/g, "$1$2")
+    .replace(/\*+/g, "")
+    .trim();
+  if (!line) return "";
+  if ((heading || bullet) && !SLIDE_HEADER.test(line)) return `Notes: ${line}`;
+  return line;
+}
+
+/** Removes any leftover emphasis markers from text that is about to become slide copy. */
+function plainCopy(text) {
+  return text == null ? text : String(text).replace(/\*+/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** A short title with no sentence punctuation reads as a label ("The Hook"), not copy. */
+function isShortLabel(text) {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  return words > 0 && words <= 4 && !/[.!?]$/.test(trimmed) && !QUOTED.test(trimmed);
+}
 
 /**
  * Reads explicit slide-by-slide copy from a brief. Each "Slide N" block yields a
@@ -141,6 +189,9 @@ const LIST_SPLIT = /\s*,\s*(?:and\s+)?|\s+and\s+/i;
 export function parseExplicitSlides(brief) {
   const text = String(brief || "")
     .replace(/\r/g, "")
+    .split("\n")
+    .map(normalizeBriefLine)
+    .join("\n")
     .replace(SLIDE_HEADER_INLINE, "\n")
     .replace(CTA_INLINE, "\n")
     .replace(DIRECTION_INLINE, "\n")
@@ -153,11 +204,13 @@ export function parseExplicitSlides(brief) {
     if (!line) continue;
     const header = line.match(SLIDE_HEADER);
     if (header) {
-      current = { number: Number(header[1]), title: header[2].replace(/[.:]$/, "").trim(), lines: [] };
+      // "(CTA)" is a marker, not copy. A leading colon or dash is the separator.
+      const rawTitle = header[2].replace(/\(\s*cta\s*\)/i, "").replace(/^\s*[:.\-—–]\s*/, "").trim();
+      current = { number: Number(header[1]), rawTitle, lines: [] };
       blocks.push(current);
       continue;
     }
-    if (DIRECTION_LINE.test(line)) {
+    if (GLOBAL_LABEL_LINE.test(line) || GLOBAL_BARE_LINE.test(line)) {
       current = null;
       continue;
     }
@@ -183,14 +236,30 @@ export function parseExplicitSlides(brief) {
         }
         body.push(line);
       }
-      if (!headline && body.length) headline = body.shift();
-      return { number: block.number, title: block.title, headline, cta, body: body.join(" ").trim() || null };
+      // A short label ("Slide 2: The Problem") with body lines names the slide, and its
+      // copy is the first body line. Otherwise the header text itself is the copy.
+      const titleQuote = block.rawTitle.match(QUOTED);
+      const labelled = !titleQuote && block.lines.length > 0 && isShortLabel(block.rawTitle);
+      if (labelled) {
+        if (!headline) headline = body.length ? body.shift() : block.rawTitle;
+      } else {
+        const titleCopy = titleQuote ? titleQuote[1].trim() : block.rawTitle;
+        if (!headline) headline = titleCopy || null;
+        else if (titleCopy) body.unshift(titleCopy);
+      }
+      return {
+        number: block.number,
+        title: labelled ? block.rawTitle.replace(/[.:]$/, "").trim() : "",
+        headline,
+        cta,
+        body: body.join(" ").trim() || null,
+      };
     })
     .filter((block) => block.headline);
 }
 
 /** Turns parsed user copy into deck slides. Nothing here rewrites the copy. */
-function explicitSkeleton(parsedSlides, action, keyword) {
+function explicitSkeleton(parsedSlides, action, keyword, { slideLabels = false } = {}) {
   const total = parsedSlides.length;
   return parsedSlides.map((parsed, index) => {
     const isLast = index === total - 1;
@@ -200,17 +269,16 @@ function explicitSkeleton(parsedSlides, action, keyword) {
       visual = { type: "cta", action, keyword, ...(parsed.cta ? { ctaLabel: parsed.cta } : {}) };
     } else if (highlight) {
       visual = { type: "list", items: highlight[1].split(LIST_SPLIT).map((item) => item.trim()).filter(Boolean) };
-    } else if (parsed.body) {
-      // Body copy is shown as the slide's supporting line.
-      visual = { type: "list", items: [] };
     } else {
-      visual = { type: "product", caption: "" };
+      // Text-led educational slides use a graphic that needs no product photo.
+      visual = { type: "icon", icon: "sparkle" };
     }
     return {
       role: index === 0 ? "hook" : isLast ? "cta" : "detail",
-      kicker: parsed.title ? parsed.title.toUpperCase() : `SLIDE ${index + 1}`,
-      headline: parsed.headline,
-      ...(parsed.body ? { sub: parsed.body } : {}),
+      // Generated "SLIDE N" labels are opt-in; a title the user wrote is always kept.
+      kicker: parsed.title ? plainCopy(parsed.title).toUpperCase() : slideLabels ? `SLIDE ${index + 1}` : "",
+      headline: plainCopy(parsed.headline),
+      ...(parsed.body ? { sub: plainCopy(parsed.body) } : {}),
       visual,
     };
   });
@@ -321,6 +389,7 @@ export function planCarousel({
   look = null,
   music = null,
   facts = {},
+  slideLabels = false,
 } = {}) {
   const topic = extractTopic(brief);
   const resolvedLook = look || detectLook(brief);
@@ -337,7 +406,7 @@ export function planCarousel({
   const brandPlan = planBrand({ brand, brandColors, handle });
 
   const skeleton = useExplicit
-    ? explicitSkeleton(explicit, action, keyword)
+    ? explicitSkeleton(explicit, action, keyword, { slideLabels })
     : buildStorySkeleton(topic, count, keyword, action, facts);
   const colors = brandPlan.colors.length ? brandPlan.colors : defaultColorsFor(resolvedLook);
 
@@ -349,7 +418,7 @@ export function planCarousel({
     ...(slide.sub ? { sub: slide.sub } : {}),
     visualType: slide.visual.type,
     visual: slide.visual,
-    motion: MOTION_BY_TYPE[slide.visual.type] || "animates on the beat",
+    motion: motionFor(slide.visual.type, resolvedMusic),
     durationSeconds: CAROUSEL_SLIDE_SECONDS,
   }));
 

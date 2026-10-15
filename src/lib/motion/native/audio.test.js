@@ -9,6 +9,13 @@ test('a silent mood produces no audio at all', () => {
   assert.ok(timeline.samples.every((sample) => sample === 0));
 });
 
+test('sound effects can be turned off while a music bed plays', () => {
+  const withAccents = buildAudioTimeline({ mood: 'none', slideCount: 2, slideSeconds: 2, accents: true });
+  assert.equal(withAccents.silent, false, 'accents alone are audible');
+  const withoutAccents = buildAudioTimeline({ mood: 'none', slideCount: 2, slideSeconds: 2, accents: false });
+  assert.equal(withoutAccents.silent, true, 'no music and no accents is silent');
+});
+
 test('the bed is exactly the deck length, so picture and sound cannot drift', () => {
   const slideSeconds = 2;
   const slideCount = 4;
