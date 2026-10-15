@@ -9,6 +9,7 @@ import { presetStyleSheet } from "../../packages/studio/src/lib/motion/carousel/
 import { attachApprovedStyleSheet, styleSheetFingerprint } from "./motionCarouselStyleSheet.js";
 import { InMemoryMotionCarouselJobStore } from "./motionCarouselJobStore.js";
 import { carouselObjectKey } from "./motionCarouselStorage.js";
+import { creativeObjectKey } from "./creativeMediaStorage.js";
 import {
   handleMotionCarouselPost,
   handleMotionCarouselGet,
@@ -94,6 +95,31 @@ test("a style sheet draft uses the AI reply when it is valid, and falls back whe
   assert.equal(good.styleSheet.name, "Cool Studio");
   const bad = await (await draft(async () => "not json at all")).json();
   assert.equal(bad.source, "preset");
+});
+
+test("a style sheet draft sends the uploaded photos to the model as signed references", async () => {
+  const ASSET = `asset_${"c".repeat(64)}`;
+  const repository = {
+    async get(id, { accountId }) {
+      if (id === ASSET && accountId === IDENTITY.accountId) {
+        return { id, accountId: IDENTITY.accountId, title: "Desk", storageReference: `storage://${creativeObjectKey(IDENTITY.accountId, ASSET)}`, metadata: { modality: "image" } };
+      }
+      return null;
+    },
+  };
+  const storage = { createSignedDeliveryReference: async (key) => `https://signed.test/${encodeURIComponent(key)}` };
+  let sent = null;
+  const ai = { complete: async ({ messages }) => { sent = messages; return JSON.stringify({ name: "Desk Studio", visualStyle: "modern_agency", palette: [{ name: "Ink Black", hex: "#101010" }, { name: "Paper White", hex: "#fafafa" }], rules: [] }); } };
+  const response = await handleMotionCarouselPost(
+    new Request("https://example.test/api/motion-carousel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "style_sheet", op: "draft", brief: "desk setup", imageAssetIds: [ASSET] }) }),
+    { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV, startWorker: noWorker, ai, storage, repository },
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.source, "ai");
+  const imageParts = sent[1].content.filter((part) => part.type === "image_url");
+  assert.equal(imageParts.length, 1);
+  assert.equal(imageParts[0].image_url.url, `https://signed.test/${encodeURIComponent(creativeObjectKey(IDENTITY.accountId, ASSET))}`);
 });
 
 test("render enqueues a background job instead of rendering inline", async () => {
