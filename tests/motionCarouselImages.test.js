@@ -15,6 +15,7 @@ import {
   matchesImageSignature,
   ownedCarouselImageKey,
   planCarouselWithImages,
+  saveCarouselImage,
 } from '../src/lib/motionCarouselImages.js';
 import { creativeObjectKey } from '../src/lib/creativeMediaStorage.js';
 
@@ -258,6 +259,41 @@ test("the worker refuses a deck that references another account's photo", async 
     materializeCarouselImages({ deck, outDir: '/tmp/out', accountId: ACCOUNT, storage, fs }),
     (error) => error.code === 'carousel_image_not_found',
   );
+});
+
+// Mirrors migrations/005_creative_assets.sql, where conversation_id is NOT NULL: MySQL refuses a row without one.
+function creativeAssetsRepository() {
+  const rows = [];
+  return {
+    rows,
+    db: null,
+    async saveOnConnection(_connection, asset) {
+      if (typeof asset.conversationId !== 'string' || !asset.conversationId) {
+        const error = new Error("Column 'conversation_id' cannot be null");
+        error.code = 'ER_BAD_NULL_ERROR';
+        throw error;
+      }
+      rows.push(asset);
+      return asset;
+    },
+  };
+}
+
+test('a Motion Carousel photo saves to the Creative Library with a non-null conversation, as the table requires', async () => {
+  const repository = creativeAssetsRepository();
+  const puts = [];
+  const storage = {
+    async getMetadata() { return null; },
+    async putObject(input) { puts.push(input); return {}; },
+  };
+  const file = new File([JPEG], 'desk.jpg', { type: 'image/jpeg' });
+  const saved = await saveCarouselImage(IDENTITY, file, { repository, storage });
+  assert.equal(repository.rows.length, 1);
+  assert.equal(typeof repository.rows[0].conversationId, 'string');
+  assert.ok(repository.rows[0].conversationId.length > 0);
+  assert.match(saved.assetId, /^asset_[a-f0-9]{64}$/);
+  assert.equal(saved.storageReference, `storage://${creativeObjectKey(ACCOUNT, saved.assetId)}`);
+  assert.equal(puts.length, 1);
 });
 
 test('a deck without uploaded photos is passed to the renderer unchanged', async () => {

@@ -103,7 +103,9 @@ export async function saveCarouselImage(identity, file, {
     requestId: id,
     authorizationId: id,
     agentId: 'motion-carousel',
-    conversationId: null,
+    // Carousel photos have no chat conversation. The column is NOT NULL (migrations/005),
+    // so they use a fixed scope instead of null.
+    conversationId: 'motion-carousel',
     campaignId: null,
     title: `Carousel photo · ${name}`,
     prompt: null,
