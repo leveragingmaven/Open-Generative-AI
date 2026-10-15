@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { S3AssetStorage } from "../../packages/studio/src/lib/intelligence/S3AssetStorage.js";
 import { planCarousel } from "../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js";
+import { presetStyleSheet } from "../../packages/studio/src/lib/motion/carousel/CarouselStyleSheet.js";
+import { attachApprovedStyleSheet, styleSheetFingerprint } from "./motionCarouselStyleSheet.js";
 import { InMemoryMotionCarouselJobStore } from "./motionCarouselJobStore.js";
 import { carouselObjectKey } from "./motionCarouselStorage.js";
 import {
@@ -15,7 +17,11 @@ import {
 } from "./motionCarouselEndpoint.js";
 
 const ENV = { MAVEN_MOTION_OUTPUT_DIR: join(tmpdir(), "maven-motion-endpoint-test") };
-const DECK = planCarousel({ brief: "make an animated carousel about MavenSync Spaces" }).deck;
+// The style sheet is approved before any planning or rendering. These fixtures use
+// an approved sheet exactly as the panel would send it.
+const SHEET = presetStyleSheet({ visualStyle: "minimal_luxe", brandName: "MavenSync", colors: ["#111111", "#f5f1ea"] });
+const APPROVAL = styleSheetFingerprint(SHEET);
+const DECK = attachApprovedStyleSheet(planCarousel({ brief: "make an animated carousel about MavenSync Spaces" }).deck, SHEET, APPROVAL);
 const IDENTITY = { accountId: "1", identityKey: "creator-1" };
 
 // Never start a real (MySQL-backed) worker in tests.
@@ -31,11 +37,63 @@ function post(body, { store = new InMemoryMotionCarouselJobStore(), identity = I
 }
 
 test("plan action returns a deck, storyboard and preset", async () => {
-  const response = await post({ action: "plan", brief: "an animated carousel about cold brew", platform: "pinterest_pin" });
+  const response = await post({ action: "plan", brief: "an animated carousel about cold brew", platform: "pinterest_pin", styleSheet: SHEET, styleSheetApproval: APPROVAL });
   const body = await response.json();
   assert.equal(response.status, 200);
   assert.equal(body.preset.id, "pinterest_pin");
   assert.ok(body.deck.slides.length >= 3);
+});
+
+test("plan is refused without an approved style sheet, or with one edited after approval", async () => {
+  const none = await post({ action: "plan", brief: "cold brew" });
+  assert.equal(none.status, 409);
+  assert.equal((await none.json()).code, "style_sheet_not_approved");
+  const edited = { ...SHEET, palette: [{ name: "Red", hex: "#ff0000" }, { name: "Blue", hex: "#0000ff" }] };
+  const tampered = await post({ action: "plan", brief: "cold brew", styleSheet: edited, styleSheetApproval: APPROVAL });
+  assert.equal(tampered.status, 409);
+});
+
+test("an approved sheet sets the deck's visual style and palette before slides are planned", async () => {
+  const response = await post({ action: "plan", brief: "an animated carousel about cold brew", styleSheet: SHEET, styleSheetApproval: APPROVAL });
+  const { deck } = await response.json();
+  assert.equal(deck.preset, "minimal_luxe");
+  assert.deepEqual(deck.colors, ["#111111", "#f5f1ea"]);
+  assert.equal(deck.styleSheetApproval, APPROVAL);
+});
+
+test("render is refused for a deck without an approved sheet, or one changed since approval", async () => {
+  const plain = planCarousel({ brief: "make an animated carousel about MavenSync Spaces" }).deck;
+  const unapproved = await post({ action: "render", deck: plain });
+  assert.equal(unapproved.status, 409);
+  assert.equal((await unapproved.json()).code, "style_sheet_not_approved");
+  const changed = { ...DECK, styleSheet: { ...DECK.styleSheet, rules: ["Anything goes"] } };
+  const tampered = await post({ action: "render", deck: changed });
+  assert.equal(tampered.status, 409);
+});
+
+test("a style sheet draft falls back to a preset sheet when the AI is unavailable", async () => {
+  const response = await handleMotionCarouselPost(
+    new Request("https://example.test/api/motion-carousel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "style_sheet", op: "draft", brief: "cold brew", visualStyle: "modern_agency" }) }),
+    { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV, startWorker: noWorker, ai: { complete: async () => { throw new Error("offline"); } }, storage: null },
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.source, "preset");
+  assert.equal(body.styleSheet.visualStyle, "modern_agency");
+  assert.ok(body.styleSheet.palette.length >= 2);
+});
+
+test("a style sheet draft uses the AI reply when it is valid, and falls back when it is not", async () => {
+  const reply = JSON.stringify({ name: "Cool Studio", visualStyle: "bold_editorial", palette: [{ name: "Ink Black", hex: "#101010" }, { name: "Paper White", hex: "#fafafa" }], rules: ["Never tint a photo over the headline"] });
+  const draft = (complete) => handleMotionCarouselPost(
+    new Request("https://example.test/api/motion-carousel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "style_sheet", op: "draft", brief: "cold brew" }) }),
+    { identity: IDENTITY, store: new InMemoryMotionCarouselJobStore(), env: ENV, startWorker: noWorker, ai: { complete }, storage: null },
+  );
+  const good = await (await draft(async () => reply)).json();
+  assert.equal(good.source, "ai");
+  assert.equal(good.styleSheet.name, "Cool Studio");
+  const bad = await (await draft(async () => "not json at all")).json();
+  assert.equal(bad.source, "preset");
 });
 
 test("render enqueues a background job instead of rendering inline", async () => {
@@ -59,7 +117,7 @@ test("render is deduped on the idempotency key", async () => {
 });
 
 test("render rejects an invalid deck and an unauthenticated caller", async () => {
-  const invalid = await post({ action: "render", deck: { look: "solid", slides: [{ headline: "no visual", visual: { type: "hologram" } }] } });
+  const invalid = await post({ action: "render", deck: { ...DECK, look: "solid", slides: [{ headline: "no visual", visual: { type: "hologram" } }] } });
   assert.equal(invalid.status, 422);
   assert.equal((await invalid.json()).code, "deck_invalid");
   const anonymous = await post({ action: "render", deck: DECK }, { identity: {} });

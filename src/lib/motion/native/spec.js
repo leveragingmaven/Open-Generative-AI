@@ -90,7 +90,8 @@ export function buildNativeSpec({
   const preset = safeNativePreset(presetId);
   // The deck is the source of truth for branding (it is what Maven planned and the
   // user approved); an explicit argument only overrides it.
-  const resolvedBrandId = String(deck.brand || '').trim() || brandId;
+  // An approved style sheet is the brand for this render: its palette must drive the frame.
+  const resolvedBrandId = deck.styleSheet ? 'customer' : (String(deck.brand || '').trim() || brandId);
   const hexColors = Array.isArray(colors) ? colors.filter((color) => /^#[0-9a-fA-F]{6}$/.test(String(color).trim())) : [];
   const deckColors = Array.isArray(deck.colors) ? deck.colors.filter((color) => /^#[0-9a-fA-F]{6}$/.test(String(color).trim())) : [];
   const resolvedColors = hexColors.length ? hexColors : deckColors;

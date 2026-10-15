@@ -13,6 +13,7 @@ import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 const ACTIVE = new Set(["queued", "running"]);
 const POLL_MS = 2500;
+const FIELD_CLASS = "mt-1 w-full rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1.5 text-white";
 
 function progressLabel(job) {
   if (!job) return "";
@@ -26,12 +27,42 @@ function progressLabel(job) {
   return job.status;
 }
 
+function parseColours(text) {
+  return String(text || "").split(/[,\s]+/).map((c) => c.trim()).filter(Boolean);
+}
+
+// Palette and rules are typed as plain text; the sheet only changes when the text parses.
+function parsePalette(text, previous = []) {
+  return parseColours(text).map((hex, index) => ({
+    name: previous[index]?.name || `Swatch ${index + 1}`,
+    hex: hex.toLowerCase(),
+  }));
+}
+
+function parseRules(text) {
+  return String(text || "").split("\n").map((rule) => rule.trim()).filter(Boolean);
+}
+
+function SheetField({ label, value, onChange, multiline = false, className = "" }) {
+  return (
+    <label className={`block text-xs text-[var(--ms-color-text-secondary)] ${className}`}>
+      {label}
+      {multiline ? (
+        <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={2} className={FIELD_CLASS} />
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} className={FIELD_CLASS} />
+      )}
+    </label>
+  );
+}
+
 /**
  * Maven Motion Carousel — the Motion Design view for the local, code-rendered
  * animated carousel.
  *
- * Flow: describe the topic → Maven drafts a storyboard → review/edit and approve
- * → queue a background render → watch progress → preview and download exports.
+ * Flow: draft a style sheet from the brief and photos → edit it, request changes,
+ * approve → plan the storyboard (only from the approved sheet) → review and approve
+ * the storyboard → queue a background render → watch progress → preview and download.
  * Rendering runs in the Creator OS worker (never inside the HTTP request); the
  * panel polls `/api/motion-carousel` for job status. No paid API is used.
  */
@@ -41,7 +72,6 @@ export default function MavenCarouselPanel({ onExit }) {
   const [handle, setHandle] = useState("");
   const [brandColors, setBrandColors] = useState("");
   const [presetId, setPresetId] = useState("instagram_carousel");
-  const [visualPreset, setVisualPreset] = useState(CAROUSEL_DEFAULT_VISUAL_STYLE);
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [layoutNote, setLayoutNote] = useState(null);
@@ -57,6 +87,15 @@ export default function MavenCarouselPanel({ onExit }) {
   const [rendererStatus, setRendererStatus] = useState(null);
   const [publishingNotice, setPublishingNotice] = useState(null);
   const [sendingToPublishing, setSendingToPublishing] = useState(false);
+  // The style sheet: the creative direction for the series. Planning needs it approved.
+  const [styleSheet, setStyleSheet] = useState(null);
+  const [sheetApproval, setSheetApproval] = useState(null);
+  const [sheetSource, setSheetSource] = useState(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetFeedback, setSheetFeedback] = useState("");
+  const [paletteText, setPaletteText] = useState("");
+  const [rulesText, setRulesText] = useState("");
+  const [startStyle, setStartStyle] = useState(CAROUSEL_DEFAULT_VISUAL_STYLE);
   // One carousel draft per finished job: repeat clicks reuse it instead of adding duplicate drafts.
   const carouselDraftsSentRef = useRef({});
   const idempotency = useRef(0);
@@ -120,7 +159,71 @@ export default function MavenCarouselPanel({ onExit }) {
     return () => { active = false; clearInterval(timer); };
   }, [job?.jobId, job?.status]);
 
+  // Any change to the sheet, or its approval, makes the planned storyboard stale.
+  const resetPlan = useCallback(() => {
+    setDeck(null); setStoryboard(null); setApproved(false);
+    setClarifications([]); setWarnings([]); setLayoutNote(null);
+  }, []);
+
+  const changeSheet = useCallback((next) => {
+    setStyleSheet(next);
+    setSheetApproval(null);
+    resetPlan();
+  }, [resetPlan]);
+
+  // Replaces the whole sheet, including the plain-text fields the user types into.
+  const adoptSheet = useCallback((sheet) => {
+    changeSheet(sheet);
+    setPaletteText(sheet.palette.map((swatch) => swatch.hex).join(", "));
+    setRulesText(sheet.rules.join("\n"));
+  }, [changeSheet]);
+
+  const setSheetField = useCallback((section, field, value) => {
+    changeSheet({ ...styleSheet, [section]: { ...styleSheet[section], [field]: value } });
+  }, [styleSheet, changeSheet]);
+
+  const draftSheet = useCallback(async (revise) => {
+    setSheetBusy(true); setError(null);
+    try {
+      const data = await post({
+        action: "style_sheet",
+        op: "draft",
+        brief,
+        brand: brandId,
+        brandColors: parseColours(brandColors),
+        visualStyle: styleSheet?.visualStyle || startStyle,
+        imageAssetIds: photos.map((photo) => photo.assetId),
+        currentSheet: revise ? styleSheet : null,
+        feedback: revise ? sheetFeedback : "",
+      });
+      adoptSheet(data.styleSheet);
+      setSheetSource(data.source);
+      if (revise) setSheetFeedback("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSheetBusy(false);
+    }
+  }, [post, brief, brandId, brandColors, styleSheet, startStyle, photos, sheetFeedback, adoptSheet]);
+
+  // The server returns the normalized sheet and its fingerprint. Planning and
+  // rendering check that fingerprint, so an edit after this step needs approving again.
+  const approveSheet = useCallback(async () => {
+    if (!styleSheet) return;
+    setSheetBusy(true); setError(null);
+    try {
+      const data = await post({ action: "style_sheet", op: "approve", styleSheet });
+      adoptSheet(data.styleSheet);
+      setSheetApproval(data.approval);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSheetBusy(false);
+    }
+  }, [post, styleSheet, adoptSheet]);
+
   const planStoryboard = useCallback(async () => {
+    if (!sheetApproval) return;
     setBusy("plan"); setError(null); setJob(null); setApproved(false);
     try {
       const data = await post({
@@ -128,9 +231,11 @@ export default function MavenCarouselPanel({ onExit }) {
         brief,
         brand: brandId,
         handle: handle || null,
-        brandColors: brandColors.split(/[,\s]+/).map((c) => c.trim()).filter(Boolean),
+        brandColors: parseColours(brandColors),
         platform: presetId,
         imageAssetIds: photos.map((photo) => photo.assetId),
+        styleSheet,
+        styleSheetApproval: sheetApproval,
       });
       setDeck(data.deck);
       setLayoutNote(data.layout || null);
@@ -142,7 +247,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, brief, brandId, handle, brandColors, presetId, photos]);
+  }, [post, sheetApproval, styleSheet, brief, brandId, handle, brandColors, presetId, photos]);
 
   const editHeadline = useCallback((index, value) => {
     setApproved(false);
@@ -154,11 +259,11 @@ export default function MavenCarouselPanel({ onExit }) {
     setBusy("render"); setError(null);
     idempotency.current += 1;
     try {
+      // The deck already carries the approved sheet and its approval, which the
+      // worker hands to the renderer. The sheet's visual style sets the frame.
       const data = await post({
         action: "render",
-        // The visual style travels on the deck, which the queue already persists and
-        // passes to the renderer — so no new job field and no schema change.
-        deck: { ...deck, preset: visualPreset },
+        deck,
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -169,7 +274,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, visualPreset, lastFingerprints]);
+  }, [post, deck, approved, presetId, lastFingerprints]);
 
   // Registers the finished slides as library assets (server, in order) and opens one
   // carousel draft in Publishing. The existing composer handles accounts and scheduling.
@@ -221,6 +326,7 @@ export default function MavenCarouselPanel({ onExit }) {
   const presetOptions = useMemo(() => CAROUSEL_EXPORT_PRESET_IDS.map((id) => CAROUSEL_EXPORT_PRESETS[id]), []);
   const result = job?.status === "completed" ? job.result : null;
   const running = job ? ACTIVE.has(job.status) : false;
+  const visualStyle = styleSheet?.visualStyle || startStyle;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-transparent">
@@ -239,6 +345,87 @@ export default function MavenCarouselPanel({ onExit }) {
           No carousel renderer is available on this server, so renders stay queued. {rendererStatus.runtime}
         </div>
       ) : null}
+
+      <section className="mx-4 mb-4 min-w-0 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-3" aria-label="Style sheet">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-[var(--ms-color-text-secondary)]">Style sheet — the look every slide follows</h3>
+          <span className="text-[11px] text-[var(--ms-color-text-muted)]">
+            {sheetApproval ? "Approved — planning uses this sheet" : styleSheet ? "Draft — edit, then approve" : "Not drafted yet"}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] text-[var(--ms-color-text-muted)]">
+          Maven drafts the series look from your brief and photos. Edit anything, or ask for changes, then approve. Only an approved sheet can be planned or rendered.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => draftSheet(false)} disabled={sheetBusy || busy !== null} className="rounded bg-[var(--ms-color-pink-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+            {sheetBusy ? "Drafting…" : styleSheet ? "Redraft from brief" : "Draft style sheet"}
+          </button>
+          <label className="text-xs text-[var(--ms-color-text-secondary)]">
+            Starting visual style{" "}
+            <select
+              value={visualStyle}
+              onChange={(e) => (styleSheet ? changeSheet({ ...styleSheet, visualStyle: e.target.value }) : setStartStyle(e.target.value))}
+              className="ml-1 rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1 text-white"
+            >
+              {CAROUSEL_VISUAL_STYLES.map((style) => (
+                <option key={style.id} value={style.id}>{style.label}</option>
+              ))}
+            </select>
+          </label>
+          {sheetSource === "preset" ? (
+            <span className="text-[11px] text-[var(--ms-color-warning)]">AI drafting was unavailable, so this is a preset sheet. Edit it freely.</span>
+          ) : null}
+        </div>
+
+        {styleSheet ? (
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-2 md:grid-cols-2">
+              <SheetField label="Sheet name" value={styleSheet.name} onChange={(value) => changeSheet({ ...styleSheet, name: value })} />
+              <SheetField
+                label="Palette (2 to 6 hex colours, comma separated)"
+                value={paletteText}
+                onChange={(value) => { setPaletteText(value); changeSheet({ ...styleSheet, palette: parsePalette(value, styleSheet.palette) }); }}
+              />
+              <div className="md:col-span-2 flex flex-wrap gap-1.5" aria-label="Palette preview">
+                {styleSheet.palette.map((swatch, index) => (
+                  <span key={`${swatch.hex}-${index}`} className="flex items-center gap-1 rounded bg-[var(--ms-color-background-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--ms-color-text-secondary)]">
+                    <span className="inline-block h-3 w-3 rounded border border-[var(--ms-color-border-subtle)]" style={{ background: swatch.hex }} />
+                    {swatch.name} {swatch.hex}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-3">
+              <SheetField label="Headline type" value={styleSheet.typography.headline} onChange={(value) => setSheetField("typography", "headline", value)} />
+              <SheetField label="Body type" value={styleSheet.typography.body} onChange={(value) => setSheetField("typography", "body", value)} />
+              <SheetField label="Caption type" value={styleSheet.typography.caption} onChange={(value) => setSheetField("typography", "caption", value)} />
+              <SheetField label="Imagery treatment" value={styleSheet.imagery.treatment} onChange={(value) => setSheetField("imagery", "treatment", value)} />
+              <SheetField label="Layout skeleton" value={styleSheet.layout.skeleton} onChange={(value) => setSheetField("layout", "skeleton", value)} />
+              <SheetField label="Motion direction" value={styleSheet.motion.direction} onChange={(value) => setSheetField("motion", "direction", value)} />
+              <SheetField label="Background" value={styleSheet.surface.background} onChange={(value) => setSheetField("surface", "background", value)} />
+              <SheetField label="Texture" value={styleSheet.surface.texture} onChange={(value) => setSheetField("surface", "texture", value)} />
+            </div>
+            <SheetField
+              label="Rules (one per line; these are prohibitions the slides must follow)"
+              value={rulesText}
+              multiline
+              onChange={(value) => { setRulesText(value); changeSheet({ ...styleSheet, rules: parseRules(value) }); }}
+            />
+            <div className="rounded border border-[var(--ms-color-border-subtle)] p-2">
+              <SheetField label="Request changes from Maven" value={sheetFeedback} multiline onChange={setSheetFeedback} />
+              <button type="button" onClick={() => draftSheet(true)} disabled={sheetBusy || !sheetFeedback.trim() || busy !== null} className="mt-2 rounded bg-[var(--ms-color-panel-hover)] px-3 py-1.5 text-xs text-white hover:bg-[var(--ms-color-border-emphasized)] disabled:opacity-50">
+                {sheetBusy ? "Revising…" : "Revise sheet with these changes"}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={approveSheet} disabled={sheetBusy || busy !== null || !!sheetApproval} className="rounded bg-[var(--ms-color-gold-primary)] px-3 py-2 text-sm font-medium text-[#0b0a09] disabled:opacity-50">
+                {sheetApproval ? "Style sheet approved" : "Approve style sheet"}
+              </button>
+              {!sheetApproval ? <span className="text-[11px] text-[var(--ms-color-text-muted)]">Approve the sheet to unlock planning.</span> : null}
+            </div>
+          </div>
+        ) : null}
+      </section>
 
       <div className="mx-auto grid w-full max-w-6xl gap-4 px-4 pb-6 md:grid-cols-2">
         <section className="min-w-0 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-3">
@@ -287,18 +474,11 @@ export default function MavenCarouselPanel({ onExit }) {
                 ))}
               </select>
             </label>
-            <label className="block">
-              Visual style
-              <select value={visualPreset} onChange={(e) => setVisualPreset(e.target.value)} className="mt-1 w-full rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1.5 text-white">
-                {CAROUSEL_VISUAL_STYLES.map((style) => (
-                  <option key={style.id} value={style.id}>{style.label}</option>
-                ))}
-              </select>
-            </label>
           </div>
-          <button type="button" onClick={planStoryboard} disabled={busy !== null} className="mt-3 w-full rounded bg-[var(--ms-color-pink-primary)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+          <button type="button" onClick={planStoryboard} disabled={busy !== null || !sheetApproval} className="mt-3 w-full rounded bg-[var(--ms-color-pink-primary)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
             {busy === "plan" ? "Planning…" : "Plan storyboard"}
           </button>
+          {!sheetApproval ? <p className="mt-2 text-[11px] text-[var(--ms-color-text-muted)]">Draft and approve the style sheet above first.</p> : null}
         </section>
 
         <section className="min-w-0 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-3">

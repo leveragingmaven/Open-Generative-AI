@@ -28,6 +28,16 @@ import { carouselContentType, ownedCarouselFile, safeCarouselFileName, resolveCa
 import { getR2MediaStorage } from './r2MediaStorage.js';
 import { publishMotionCarouselSlides } from './motionCarouselPublishing.js';
 import { CarouselImageError, handleCarouselImageUpload, loadCarouselImages, planCarouselWithImages } from './motionCarouselImages.js';
+import {
+  assertApprovedStyleSheet,
+  assertDeckStyleSheetApproved,
+  attachApprovedStyleSheet,
+  draftStyleSheet,
+  StyleSheetRequestError,
+  styleLinesForDeck,
+  styleSheetFingerprint,
+} from './motionCarouselStyleSheet.js';
+import { normalizeStyleSheet, StyleSheetError } from '../../packages/studio/src/lib/motion/carousel/CarouselStyleSheet.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
@@ -37,6 +47,12 @@ export { carouselOutputDir };
 
 function jsonError(message, code, status) {
   return Response.json({ error: message, code }, { status });
+}
+
+function styleSheetErrorResponse(error) {
+  if (error instanceof StyleSheetRequestError) return jsonError(error.code, error.code, error.status);
+  if (error instanceof StyleSheetError) return jsonError(error.code, error.code, 400);
+  return null;
 }
 
 function jobErrorResponse(error) {
@@ -69,9 +85,12 @@ export async function handleMotionCarouselPost(request, { identity, store, rende
   }
   const action = String(body?.action || '');
   if (action === 'plan') return planResponse(body, { identity, storage, repository, ai, env });
+  if (action === 'style_sheet') return styleSheetResponse(body, { identity, storage, repository, ai, env });
   if (action === 'publish') return publishMotionCarouselSlides(body, { identity, store, storage, repository });
   try {
     if (action === 'render') {
+      // Only a deck built from an approved style sheet, unchanged since approval, may render.
+      assertDeckStyleSheetApproved(body.deck);
       // Lazily start the in-process worker the first time a render is requested.
       startWorker({ store: store || null, renderer, env });
       const { job, deduped } = await enqueueMotionCarouselRender({
@@ -95,12 +114,55 @@ export async function handleMotionCarouselPost(request, { identity, store, rende
       return Response.json({ ok: true, action: 'retry', job });
     }
   } catch (error) {
-    return jobErrorResponse(error);
+    return styleSheetErrorResponse(error) || jobErrorResponse(error);
   }
   return jsonError(`Unknown action "${action}".`, 'unknown_action', 400);
 }
 
+/** Drafts, revises or approves the carousel style sheet. Nothing is planned here. */
+async function styleSheetResponse(body = {}, { identity = null, storage = null, repository = null, ai = null, env = process.env } = {}) {
+  const op = String(body.op || 'draft');
+  if (op === 'approve') {
+    try {
+      const styleSheet = normalizeStyleSheet(body.styleSheet);
+      return Response.json({ ok: true, action: 'style_sheet', op, styleSheet, approval: styleSheetFingerprint(styleSheet) });
+    } catch (error) {
+      return styleSheetErrorResponse(error) || jsonError('Could not approve the style sheet.', 'style_sheet_failed', 400);
+    }
+  }
+  if (op !== 'draft') return jsonError(`Unknown style sheet operation "${op}".`, 'unknown_style_sheet_op', 400);
+  try {
+    const images = await loadCarouselImages(identity, Array.isArray(body.imageAssetIds) ? body.imageAssetIds : [], { repository: repository || undefined });
+    const brandColors = Array.isArray(body.brandColors) ? body.brandColors.filter(Boolean) : [];
+    const brandName = body.brand === 'mavensync' || !body.brand ? 'MavenSync' : String(body.brand);
+    const result = await draftStyleSheet({
+      brief: String(body.brief || ''),
+      brandName,
+      brandColors,
+      visualStyle: body.visualStyle || null,
+      currentSheet: body.currentSheet || null,
+      feedback: String(body.feedback || ''),
+      images,
+      identity,
+      storage,
+      ai,
+      env,
+    });
+    return Response.json({ ok: true, action: 'style_sheet', op: 'draft', source: result.source, reason: result.reason, styleSheet: result.sheet });
+  } catch (error) {
+    if (error instanceof CarouselImageError) return jsonError(error.code, error.code, error.status);
+    return styleSheetErrorResponse(error) || jsonError('Could not draft the style sheet.', 'style_sheet_failed', 500);
+  }
+}
+
 async function planResponse(body = {}, { identity = null, storage = null, repository = null, ai = null, env = process.env } = {}) {
+  // Slide design only starts from an approved style sheet, unchanged since approval.
+  let sheet;
+  try {
+    sheet = assertApprovedStyleSheet(body.styleSheet, body.styleSheetApproval);
+  } catch (error) {
+    return styleSheetErrorResponse(error) || jsonError('Could not plan the carousel.', 'plan_failed', 400);
+  }
   let plan;
   try {
     plan = planCarousel({
@@ -117,11 +179,13 @@ async function planResponse(body = {}, { identity = null, storage = null, reposi
   } catch (error) {
     return jsonError(String(error?.message || 'Could not plan the carousel.'), 'plan_failed', 400);
   }
+  // The approved sheet sets the deck's look and colours before any layout decision.
+  plan = { ...plan, deck: attachApprovedStyleSheet(plan.deck, sheet, body.styleSheetApproval) };
   // Uploaded photos are optional. Ownership is checked here, then the AI layout
   // runs with a deterministic fallback, so a planning failure never blocks the deck.
   try {
     const images = await loadCarouselImages(identity, Array.isArray(body.imageAssetIds) ? body.imageAssetIds : [], { repository: repository || undefined });
-    const layoutPlan = await planCarouselWithImages({ plan, brief: plan.topic || body.brief || '', images, identity, storage, ai, env });
+    const layoutPlan = await planCarouselWithImages({ plan, brief: plan.topic || body.brief || '', images, identity, storage, ai, env, styleLines: styleLinesForDeck(plan.deck) });
     return Response.json({
       ok: true,
       action: 'plan',

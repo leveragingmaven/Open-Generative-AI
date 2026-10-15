@@ -164,7 +164,7 @@ export async function loadCarouselImages(identity, assetIds, { repository = null
  * gets which photo and its treatment; the copy never changes. If the model call
  * or its reply fails, or yields nothing valid, the deterministic plan is used.
  */
-export async function planCarouselWithImages({ plan, brief = '', images = [], identity, storage = null, ai = null, env = process.env, logger = console }) {
+export async function planCarouselWithImages({ plan, brief = '', images = [], identity, storage = null, ai = null, env = process.env, logger = console, styleLines = [] }) {
   const base = { deck: plan.deck, storyboard: plan.storyboard };
   if (!images.length) return { ...base, layout: { mode: 'deterministic', applied: 0, rejected: 0, reason: 'no_images' } };
 
@@ -178,6 +178,7 @@ export async function planCarouselWithImages({ plan, brief = '', images = [], id
     const client = ai || createServerVisionTextIntelligence(identity, { env });
     const messages = buildLayoutMessages({
       brief,
+      styleLines,
       // Roles live on the storyboard; the deck slides line up with it by index.
       slides: plan.deck.slides.map((slide, index) => ({ role: plan.storyboard?.slides?.[index]?.role, kicker: slide.kicker, headline: slide.headline, sub: slide.sub, visual: slide.visual })),
       images: signedImages,

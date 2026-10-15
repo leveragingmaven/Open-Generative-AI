@@ -20,7 +20,7 @@ export const PLACEHOLDER_VISUALS = Object.freeze(["icon", "steps", "checklist"])
 const MAX_CHOICES = 12;
 
 /** Builds the chat messages for the layout decision. Images are sent as signed URLs. */
-export function buildLayoutMessages({ brief = "", slides = [], images = [] } = {}) {
+export function buildLayoutMessages({ brief = "", slides = [], images = [], styleLines = [] } = {}) {
   const slideLines = slides.map((slide, index) => {
     const parts = [slide.kicker, slide.headline, slide.sub].filter(Boolean).join(" | ");
     return `${index}: [${slide.role}, current visual: ${slide.visual?.type || "none"}] ${parts}`;
@@ -28,6 +28,7 @@ export function buildLayoutMessages({ brief = "", slides = [], images = [] } = {
   const imageLines = images.map((image, index) => `image ${index}: ${image.name || "uploaded image"}`);
   const instructions = [
     "You are laying out an Instagram carousel that uses the user's uploaded photos.",
+    ...styleLines.map((line) => String(line)),
     "Decide which body slides should show which uploaded image.",
     "Rules: never choose slide 0 (the cover, which cannot show a photo) or the last slide (the call to action). Use only image numbers listed below.",
     "Use visual \"product\" for a clear product or object photo, and \"image\" for a scene or lifestyle photo.",
