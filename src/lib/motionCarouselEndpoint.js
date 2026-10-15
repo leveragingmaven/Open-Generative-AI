@@ -27,6 +27,7 @@ import { describeRenderer } from './motionCarouselRendererSelection.js';
 import { carouselContentType, ownedCarouselFile, safeCarouselFileName, resolveCarouselStorageMode } from './motionCarouselStorage.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
 import { publishMotionCarouselSlides } from './motionCarouselPublishing.js';
+import { CarouselImageError, handleCarouselImageUpload, loadCarouselImages, planCarouselWithImages } from './motionCarouselImages.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
@@ -55,7 +56,11 @@ function resolveStore(store) {
 }
 
 /** POST { action: 'plan' | 'render' | 'cancel' | 'retry' }. */
-export async function handleMotionCarouselPost(request, { identity, store, renderer = null, env = process.env, startWorker = startMotionCarouselWorker, storage = null, repository = null } = {}) {
+export async function handleMotionCarouselPost(request, { identity, store, renderer = null, env = process.env, startWorker = startMotionCarouselWorker, storage = null, repository = null, ai = null } = {}) {
+  // A photo upload is multipart; everything else is a JSON action.
+  if (String(request.headers?.get?.('content-type') || '').toLowerCase().startsWith('multipart/form-data')) {
+    return handleCarouselImageUpload(request, { identity, repository, storage });
+  }
   let body;
   try {
     body = await request.json();
@@ -63,7 +68,7 @@ export async function handleMotionCarouselPost(request, { identity, store, rende
     return jsonError('A JSON body is required.', 'invalid_json', 400);
   }
   const action = String(body?.action || '');
-  if (action === 'plan') return planResponse(body);
+  if (action === 'plan') return planResponse(body, { identity, storage, repository, ai, env });
   if (action === 'publish') return publishMotionCarouselSlides(body, { identity, store, storage, repository });
   try {
     if (action === 'render') {
@@ -95,9 +100,10 @@ export async function handleMotionCarouselPost(request, { identity, store, rende
   return jsonError(`Unknown action "${action}".`, 'unknown_action', 400);
 }
 
-function planResponse(body = {}) {
+async function planResponse(body = {}, { identity = null, storage = null, repository = null, ai = null, env = process.env } = {}) {
+  let plan;
   try {
-    const plan = planCarousel({
+    plan = planCarousel({
       brief: String(body.brief || ''),
       brand: body.brand || 'mavensync',
       handle: body.handle || null,
@@ -108,19 +114,29 @@ function planResponse(body = {}) {
       music: body.music || null,
       facts: body.facts && typeof body.facts === 'object' ? body.facts : {},
     });
+  } catch (error) {
+    return jsonError(String(error?.message || 'Could not plan the carousel.'), 'plan_failed', 400);
+  }
+  // Uploaded photos are optional. Ownership is checked here, then the AI layout
+  // runs with a deterministic fallback, so a planning failure never blocks the deck.
+  try {
+    const images = await loadCarouselImages(identity, Array.isArray(body.imageAssetIds) ? body.imageAssetIds : [], { repository: repository || undefined });
+    const layoutPlan = await planCarouselWithImages({ plan, brief: plan.topic || body.brief || '', images, identity, storage, ai, env });
     return Response.json({
       ok: true,
       action: 'plan',
       topic: plan.topic,
-      deck: plan.deck,
-      storyboard: plan.storyboard,
+      deck: layoutPlan.deck,
+      storyboard: layoutPlan.storyboard,
+      layout: layoutPlan.layout,
       clarifications: plan.clarifications,
       warnings: plan.warnings,
       preset: plan.preset,
       brand: plan.brand,
     });
   } catch (error) {
-    return jsonError(String(error?.message || 'Could not plan the carousel.'), 'plan_failed', 400);
+    if (error instanceof CarouselImageError) return jsonError(error.code, error.code, error.status);
+    return jsonError('Could not plan the carousel.', 'plan_failed', 500);
   }
 }
 

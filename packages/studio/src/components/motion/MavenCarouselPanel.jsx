@@ -42,6 +42,9 @@ export default function MavenCarouselPanel({ onExit }) {
   const [brandColors, setBrandColors] = useState("");
   const [presetId, setPresetId] = useState("instagram_carousel");
   const [visualPreset, setVisualPreset] = useState(CAROUSEL_DEFAULT_VISUAL_STYLE);
+  const [photos, setPhotos] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [layoutNote, setLayoutNote] = useState(null);
   const [deck, setDeck] = useState(null);
   const [storyboard, setStoryboard] = useState(null);
   const [clarifications, setClarifications] = useState([]);
@@ -80,6 +83,25 @@ export default function MavenCarouselPanel({ onExit }) {
     return data;
   }, []);
 
+  // Uploads one photo into the Creative Library and keeps its asset id for planning.
+  const uploadPhoto = useCallback(async (file) => {
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/motion-carousel", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Upload failed (${response.status})`);
+      setPhotos((current) => [...current, { assetId: data.image.assetId, name: data.image.name }].slice(0, 6));
+      setApproved(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   // Poll the job until it reaches a terminal state.
   useEffect(() => {
     const jobId = job?.jobId;
@@ -108,8 +130,10 @@ export default function MavenCarouselPanel({ onExit }) {
         handle: handle || null,
         brandColors: brandColors.split(/[,\s]+/).map((c) => c.trim()).filter(Boolean),
         platform: presetId,
+        imageAssetIds: photos.map((photo) => photo.assetId),
       });
       setDeck(data.deck);
+      setLayoutNote(data.layout || null);
       setStoryboard(data.storyboard);
       setClarifications(data.clarifications || []);
       setWarnings(data.warnings || []);
@@ -118,7 +142,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, brief, brandId, handle, brandColors, presetId]);
+  }, [post, brief, brandId, handle, brandColors, presetId, photos]);
 
   const editHeadline = useCallback((index, value) => {
     setApproved(false);
@@ -220,6 +244,25 @@ export default function MavenCarouselPanel({ onExit }) {
         <section className="min-w-0 rounded-lg border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-panel)] p-3">
           <label className="block text-xs font-medium text-[var(--ms-color-text-secondary)] mb-1">What is the carousel about?</label>
           <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} className="w-full rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1.5 text-sm text-white" />
+          <div className="mt-3 rounded border border-[var(--ms-color-border-subtle)] p-2 text-xs text-[var(--ms-color-text-secondary)]">
+            <div className="flex items-center justify-between">
+              <span>Photos (optional, up to 6)</span>
+              <label className="cursor-pointer rounded bg-[var(--ms-color-panel-hover)] px-2 py-1 text-white hover:bg-[var(--ms-color-border-emphasized)]">
+                {uploading ? "Uploading…" : "Add photo"}
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={uploading || photos.length >= 6} onChange={(e) => { uploadPhoto(e.target.files?.[0]); e.target.value = ""; }} aria-label="Add a photo to the carousel" />
+              </label>
+            </div>
+            {photos.length ? (
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {photos.map((photo) => (
+                  <li key={photo.assetId} className="flex items-center gap-1 rounded bg-[var(--ms-color-background-elevated)] px-2 py-0.5">
+                    <span className="max-w-[12rem] truncate">{photo.name}</span>
+                    <button type="button" aria-label={`Remove ${photo.name}`} onClick={() => { setPhotos((current) => current.filter((p) => p.assetId !== photo.assetId)); setApproved(false); }} className="text-[var(--ms-color-text-muted)] hover:text-white">×</button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--ms-color-text-secondary)]">
             <label className="block">
               Brand

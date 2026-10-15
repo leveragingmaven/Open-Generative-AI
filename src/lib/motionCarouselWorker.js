@@ -32,6 +32,7 @@ import {
 } from './motionCarouselStorage.js';
 import { CACHE_DIR, CACHE_FILE } from './motion/native/renderCache.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
+import { materializeCarouselImages } from './motionCarouselImages.js';
 
 export const DEFAULT_POLL_MS = 2000;
 export const DEFAULT_CANCEL_POLL_MS = 1500;
@@ -297,8 +298,15 @@ export function createMotionCarouselWorker({
         reported = Math.min(70, Math.max(reported, progressValue));
         await store.heartbeat(job.id, { phase: MOTION_CAROUSEL_JOB_PHASE.RENDERING, progress: reported, leaseMs }).catch(() => {});
       };
-      const renderResult = await resolvedRenderer.render({
+      // Uploaded photos are copied beside the deck first, so the renderer can draw them.
+      const renderDeck = await materializeCarouselImages({
         deck: job.deck,
+        outDir,
+        accountId: job.accountId,
+        storage: resolveStorage().storage,
+      });
+      const renderResult = await resolvedRenderer.render({
+        deck: renderDeck,
         outDir,
         plan,
         signal: controller.signal,

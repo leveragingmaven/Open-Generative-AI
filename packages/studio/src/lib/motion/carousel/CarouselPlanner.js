@@ -19,7 +19,7 @@ import { defaultColorsFor, defaultMusicFor, wordCount, validateDeck } from "./Ca
 
 // Motion text is written for music. Without music, beat wording would describe a
 // rhythm the video does not have, so it is replaced with plain sequencing.
-function motionFor(type, music) {
+export function motionFor(type, music) {
   const base = MOTION_BY_TYPE[type] || "animates in sequence";
   if (music !== "none") return base;
   return base
