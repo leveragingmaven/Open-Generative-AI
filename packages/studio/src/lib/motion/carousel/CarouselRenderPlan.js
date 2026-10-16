@@ -100,7 +100,7 @@ export function buildCarouselRenderPlan({
     diff,
     renderOptions,
     postprocess,
-    slideSeconds: CAROUSEL_SLIDE_SECONDS,
+    slideSeconds: deck.slideSeconds ?? CAROUSEL_SLIDE_SECONDS,
     estimatedSeconds,
     summary,
   };

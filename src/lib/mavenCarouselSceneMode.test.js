@@ -16,6 +16,8 @@ import {
   buildCarouselStoryboardReply,
   buildCarouselApprovedReply,
   isCarouselFormatFollowUp,
+  isCarouselRenderRequest,
+  buildCarouselRenderHandoffReply,
   mavenCarouselApprovalInternals,
   readApprovedCarouselApproval,
   readPendingCarouselApproval,
@@ -176,4 +178,73 @@ test("render still refuses a switched-mode deck whose sheet was edited", async (
   const response = await render(edited);
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "style_sheet_not_approved");
+});
+
+const EXACT_BRIEF = [
+  "Create a 5-slide continuous motion carousel titled Meet Maven.",
+  "Slide 1: Meet MavenSync",
+  "Slide 2: Your AI Creative Partner",
+  "Slide 3: Turn Ideas Into Content",
+  "Slide 4: Create. Animate. Inspire.",
+  "Slide 5: Welcome to MavenSync",
+  "Use my uploaded background image and transparent Maven PNG. Animate the headlines with smooth entrances, add elegant champagne-gold circles and lines, and keep Maven visible as the camera moves continuously across all five slides.",
+  "Use the native Continuous Layers renderer, not AI video generation.",
+  "Format: 1080×1350, 30 seconds, one seamless MP4.",
+].join("\n");
+
+test("an explicit Continuous Layers request selects layers, other requests are unchanged", () => {
+  assert.equal(detectSceneMode(EXACT_BRIEF), "layers");
+  assert.equal(detectSceneMode("use the Continuous Layers renderer"), "layers");
+  assert.equal(detectSceneMode(CONTINUOUS_BRIEF), "continuous");
+  assert.equal(detectSceneMode(STANDARD_BRIEF), "standard");
+});
+
+test("all five headlines are preserved, including slide 5 with the animation instructions kept out of copy", () => {
+  const plan = planCarousel({ brief: EXACT_BRIEF, sceneMode: detectSceneMode(EXACT_BRIEF) });
+  assert.deepEqual(plan.deck.slides.map((slide) => slide.headline), [
+    "Meet MavenSync",
+    "Your AI Creative Partner",
+    "Turn Ideas Into Content",
+    "Create. Animate. Inspire.",
+    "Welcome to MavenSync",
+  ]);
+  const slideFive = plan.deck.slides[4];
+  assert.equal(slideFive.sub, undefined);
+  assert.doesNotMatch(JSON.stringify(plan.deck.slides), /Use my uploaded|Continuous Layers renderer/);
+});
+
+test("an explicit 30-second total gives six seconds per slide and reaches the deck and storyboard", () => {
+  const plan = planCarousel({ brief: EXACT_BRIEF, sceneMode: "layers" });
+  assert.equal(plan.deck.slideSeconds, 6);
+  assert.ok(plan.storyboard.slides.every((slide) => slide.durationSeconds === 6));
+  assert.equal(plan.storyboard.slides.length * 6, 30);
+});
+
+test("without a stated duration the eight-second default is kept and the deck has no override", () => {
+  const plan = planCarousel({ brief: STANDARD_BRIEF });
+  assert.equal(plan.deck.slideSeconds, undefined);
+  assert.ok(plan.storyboard.slides.every((slide) => slide.durationSeconds === 8));
+});
+
+test("the native renderer spec honours the deck's per-slide duration", async () => {
+  const { buildNativeSpec } = await import("./motion/native/spec.js");
+  const plan = planCarousel({ brief: EXACT_BRIEF, sceneMode: "layers" });
+  const fontContext = { fonts: {}, measures: {}, unsupported: () => [] };
+  const spec = buildNativeSpec({ deck: { ...plan.deck, slides: plan.deck.slides }, durationSeconds: plan.deck.slideSeconds, fontContext });
+  assert.equal(spec.durationSeconds, 6);
+  assert.equal(spec.frames, 180);
+  assert.equal(spec.totalSeconds, 30);
+  assert.equal(spec.look, "layers");
+});
+
+test("after approval, 'create' gets the Motion Carousel render handoff, not the video flow", () => {
+  const messages = approvedMessagesFor(EXACT_BRIEF);
+  assert.equal(readPendingCarouselApproval(messages, { identity: IDENTITY, conversationId: CONVERSATION }), null);
+  const approved = readApprovedCarouselApproval(messages, { identity: IDENTITY, conversationId: CONVERSATION });
+  assert.ok(approved, "the approved storyboard must be readable after approval");
+  assert.equal(approved.sceneMode, "layers");
+  for (const word of ["create", "render", "generate the carousel"]) {
+    assert.equal(isCarouselRenderRequest(word), true, word);
+  }
+  assert.match(buildCarouselRenderHandoffReply(), /Motion Design → Carousel/);
 });

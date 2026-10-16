@@ -43,6 +43,9 @@ import {
   buildCarouselApprovedReply,
   buildCarouselCancellationReply,
   readPendingCarouselApproval,
+  readApprovedCarouselApproval,
+  buildCarouselRenderHandoffReply,
+  isCarouselRenderRequest,
   isCarouselApprovalConfirmation,
   isCarouselApprovalCancellation,
 } from './mavenCarouselApproval.js';
@@ -770,7 +773,11 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // A follow-up while a storyboard awaits approval: format changes keep the approved
     // topic and direction; a render request gets the Motion Design handoff. Other
     // messages return null and route as before.
-    const pendingFollowUpReply = pendingCarousel ? buildCarouselFollowUpReply({ message, pending: pendingCarousel, identity, conversationId }) : null;
+    // Once approved, the approval marker hides the pending draft; a render request then gets the same handoff.
+    const approvedCarousel = pendingCarousel ? null : readApprovedCarouselApproval(trustedSessionReadResult.messages, { identity, conversationId });
+    const pendingFollowUpReply = pendingCarousel
+      ? buildCarouselFollowUpReply({ message, pending: pendingCarousel, identity, conversationId })
+      : (approvedCarousel && isCarouselRenderRequest(message) ? buildCarouselRenderHandoffReply() : null);
     if (pendingFollowUpReply) {
       const reply = pendingFollowUpReply;
       if (wantsStream) {

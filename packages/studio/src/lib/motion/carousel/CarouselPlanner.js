@@ -129,16 +129,39 @@ export function resolveSceneMode(value) {
   return CAROUSEL_SCENE_MODES.includes(value) ? value : CAROUSEL_DEFAULT_SCENE_MODE;
 }
 
-/** Only an explicit request for connected scenes, continuous backgrounds or camera movement selects Continuous. */
+// An explicit request for the native Continuous Layers renderer.
+const CONTINUOUS_LAYERS_PATTERN = /\bcontinuous layers?\b/i;
+
+/** Only an explicit request for Continuous Layers selects layers; connected scenes, continuous backgrounds or camera movement select Continuous. */
 export function detectSceneMode(brief) {
   const text = String(brief || "");
+  if (CONTINUOUS_LAYERS_PATTERN.test(text)) return "layers";
   return CONNECTED_SCENE_PATTERN.test(text) || CAMERA_MOVEMENT_PATTERN.test(text) ? "continuous" : CAROUSEL_DEFAULT_SCENE_MODE;
+}
+
+// "30 seconds", "30-second" or "30s" in the brief is the total length of the carousel.
+const TOTAL_SECONDS_PATTERN = /\b(\d{1,3}(?:\.\d+)?)[\s-]*(?:seconds?|secs?)\b/i;
+const MIN_SLIDE_SECONDS = 1;
+const MAX_SLIDE_SECONDS = 60;
+
+/** The total length the brief asks for, in seconds, or null when none is given. */
+export function detectTotalSeconds(brief) {
+  const match = String(brief || "").match(TOTAL_SECONDS_PATTERN);
+  const total = match ? Number(match[1]) : NaN;
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
+
+/** Seconds per slide: an explicit total is shared across the slides; otherwise the default. */
+export function slideSecondsFor(totalSeconds, slideCount) {
+  if (!totalSeconds || !slideCount) return CAROUSEL_SLIDE_SECONDS;
+  const perSlide = Number((totalSeconds / slideCount).toFixed(3));
+  return perSlide >= MIN_SLIDE_SECONDS && perSlide <= MAX_SLIDE_SECONDS ? perSlide : CAROUSEL_SLIDE_SECONDS;
 }
 
 /** What the brief asks for visually, and whether the renderer can deliver it in the chosen scene mode. */
 export function describeCreativeDirection(brief, sceneMode = CAROUSEL_DEFAULT_SCENE_MODE) {
   const text = String(brief || "");
-  const continuous = sceneMode === "continuous";
+  const continuous = sceneMode === "continuous" || sceneMode === "layers";
   const result = { applied: [], partial: [], unsupported: [] };
   for (const rule of CREATIVE_DIRECTION_RULES) {
     if (!rule.pattern.test(text)) continue;
@@ -191,10 +214,10 @@ const QUOTE_GLUED = /([.!?])(["”])(?=[A-Za-z])/g;
 const HEADER_THEN_QUOTE = /^((?:slide|scene|card)\s*\d{1,2}\s*[—–:.\-]?[^"“\n]*?)(?=["“])/gim;
 // A global-instructions section ("Format: ...", "Design: ...", "Music: ..."). Everything
 // after it, up to the next slide header, is production direction, never slide copy.
-const GLOBAL_LABEL_LINE = /^(?:global|format|design|visual|motion|style|branding|brand|music|audio|voice ?over|colou?rs?|palette|export|platform|aspect ratio|notes?|preserve|requirements?|constraints?|instructions?|handle)\b[^:\n]{0,40}:/i;
+const GLOBAL_LABEL_LINE = /^(?:global|format|design|visual|motion|style|animations?|branding|brand|music|audio|voice ?over|colou?rs?|palette|export|platform|aspect ratio|notes?|preserve|requirements?|constraints?|instructions?|handle)\b[^:\n]{0,40}:/i;
 const GLOBAL_BARE_LINE = /^(?:no (?:background )?music|no voice ?over|mavensync branding|preserve\b)/i;
 // Creative direction written after the numbered copy, e.g. "Use Instagram portrait 4:5 format."
-const DIRECTION_LINE = /^(?:use|keep|make|add|set|apply|format)\b.*\b(?:format|portrait|landscape|square|music|voice ?over|animations?|colou?rs?|palette|fonts?|wording|exactly|style|branding)\b/i;
+const DIRECTION_LINE = /^(?:use|keep|make|add|set|apply|format|animate)\b.*\b(?:format|portrait|landscape|square|music|voice ?over|animat\w*|camera|renderer|colou?rs?|palette|fonts?|wording|exactly|style|branding)\b/i;
 const CTA_LINE = /^(?:cta|call to action|button)\s*:\s*(.+)$/i;
 const QUOTED = /["“”]([^"“”]+)["“”]/;
 const HIGHLIGHT_LINE = /^highlights?\s+(.+?)\.?$/i;
@@ -479,6 +502,8 @@ export function planCarousel({
   // written and in order. Generated suggestions are only for simple topics.
   const useExplicit = explicit.length >= 2;
   const count = useExplicit ? explicit.length : clampSlides(slideCount ?? detectSlideCount(brief));
+  const totalSeconds = detectTotalSeconds(brief);
+  const slideSeconds = slideSecondsFor(totalSeconds, count);
   const keyword = detectKeyword(brief);
   const action = detectCtaAction(keyword, brief);
   const brandPlan = planBrand({ brand, brandColors, handle });
@@ -497,7 +522,7 @@ export function planCarousel({
     visualType: slide.visual.type,
     visual: slide.visual,
     motion: motionFor(slide.visual.type, resolvedMusic),
-    durationSeconds: CAROUSEL_SLIDE_SECONDS,
+    durationSeconds: slideSeconds,
   }));
 
   const deck = {
@@ -508,6 +533,8 @@ export function planCarousel({
     colors,
     music: resolvedMusic,
     sceneMode: resolvedSceneMode,
+    // Only an explicit total changes the default; the renderer reads this per-slide length.
+    ...(slideSeconds === CAROUSEL_SLIDE_SECONDS ? {} : { slideSeconds }),
     handle: brandPlan.handle || undefined,
     slides: skeleton.map((slide) => ({
       kicker: slide.kicker,
@@ -531,6 +558,7 @@ export function planCarousel({
     clarifications.push("Add a handle so the slides can show your name or @account.");
   }
   if (!useExplicit) clarifications.push("Headlines are drafts generated from your topic. Review and edit them before rendering.");
+  if (totalSeconds && slideSeconds !== CAROUSEL_SLIDE_SECONDS) clarifications.push(`${totalSeconds} seconds across ${count} slides: ${slideSeconds} seconds per slide.`);
 
   const validation = validateDeck(deck);
   const warnings = [...validation.errors, ...validation.warnings];

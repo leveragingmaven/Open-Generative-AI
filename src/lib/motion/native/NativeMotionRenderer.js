@@ -319,7 +319,8 @@ export function createNativeMotionRenderer({
       colors: deckColors(deck),
       handle: deck.handle || null,
       fps: options.fps,
-      durationSeconds: options.durationSeconds,
+      // The deck's per-slide length (from an explicit brief total) reaches the frame count.
+      durationSeconds: options.durationSeconds ?? deck.slideSeconds,
       fontContext,
     });
 
