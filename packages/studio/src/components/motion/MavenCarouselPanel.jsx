@@ -7,8 +7,10 @@ import {
   CAROUSEL_BRANDS,
 } from "../../lib/motion/carousel/CarouselConstants.js";
 import { CAROUSEL_VISUAL_STYLES, CAROUSEL_DEFAULT_VISUAL_STYLE } from "../../lib/motion/carousel/CarouselVisualStyles.js";
+import { resolveSceneMode } from "../../lib/motion/carousel/CarouselPlanner.js";
 import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
+import { readStoredDashboardSessionId } from "design-agent";
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 const ACTIVE = new Set(["queued", "running"]);
@@ -72,6 +74,8 @@ export default function MavenCarouselPanel({ onExit }) {
   const [handle, setHandle] = useState("");
   const [brandColors, setBrandColors] = useState("");
   const [presetId, setPresetId] = useState("instagram_carousel");
+  // "standard" keeps one scene per slide; "continuous" draws one camera-panned scene across the deck.
+  const [sceneMode, setSceneMode] = useState("standard");
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [layoutNote, setLayoutNote] = useState(null);
@@ -107,6 +111,35 @@ export default function MavenCarouselPanel({ onExit }) {
     fetch("/api/motion-carousel")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (active && data) setRendererStatus(data); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // Opened from Maven Chat: load the storyboard the customer already approved in that
+  // conversation. Nothing is regenerated or re-approved; the server re-checks the approval
+  // for this account, creator and conversation. No conversation, or any failed check, keeps
+  // the normal blank workflow. Rendering still requires the approved style sheet.
+  useEffect(() => {
+    const conversationId = readStoredDashboardSessionId(typeof window === "undefined" ? null : window.localStorage);
+    if (!conversationId) return undefined;
+    let active = true;
+    fetch(`/api/motion-carousel?conversation=${encodeURIComponent(conversationId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        // The approved sheet and its approval come with the deck; without both, nothing loads.
+        if (!active || !data?.ok || !data.deck?.styleSheet || !data.deck.styleSheetApproval) return;
+        setStyleSheet(data.deck.styleSheet);
+        setPaletteText(data.deck.styleSheet.palette.map((swatch) => swatch.hex).join(", "));
+        setRulesText(data.deck.styleSheet.rules.join("\n"));
+        setSheetApproval(data.deck.styleSheetApproval);
+        setDeck(data.deck);
+        // The selector starts on the mode the customer approved in chat.
+        setSceneMode(resolveSceneMode(data.deck.sceneMode));
+        setStoryboard(data.storyboard || null);
+        setClarifications(data.clarifications || []);
+        setWarnings(data.warnings || []);
+        setApproved(true);
+      })
       .catch(() => {});
     return () => { active = false; };
   }, []);
@@ -263,7 +296,7 @@ export default function MavenCarouselPanel({ onExit }) {
       // worker hands to the renderer. The sheet's visual style sets the frame.
       const data = await post({
         action: "render",
-        deck,
+        deck: { ...deck, sceneMode },
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -274,7 +307,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, lastFingerprints]);
+  }, [post, deck, approved, presetId, sceneMode, lastFingerprints]);
 
   // Registers the finished slides as library assets (server, in order) and opens one
   // carousel draft in Publishing. The existing composer handles accounts and scheduling.
@@ -475,6 +508,13 @@ export default function MavenCarouselPanel({ onExit }) {
               </select>
             </label>
           </div>
+          <label className="mt-3 block">
+            Scene
+            <select value={sceneMode} onChange={(e) => setSceneMode(resolveSceneMode(e.target.value))} className="mt-1 w-full rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1.5 text-white">
+              <option value="standard">Standard — one scene per slide</option>
+              <option value="continuous">Continuous — one camera-panned scene across the deck</option>
+            </select>
+          </label>
           <button type="button" onClick={planStoryboard} disabled={busy !== null || !sheetApproval} className="mt-3 w-full rounded bg-[var(--ms-color-pink-primary)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
             {busy === "plan" ? "Planning…" : "Plan storyboard"}
           </button>

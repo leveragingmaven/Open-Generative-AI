@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir, rm, rename, stat } from 'node:fs/promises';
 import { loadFontRegistry, buildFontContext, fontFaceCss, allFaceAliases, presetFacesFor, fontDirectory } from './fontRegistry.js';
 import { buildNativeSpec, NativeSpecError } from './spec.js';
 import { composeSlideFrame, thumbnailFrameIndex, slideOutputName } from './timeline.js';
+import { CONTINUOUS_SCENE, composeContinuousFrame } from './continuousScene.js';
 import { createRasterizer, imageDataUriFromFile } from './raster.js';
 import { createRenderCache, CACHE_DIR } from './renderCache.js';
 import { buildAudioTimeline, writeWav, MOODS } from './audio.js';
@@ -36,6 +37,16 @@ export function safeExportPreset(presetId) {
   } catch {
     return null;
   }
+}
+
+/**
+ * One frame for a slide. The standard look composes the slide on its own. The continuous look
+ * composes the whole deck on one timeline, so the slide's frame is taken at its place in that
+ * timeline and the camera and background carry across the slide boundary.
+ */
+function composeFor(spec, slideIndex, frameIndex, fontStyle, imageResolver) {
+  if (spec.look !== CONTINUOUS_SCENE) return composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle, imageResolver });
+  return composeContinuousFrame({ spec, slideIndex, frameIndex, fontStyle, imageResolver });
 }
 
 export const NATIVE_RENDERER_ID = 'mavensync-native';
@@ -185,7 +196,7 @@ export function createNativeMotionRenderer({
       signal,
       prefetch: framePrefetch,
       producer: async (frameIndex) => {
-        const { svg } = composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle, imageResolver });
+        const { svg } = composeFor(spec, slideIndex, frameIndex, fontStyle, imageResolver);
         const buffer = await rasterizerForSlide.frameRaw(svg);
         onFrame?.(frameIndex);
         return buffer;
@@ -196,7 +207,7 @@ export function createNativeMotionRenderer({
 
   async function renderThumbnail({ spec, slideIndex, imageResolver, fontStyle }) {
     const rasterizerForSlide = rasterizer || createRasterizer({ width: spec.width, height: spec.height });
-    const { svg } = composeSlideFrame({ spec, slideIndex, frameIndex: thumbnailFrameIndex(spec), fontStyle, imageResolver });
+    const { svg } = composeFor(spec, slideIndex, thumbnailFrameIndex(spec), fontStyle, imageResolver);
     return rasterizerForSlide.framePng(svg);
   }
 
@@ -230,7 +241,7 @@ export function createNativeMotionRenderer({
       }
     }
     const rasterizerForSlide = rasterizer || createRasterizer({ width: spec.width, height: spec.height });
-    const { svg } = composeSlideFrame({ spec, slideIndex, frameIndex: thumbnailFrameIndex(spec), fontStyle, imageResolver });
+    const { svg } = composeFor(spec, slideIndex, thumbnailFrameIndex(spec), fontStyle, imageResolver);
     await writeFile(target, await rasterizerForSlide.framePng(svg));
     return target;
   }
@@ -288,8 +299,13 @@ export function createNativeMotionRenderer({
     const mood = MOODS[deck.music] ? deck.music : 'none';
     const accents = typeof deck.sfx === 'boolean' ? deck.sfx : mood !== 'none';
     const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
+    // A continuous scene is one timeline: an edit to any slide moves the camera and background of
+    // every slide, so every slide's key covers the whole deck. Standard keys are unchanged.
+    const sceneKey = spec.look === CONTINUOUS_SCENE
+      ? `continuous|${hashString(spec.slides.map((_, i) => fingerprints?.[i] || String(i)).join('|'))}`
+      : null;
     const slideKeys = spec.slides.map((slide, index) => slideCacheKey({
-      fingerprint: `${fingerprints?.[index] || String(index)}|audio=${mood}:${accents ? 1 : 0}`,
+      fingerprint: `${sceneKey || fingerprints?.[index] || String(index)}|audio=${mood}:${accents ? 1 : 0}`,
       presetId: spec.presetId,
       theme: spec.theme,
       fps: spec.fps,
@@ -380,7 +396,7 @@ export function createNativeMotionRenderer({
     const pages = [];
     for (let index = 0; index < spec.slides.length; index += 1) {
       const rasterizerForSlide = rasterizer || createRasterizer({ width: spec.width, height: spec.height });
-      const { svg } = composeSlideFrame({ spec, slideIndex: index, frameIndex: thumbnailFrameIndex(spec), fontStyle, imageResolver });
+      const { svg } = composeFor(spec, index, thumbnailFrameIndex(spec), fontStyle, imageResolver);
       // eslint-disable-next-line no-await-in-loop
       pages.push({ jpeg: await rasterizerForSlide.frameJpeg(svg), width: spec.width, height: spec.height });
     }

@@ -134,6 +134,9 @@ export function buildNativeSpec({
     if (missing.length) warnings.push(`slide ${slide.index + 1} uses characters no bundled font can draw: ${missing.join(" ")}`);
   }
 
+  // `continuous` draws one world-space scene across the deck (background and camera carry over
+  // slide boundaries). Any other value keeps the standard per-slide look.
+  const look = String(deck.sceneMode || '').trim() === 'continuous' ? 'continuous' : 'standard';
   const frames = Math.round(fps * durationSeconds);
   return {
     width,
@@ -141,6 +144,7 @@ export function buildNativeSpec({
     fps,
     frames,
     durationSeconds,
+    look,
     totalSeconds: Number((durationSeconds * slides.length).toFixed(3)),
     presetId: preset.id,
     preset,

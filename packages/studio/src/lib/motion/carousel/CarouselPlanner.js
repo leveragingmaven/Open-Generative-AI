@@ -105,6 +105,50 @@ export function detectLook(brief) {
   return "solid";
 }
 
+// Creative direction from the brief, checked against what the renderer can do.
+// "applied" and "partial" are delivered; "unsupported" is reported to the customer
+// and never claimed as delivered.
+// `continuousStatus` applies when the scene mode is Continuous, which draws one camera-panned
+// world with a traveling ring. Standard mode cannot deliver these, so they stay unsupported there.
+const CAMERA_MOVEMENT_PATTERN = /\bcamera\b|\b(?:pan|zoom|dolly)\b|\btracking shot\b/i;
+const CONNECTED_SCENE_PATTERN = /\bconnected (?:backgrounds?|scenes?)\b|\bcontinuous (?:visual )?(?:world|scenes?|backgrounds?)\b/i;
+const CREATIVE_DIRECTION_RULES = Object.freeze([
+  { label: "Instagram 4:5 format", status: "applied", pattern: /\b4:5\b|\binstagram portrait\b/i },
+  { label: "camera movement", status: "unsupported", continuousStatus: "applied", pattern: CAMERA_MOVEMENT_PATTERN },
+  { label: "a traveling element across slides", status: "unsupported", continuousStatus: "applied", pattern: /\btravel(?:l)?ing\b|\bmoving (?:gold |golden )?(?:circle|dot|orb|shape)\b/i },
+  { label: "connected backgrounds across slides", status: "unsupported", continuousStatus: "applied", pattern: CONNECTED_SCENE_PATTERN },
+  { label: "kinetic typography", status: "unsupported", pattern: /\bkinetic\b/i },
+  { label: "named brand colours", status: "partial", note: "colour names in the brief are not read; set the colours in Motion Design", pattern: /\b(?:charcoal|champagne|gold|pink|palette|colou?rs?)\b/i },
+]);
+
+export const CAROUSEL_SCENE_MODES = Object.freeze(["standard", "continuous"]);
+export const CAROUSEL_DEFAULT_SCENE_MODE = "standard";
+
+/** Any value that is not a known scene mode becomes Standard. */
+export function resolveSceneMode(value) {
+  return CAROUSEL_SCENE_MODES.includes(value) ? value : CAROUSEL_DEFAULT_SCENE_MODE;
+}
+
+/** Only an explicit request for connected scenes, continuous backgrounds or camera movement selects Continuous. */
+export function detectSceneMode(brief) {
+  const text = String(brief || "");
+  return CONNECTED_SCENE_PATTERN.test(text) || CAMERA_MOVEMENT_PATTERN.test(text) ? "continuous" : CAROUSEL_DEFAULT_SCENE_MODE;
+}
+
+/** What the brief asks for visually, and whether the renderer can deliver it in the chosen scene mode. */
+export function describeCreativeDirection(brief, sceneMode = CAROUSEL_DEFAULT_SCENE_MODE) {
+  const text = String(brief || "");
+  const continuous = sceneMode === "continuous";
+  const result = { applied: [], partial: [], unsupported: [] };
+  for (const rule of CREATIVE_DIRECTION_RULES) {
+    if (!rule.pattern.test(text)) continue;
+    const status = continuous && rule.continuousStatus ? rule.continuousStatus : rule.status;
+    if (status === "applied") result.applied.push(rule.label);
+    else if (status === "partial") result.partial.push({ label: rule.label, note: rule.note });
+    else result.unsupported.push(rule.label);
+  }
+  return result;
+}
 export function detectMusic(brief, look) {
   const text = String(brief || "").toLowerCase();
   if (/\b(no (background )?music|no voice ?over|silent|without music|mute)\b/.test(text)) return "none";
@@ -419,11 +463,14 @@ export function planCarousel({
   slideCount = null,
   look = null,
   music = null,
+  sceneMode = null,
   facts = {},
   slideLabels = false,
 } = {}) {
   const topic = extractTopic(brief);
   const resolvedLook = look || detectLook(brief);
+  // Standard unless the caller (the chat path) passes a mode. The standalone planner is unchanged.
+  const resolvedSceneMode = resolveSceneMode(sceneMode);
   const resolvedMusic = music || detectMusic(brief, resolvedLook);
   const presetId = platform || detectPlatform(brief);
   const preset = getCarouselExportPreset(presetId);
@@ -460,6 +507,7 @@ export function planCarousel({
     brand: brandPlan.id,
     colors,
     music: resolvedMusic,
+    sceneMode: resolvedSceneMode,
     handle: brandPlan.handle || undefined,
     slides: skeleton.map((slide) => ({
       kicker: slide.kicker,
@@ -490,7 +538,10 @@ export function planCarousel({
     for (const slide of validation.slides) for (const error of slide.errors) warnings.push(error);
   }
 
-  return { deck, storyboard: { slides: storyboardSlides, topic, preset: preset.id }, clarifications, warnings, preset, brand: brandPlan, topic };
+  return {
+    deck, storyboard: { slides: storyboardSlides, topic, preset: preset.id }, clarifications, warnings, preset, brand: brandPlan, topic,
+    creativeDirection: describeCreativeDirection(brief, resolvedSceneMode),
+  };
 }
 
 export function isStoryboardSlideReasonablyShort(slide) {

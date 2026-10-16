@@ -38,6 +38,7 @@ import {
   styleSheetFingerprint,
 } from './motionCarouselStyleSheet.js';
 import { normalizeStyleSheet, StyleSheetError } from '../../packages/studio/src/lib/motion/carousel/CarouselStyleSheet.js';
+import { readApprovedCarouselApproval, resolveCarouselApprovedPlan } from './mavenCarouselApproval.js';
 
 const SAFE_FILE = /^[\w.-]+\.(mp4|png|pdf|json)$/i;
 const CONTENT_TYPES = { mp4: 'video/mp4', png: 'image/png', pdf: 'application/pdf', json: 'application/json' };
@@ -204,9 +205,49 @@ async function planResponse(body = {}, { identity = null, storage = null, reposi
   }
 }
 
+/**
+ * The approved storyboard for a Maven Chat conversation, for Motion Design. The
+ * approval is read from this caller's own transcript (account, creator and
+ * conversation are bound in the marker) and the deck is re-derived from the approved
+ * brief with the same planner, so headlines, order and direction are unchanged.
+ * Nothing is regenerated or re-approved. A missing, stale, cancelled or unowned
+ * approval returns the same 404, so the panel stays blank.
+ */
+export async function handleApprovedCarouselGet({ identity, conversationId, deps = {} } = {}) {
+  const notFound = () => jsonError('No approved storyboard for this conversation.', 'approval_not_found', 404);
+  const services = deps.services || await (await import('./designAgentConversationEndpoint.js')).loadEndpointServices();
+  try {
+    const owned = await services.ownershipService.verifyOwnedSession({ designSessionId: conversationId, identity });
+    if (owned && owned.ok === false) return notFound();
+    const read = await services.conversationReader.read({ agentId: 'design-agent', conversationId, identity });
+    const approval = readApprovedCarouselApproval(read?.messages, { identity, conversationId });
+    if (!approval) return notFound();
+    const plan = resolveCarouselApprovedPlan(approval);
+    // The approved sheet and its fingerprint travel on the deck, so render validates the same approval.
+    const deck = attachApprovedStyleSheet(plan.deck, approval.sheet, approval.sheetFingerprint);
+    return Response.json({
+      ok: true,
+      action: 'approved',
+      conversationId,
+      topic: plan.topic,
+      deck,
+      storyboard: plan.storyboard,
+      clarifications: plan.clarifications,
+      warnings: plan.warnings,
+      preset: plan.preset,
+      brand: plan.brand,
+    });
+  } catch {
+    // Unowned or unreadable conversations fail closed to the same answer as a missing approval.
+    return notFound();
+  }
+}
+
 /** GET (status/list) or GET ?file=<name> (download). */
 export async function handleMotionCarouselGet(request, { identity, store, storage = null, env = process.env } = {}) {
   const url = new URL(request.url);
+  const conversationId = url.searchParams.get('conversation');
+  if (conversationId) return handleApprovedCarouselGet({ identity, conversationId });
   const file = url.searchParams.get('file');
   if (file) {
     return serveCarouselFile(file, identity, env, {

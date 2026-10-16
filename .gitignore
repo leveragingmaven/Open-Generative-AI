@@ -46,6 +46,9 @@ output/maven-motion/
 output/maven-motion-carousel-demo/
 output/native-demo/
 output/inspect*/
+output/continuous-confidence/
+output/http-flow-continuous/
+output/standard-confidence/
 .carousel-cache/
 
 # Agent temporary files

@@ -35,9 +35,11 @@ import { isImageToVideoRequest, isVideoGenerationRequest } from '../../packages/
 import { isAudioGenerationRequest, extractSpeechText } from '../../packages/studio/src/lib/mavenAudioIntent.js';
 import { isLipSyncRequest } from '../../packages/studio/src/lib/mavenLipSyncIntent.js';
 import { isCarouselRequest, extractCarouselBrief } from '../../packages/studio/src/lib/mavenCarouselIntent.js';
-import { planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
+import { detectSceneMode, planCarousel } from '../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js';
+import { draftStyleSheet } from './motionCarouselStyleSheet.js';
 import {
   buildCarouselStoryboardReply,
+  buildCarouselFollowUpReply,
   buildCarouselApprovedReply,
   buildCarouselCancellationReply,
   readPendingCarouselApproval,
@@ -752,7 +754,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // where the slides are previewed and exported. No paid provider is involved.
     const pendingCarousel = readPendingCarouselApproval(trustedSessionReadResult.messages, { identity, conversationId });
     if (pendingCarousel && isCarouselApprovalConfirmation(message)) {
-      const reply = buildCarouselApprovedReply({ pending: pendingCarousel });
+      const reply = buildCarouselApprovedReply({ pending: pendingCarousel, identity, conversationId });
       if (wantsStream) {
         return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
       }
@@ -765,9 +767,25 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       }
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, []) };
     }
+    // A follow-up while a storyboard awaits approval: format changes keep the approved
+    // topic and direction; a render request gets the Motion Design handoff. Other
+    // messages return null and route as before.
+    const pendingFollowUpReply = pendingCarousel ? buildCarouselFollowUpReply({ message, pending: pendingCarousel, identity, conversationId }) : null;
+    if (pendingFollowUpReply) {
+      const reply = pendingFollowUpReply;
+      if (wantsStream) {
+        return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
+      }
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments, []) };
+    }
     if (isCarouselRequest(message)) {
-      const carouselPlan = planCarousel({ brief: extractCarouselBrief(message) });
-      const { reply } = buildCarouselStoryboardReply({ identity, conversationId, brief: message, plan: carouselPlan });
+      const carouselBrief = extractCarouselBrief(message);
+      // Chat selects Continuous only for an explicit request for connected scenes or camera movement.
+      const carouselPlan = planCarousel({ brief: carouselBrief, sceneMode: detectSceneMode(carouselBrief) });
+      // The storyboard shows the resolved style sheet, and approval records that exact sheet.
+      // Drafting falls back to a preset sheet on failure, so the storyboard never blocks.
+      const drafted = await (deps.draftCarouselStyleSheet || draftStyleSheet)({ brief: carouselBrief, brandColors: carouselPlan.brand?.colors || [], identity });
+      const { reply } = buildCarouselStoryboardReply({ identity, conversationId, brief: message, plan: carouselPlan, sheet: drafted.sheet, sheetSource: drafted.source });
       if (wantsStream) {
         return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResultWithRefs, message, attachments: trustedAttachments, generatedReferences: [] });
       }
