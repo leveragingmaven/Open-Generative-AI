@@ -89,6 +89,24 @@ export default function MarketingMotionWorkspace({ apiKey, motionTarget = null, 
   );
 }
 
+// Standalone Prompt Library tab: same library and scope resolution as the Marketing Studio mode.
+export function MotionPromptLibraryPage({ onOpenMavenChat = null }) {
+  const [libraryScope, setLibraryScope] = useState(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    createCreatorProjectClient()
+      .resolveProfileScope()
+      .catch(() => null)
+      .then((scope) => { if (!cancelled) setLibraryScope(scope); });
+    return () => { cancelled = true; };
+  }, []);
+  return (
+    <div className="absolute inset-0 flex flex-col bg-app-bg">
+      <MotionPromptLibrary scope={libraryScope} onOpenMavenChat={onOpenMavenChat} />
+    </div>
+  );
+}
+
 /**
  * Embeds the Motion Prompt Library page. `scope` keys the page's saved data to the
  * signed-in creator; with no scope the page works but does not persist. Copy for Maven

@@ -67,6 +67,7 @@ const MavenSyncIntelligenceWorkspace = workspaceImport(() => import('../packages
 const ComingSoonStudio = workspaceImport(() => import('../packages/studio/src/components/ComingSoonStudio.jsx'), 'Workspace');
 const DesignAgentStudio = workspaceImport(() => import('../packages/studio/src/components/DesignAgentStudio.jsx'), 'Design Studio');
 const MavenCarouselPanel = workspaceImport(() => import('../packages/studio/src/components/motion/MavenCarouselPanel.jsx'), 'Motion Carousel');
+const MotionPromptLibraryPage = workspaceImport(() => import('../packages/studio/src/components/motion/MarketingMotionWorkspace.jsx').then((m) => ({ default: m.MotionPromptLibraryPage })), 'Prompt Library');
 
 // Renders the Active Campaign name in the Creative OS header when one is set.
 function CampaignHeaderLabel() {
@@ -692,6 +693,9 @@ const [characterTarget, setCharacterTarget] = useState(null);
       case 'motion-carousel':
         if (visibleTabIds.has('motion-carousel') && motionCarouselAllowed) activeWorkspaceContent = <MavenCarouselPanel onExit={() => router.push('/studio')} />;
         break;
+      case 'prompt-library':
+        if (visibleTabIds.has('prompt-library')) activeWorkspaceContent = <MotionPromptLibraryPage onOpenMavenChat={() => router.push('/studio')} />;
+        break;
       case 'marketing':
         if (visibleTabIds.has('marketing')) activeWorkspaceContent = <MarketingStudio apiKey={studioApiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGenerationComplete={makeSuccessCallback('marketing')} onGenerationError={makeErrorCallback('marketing')} motionTarget={motionTarget} onMotionTargetHandled={() => setMotionTarget(null)} />;
         break;
@@ -741,7 +745,7 @@ const [characterTarget, setCharacterTarget] = useState(null);
 
   const usesCreativeStudioFrame = new Set([
     'image', 'video', 'clipping', 'vibe-motion', 'lipsync', 'body-swap',
-    'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer', 'motion-carousel',
+    'cinema', 'audio', 'marketing', 'character', 'design-agent', 'ai-influencer', 'motion-carousel', 'prompt-library',
   ]).has(activeWorkspaceTab);
   const studioContent = (isStudioHome || isOverviewWorkspace || isCreateWorkspace || isIntelligenceWorkspace)
     ? activeWorkspaceContent
