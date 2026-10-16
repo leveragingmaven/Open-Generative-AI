@@ -103,12 +103,29 @@ export function layeredLayers(spec) {
   }
 
   const built = {
-    world: normaliseLayers(world, { width: spec.width, height: spec.height }),
-    screen: screen.length ? normaliseLayers(screen, { width: spec.width, height: spec.height }) : [],
+    world: normaliseLayers(world.map(fitMotionToDuration), { width: spec.width, height: spec.height }),
+    screen: screen.length ? normaliseLayers(screen.map(fitMotionToDuration), { width: spec.width, height: spec.height }) : [],
     totalSeconds,
   };
   sceneCache.set(spec, built);
   return built;
+}
+
+/**
+ * Short slides (a few seconds) can be shorter than a layer's entrance plus exit. Shrink both
+ * proportionally so the layer still renders, rather than failing the whole export.
+ */
+function fitMotionToDuration(layer) {
+  const enter = layer.enter?.seconds || 0;
+  const exit = layer.exit?.seconds || 0;
+  const total = enter + exit;
+  if (total === 0 || total <= layer.duration) return layer;
+  const k = layer.duration / total;
+  return {
+    ...layer,
+    enter: layer.enter ? { ...layer.enter, seconds: enter * k } : layer.enter,
+    exit: layer.exit ? { ...layer.exit, seconds: exit * k } : layer.exit,
+  };
 }
 
 /** The body of an SVG document, without its outer <svg> element. */

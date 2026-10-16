@@ -182,3 +182,19 @@ test('a continuous render exports each slide as its own ordered clip, and the fu
     assert.ok(Math.abs(fullDeck.duration - 2) < 0.3, `full deck duration ${fullDeck.duration}`);
   });
 });
+test('a Continuous Layers render exports ordered per-slide clips and a full deck with the same timing', { skip }, async () => {
+  await withOutDir(async (outDir) => {
+    const renderer = createNativeMotionRenderer({ logger: { log() {}, warn() {} } });
+    const deck = { ...DECK, sceneMode: 'layers', slideSeconds: 1 };
+    const plan = buildCarouselRenderPlan({ deck, presetId: 'instagram_carousel' });
+    const result = await renderer.render({ deck, outDir, plan, options: { fps: 6, accountId: 'integration' } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.slideFiles, ['slide-01.mp4', 'slide-02.mp4']);
+    for (const name of result.slideFiles) {
+      const clip = await probeVideo('ffmpeg', join(outDir, name));
+      assert.ok(Math.abs(clip.duration - 1) < 0.2, `${name} duration ${clip.duration}`);
+    }
+    const fullDeck = await probeVideo('ffmpeg', join(outDir, 'full-deck.mp4'));
+    assert.ok(Math.abs(fullDeck.duration - 2) < 0.3, `full deck duration ${fullDeck.duration}`);
+  });
+});
