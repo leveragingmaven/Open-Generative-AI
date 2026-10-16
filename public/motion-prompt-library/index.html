@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Motion Prompt Library</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1b1a17;--mute:#6b675f;--line:#e4e1da;--acc:#e8590c;--accbg:#fff0e6;--chip:#ecebe6;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15140f;--card:#1f1e18;--ink:#f1efe8;--mute:#9b978c;--line:#34322a;--acc:#ff8a4c;--accbg:#34241a;--chip:#2a2922;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#15140f;--card:#1f1e18;--ink:#f1efe8;--mute:#9b978c;--line:#34322a;--acc:#ff8a4c;--accbg:#34241a;--chip:#2a2922;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.02em}
+h2{font-size:18px;margin:36px 0 12px}
+.sub{color:var(--mute);margin:0 0 18px}
+a{color:var(--acc)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+input,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;width:100%}
+input:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:1px}
+.bar input{flex:1 1 220px;width:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:6px 13px}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.count{color:var(--mute);font-size:13px;margin:8px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.card h3{font-size:15px;margin:0;line-height:1.35}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--mute);font-size:13px}
+.tag{background:var(--accbg);color:var(--acc);border-radius:6px;padding:1px 8px;font-size:12px;white-space:nowrap}
+.row{display:flex;gap:8px;align-items:center;margin-top:auto}
+.star{font-size:18px;line-height:1;padding:4px 9px;border-radius:8px}
+.star.on{background:var(--accbg);color:var(--acc);border-color:var(--acc)}
+.open{flex:1;text-align:center;text-decoration:none;border:1px solid var(--acc);color:var(--acc);border-radius:8px;padding:5px 10px;font-size:14px}
+.open:hover{background:var(--acc);color:#fff}
+.card textarea{min-height:44px;font-size:13px;padding:6px 9px;resize:vertical}
+.form{display:grid;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.form textarea{min-height:110px}
+.mine{display:grid;gap:10px;margin-top:12px}
+.mine pre{white-space:pre-wrap;word-break:break-word;font:13px/1.5 ui-monospace,Menlo,monospace;margin:6px 0 0;max-height:180px;overflow:auto;background:var(--bg);border-radius:8px;padding:10px}
+.cmd{display:flex;gap:8px;align-items:center;background:var(--bg);border-radius:8px;padding:6px 8px}
+.cmd code{flex:1;font:12px ui-monospace,Menlo,monospace;overflow-x:auto;white-space:nowrap}
+.cmd button{padding:3px 10px;font-size:12px;border-radius:8px}
+.manual textarea{width:100%;margin-top:6px;font:12px ui-monospace,Menlo,monospace}
+.hint{color:var(--mute);font-size:12px;margin:0}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
+.empty{color:var(--mute);padding:24px;text-align:center;border:1px dashed var(--line);border-radius:14px}
+.foot{color:var(--mute);font-size:12.5px;margin-top:24px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎞️ My Motion Prompt Library</h1>
+  <p class="sub">A personal index of motion graphics prompts from <a href="https://promptmotion.org" target="_blank" rel="noopener">promptmotion.org</a>. Each card links to the original entry, where you can watch the video and copy the prompt or skill (use the Skills filter for reusable workflows). Star favorites, add notes, and store your own versions below.</p>
+
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search titles or creators…" aria-label="Search">
+    <button id="savedBtn" type="button">★ Saved only</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="count" id="count"></div>
+  <div class="grid" id="grid"></div>
+
+  <h2>My prompts</h2>
+  <div class="form">
+    <input id="mt" placeholder="Title (e.g. Orange-dot kinetic reel, my remix)">
+    <textarea id="mx" placeholder="Paste a prompt you copied from Prompt Motion, or write your own…"></textarea>
+    <input id="mg" placeholder="Tags, comma separated (optional)">
+    <div><button id="addMine" type="button" class="on">Save prompt</button></div>
+  </div>
+  <div class="mine" id="mine"></div>
+
+  <div class="tools">
+    <button id="exp" type="button">Export backup (.json)</button>
+    <button id="imp" type="button">Import backup</button>
+    <input id="file" type="file" accept="application/json" hidden>
+  </div>
+  <p class="foot">Videos and prompts belong to their creators and are linked on each Prompt Motion entry. Your stars, notes and prompts are saved in this browser only, so use Export to back them up.</p>
+</div>
+
+<script>
+const CATS={S:"Skills",M:"Motion graphics",E:"Explainer",P:"Product launch",U:"UI motion",D:"3D scene",F:"Film",A:"Art"};
+// [category, title, creator, entry id]
+const D=[
+["M","One orange dot drives every scene (15s 2D film)","rossaxbt","f6775974"],
+["M","Orange dot kinetic motion system","rossaxbt","b855831f"],
+["M","Motion designer résumé reel: typography, shapes, camera moves","darel023","2303535b"],
+["M","Typing, flipbook bounce and headline reveal (12s, coded)","notdwd","2c76f525"],
+["M","Magazine cover animation with typed-in headline (10s)","promptwhat","48671ce2"],
+["M","Kinetic identity bumper with looping poster typography (20s)","tkz_aiart","c0bd10f2"],
+["M","Code-made motion design video with scrubable timeline (30s)","diamai_","c01dfd08"],
+["M","Comic-book motion graphic with speech bubbles and SFX","madpencil_","6236f8d0"],
+["M","Cinematic fireworks and light-particle show","fornyapayzeka","f75fa1ad"],
+["M","Looping infinite-zoom collage with vintage objects","koldo2k","74ae07a6"],
+["M","Color theory motion graphics with a spinning wheel (20s)","koldo2k","110c3289"],
+["M","Hand-drawn iced Americano in one HTML file","promptwhat","15a88b76"],
+["M","1990s demoscene demo synced to an S3M track","gandamu_ml","14fd5391"],
+["M","Kinetic typography about Opus making kinetic typography","adamholtererer","d07f6ba1"],
+["M","Hand-drawn colored pencil and watercolor animation","orisilver","49cac4dd"],
+["M","20-second title sequence for a Netflix thriller that doesn't exist","abhinayguptha","110b400c"],
+["M","Seamless looping water cycle animation in code","higgsfield_ai","bc9d3bd8"],
+["M","Interactive showreel with click and drag interactions","robertjbye","b025495c"],
+["M","Kinetic typography video with afrobeat groove (40s)","tajudeen","a6b84a9e"],
+["M","Dribbble-style UI motion loop of morphing states","arle0x","b7c30638"],
+["E","3b1b-style paper animations with unprompted visualizations","briancchao","4e5625eb"],
+["E","3Blue1Brown-style explainer on transformers","michaelzsguo","6896f3e8"],
+["E","Chalky picture-book Pythagorean theorem explainer (30s)","hyuki","b5d8b856"],
+["E","History of the printing press motion explainer (60s)","maxescu","2e61882c"],
+["E","Why coffee keeps you awake (15s explainer)","vibeeval","14f2661d"],
+["E","Zoom from bacterial cell to quantum fields","paraschopra","c83cbd23"],
+["E","How encryption works with secure file transfers","syntaxdiffusion","c3b55f02"],
+["E","Blueprint-style explainer for a technical decision","voxyz_ai","23ef997d"],
+["E","Hand-drawn paper-collage explainer about Claude Code (15s)","so_ainsight","5ac70d50"],
+["E","Fourier series animation","miguel07code","9fd6b25c"],
+["E","Motion graphic history of ice cream","notiansans","8d57a27e"],
+["E","Didactic animation explaining LLM context windows","joaoli13","691d85c0"],
+["E","Template: 1-minute explainer with After Effects-style kinetic type","incognitoprince","6f018f5e"],
+["E","Launch video written as 9 beats: pain to range","archiveexplorer","3d5cdc4e"],
+["P","Premium SaaS launch film built from desktop app scenes (20s)","notdwd","af90e07a"],
+["P","Product launch video with morph transitions (24s)","twoclipping","809e2aef"],
+["P","Apple 1984-inspired ad for Opus (30s)","1littlecoder","591abeb5"],
+["P","One-take launch UI film: prompt bar to toast","0xnicc0","eccd155d"],
+["P","Vertical smartphone-ad promo with timed sound hits (30s)","uniyume","1dfd456b"],
+["P","Agency-style launch video with matching cuts","archiveexplorer","fc2cc53c"],
+["P","Modern slick startup launch video for an inference product","deedydas","3fcc9167"],
+["P","Product Hunt launch loop: springs, motion blur, beat-synced clicks","raphaelaubryy","b20885f8"],
+["P","Square 2D Apple-style launch film with transforming UI","ultimaxbt","e18086ad"],
+["P","Comic-book style ads with character voices","ladprofit","7dfc9e51"],
+["P","9:16 iOS-style app update trailer with stickers","javiiarchive","bd19452e"],
+["P","App Store preview video for a new app","jeanlucas","3154fe2c"],
+["U","Liquid Glass looping UI motion demo with synced audio","motion_conquest","063b058f"],
+["U","Bookmark icon: cloth-like wave, fill and shimmer","kippe07","feb247d1"],
+["U","Premium crypto wallet welcome screen animation","vvarrdi","0f52754d"],
+["U","Fitness app celebration screen animated from a static design","onethirdesigner","54a9e426"],
+["U","Liquid glass 3D hero section with refractive cuboid","viktoroddy","d5761ad2"],
+["U","Animated fire icon for an app UI","samuel_yostt","63cefa3d"],
+["U","Nutrition app hero with scanning food plates","ashikartistry","50eeb384"],
+["U","Looping UI motion reel with morphing components","raphaelaubryy","7ad0abb4"],
+["U","1440×1440 UI morphing sequence with beat-synced states","jasonugc","dcb9b506"],
+["U","Joyous sound picker UI with dither gradients","ky__zo","d46cdd19"],
+["D","Pelican riding a bike in Three.js","addyosmani","87aa71c6"],
+["D","Interactive snow globe with snow and weather controls","alexmichaelio","083652a4"],
+["D","Photoreal Falcon 9 launch in a Three.js scene","rubenssoto_ai","2e9afec3"],
+["D","Cinematic pirate ship through a sunset ocean","vib3coded","80964d71"],
+["D","Interactive 3D jet engine with explode button","canghe","3b731e8c"],
+["D","Zoom from room to quarks","victortaelin","9bd332da"],
+["D","Feudal Japan riverboat with weather and day-night cycle","mengto","b3b18d99"],
+["D","Cartoony 3D planet with orbit and zoom","tim_lb","81f2faff"],
+["F","Procedural animated short about a tiny ink character","morpheusdv","4513ec21"],
+["F","Pixar-style 1990s cartoon from a story in Three.js","scheemunai","17dfe3a2"],
+["F","Cinematic outer-space journey from Earth to a black hole","kepochnik","156dbe0f"],
+["F","16-bit pixel-art wizard short with synced chip music","gkxspace","d28ed47f"],
+["F","Origami-style animation of humanity evolving into AI","songkeys","736b3df2"],
+["F","Cinematic coded film about the Battle of Austerlitz","winterarc2125","46dbd06c"],
+["A","Mathematical marbling: ink drops, combing, paper reveal","dhruvalgolakiya","559f0a4e"],
+["A","Interactive ink-and-wash painting in one HTML file","axtonliu","d975b44d"],
+["A","Looping 32-bit pixel art scene","spikeriser","6babd9cf"],
+["A","Generative cosmos film: black holes, galaxies, music","sundyme","f68100de"],
+["A","Live word-driven audiovisual universe","miaai_lab","f85be893"],
+["A","Mouse-responsive animation rooted in high mathematics","miaai_lab","044b6070"],
+["A","Code-driven mascot animation demo","raroque","f9eaee61"],
+["S","Cinetic: agent skill that directs launch films from code","lexnlin","6161a6","https://promptmotion.org/lexnlin-6161a6","npx skills add Leonxlnx/cinetic"],
+["S","Cinetic on GitHub: source, docs and install options","Leonxlnx","sk-cinetic-gh","https://github.com/Leonxlnx/cinetic","npx skills add Leonxlnx/cinetic -g -a claude-code -y"],
+["S","Reddit marketing tool launch video (skill)","anthonyriera","9b1b2a","https://promptmotion.org/anthonyriera-9b1b2a"],
+["S","Indian civilisation history film (skill)","BuildFastWithAI","53234e","https://promptmotion.org/buildfastwithai-53234e"],
+["S","Animated agent session story (skill)","jake11moran","a269c4","https://promptmotion.org/jake11moran-a269c4"],
+["S","motionmaxxing: captures a brand from a website, then builds and checks motion films","motionmaxxing by Tejas Makwana","sk-motionmaxxing","https://www.everydev.ai/tools/motionmaxxing/llms.txt"],
+["S","onetake: short product and skill motion videos without Remotion or HyperFrames","feitangyuan","sk-onetake","https://www.skillsdirectory.com/skills/feitangyuan-onetake"],
+["P","Apple-keynote-style 2D launch film with liquid glass UI","reinexbt","0b7f4346"],
+["P","Apple-keynote-style 2D launch film with morphing UI transitions","aifeelforme","7888410e"],
+["P","One-minute launch video for an AI newsletter","alex_prompter","1cdf0664"],
+["P","Slow polished Mac desktop teaser for NotchBrowser","jake11moran","3041df3e"],
+["P","Super Bowl-style cinematic promo for a product board","vectorcrossprod","56e446b1"],
+["P","Framer template promo with smooth 3D camera moves","realmehedi1","083ecedc"],
+["P","Side-by-side launch videos with and without Motion","motion_so","8c08b9b9"],
+["P","Punchy 15-second launch video for Frontier","sidkasbekar","122fb54c"],
+["P","Launch video for a new app with slick animations and charts","nutlope","16437dd6"],
+["P","30-second trailer for the game ATTACK AGI","aidenybai","0ad7dfb9"],
+["P","Black-and-white launch film for Grok 4.7 (40s)","abxxai","3462e450"],
+["P","Cinematic hot sauce ad with alternate brand treatments","magnific","69f98234"],
+["M","Retro game card reveal animation","nickfromlater","797e6020"],
+["M","Branded motion video driven by one JSON prompt","nusretuzman","c43b482b"],
+["M","Stickman animation in a single HTML/JS file","notjazii","0df331d4"],
+["M","Looping stickman vs. clock hand short","koldo2k","0ed2a9e7"],
+["M","Terminal-error launch video with macOS command-line visuals","hiteshxdev","ba97b905"],
+["M","Opening credits for a fictional movie about you","goodside","9fb478d0"],
+["M","Pixel-art runner dodging meteors and beams","riku720720","9b0847ac"],
+["M","Minimalist rooftop bullet-dodge inspired by The Matrix","morpheusdv","051c167f"],
+["M","Cozy autumn animated screensaver for Mac","icreatelife","61206618"],
+["M","Collage-style animated composition made in After Effects","alervg","fb6a22a9"],
+["M","Cinematic rocket launch with stage separation and landing","ulisesdavid__","dc64ea94"],
+["M","Animated SVG Nintendo Switch booting up and snapping controllers in","ishuagra02","e1a8f09c"],
+["M","Nostalgic Japanese Heisei-era motion graphics with sound","__su888","7a8fbe0e"],
+["M","Epic WebGL video presentation with detailed animations and sound","blackshark0x","4117ebf2"],
+["M","Sound-design pack for a short visual edit","amirmushich","8735d08f"],
+["M","Motion graphics reel explaining prompt injections","theresanaiforit","d1bee291"],
+["M","20-second 16:9 motion graphics video that tells a little story with sound","adrianduta96","0e315ffe"],
+["M","Kinetic mathematical proof: THERE IS NO LAST PRIME","gdgtify","397f553f"],
+["M","20-second kinetic spoken-word film: BUILD THE FLOOR","gdgtify","ccfb8e10"],
+["M","20-second kinetic typography film: ESCAPE THE ORBIT","gdgtify","efbc0974"],
+["M","World-class motion designer: 20s kinetic identity bumper","techhalla","94fbeacf-2"],
+["M","20-second motion graphics manifesto for DreamFort","advait_jayant","b0fd1004"],
+["M","Hand-drawn Mid-Autumn Festival canvas animation","eric_khun","01b1548e"],
+["E","Anime-style social-media explainer with a closing song","emollick","953c2585"],
+["E","Interactive earthquake simulation: tectonic plates and seismic waves","egeberkina","1e466b6a"],
+["E","Cinematic visualization of cell aging and death","andrewaiginin","7c426c7a"],
+["E","National Geographic-style explainer on the size of the universe","codezilla_","9ad8cf6f"],
+["E","Motion graphics explainer on how AI generates images","codezilla_","aed1ca93"],
+["E","How ZODA codec cryptography works","musalbas","4b4b9fc1"],
+["E","Webpage animation explaining GitHub version control","sundyme","c0cd44e1"],
+["E","Password vs. passkey explainer","tz_2022","5e7b6fe5"],
+["E","Gravitational lensing via an interactive black hole","voxyz_ai","ab2d35fa"],
+["E","How a mechanical keyboard works","iniyanai","6b201b4d"],
+["E","How a coding agent works in 40 seconds","arthurkatcher","f06aec02"],
+["E","50 podcast animations for hard-to-visualize ideas","stokebuilder","77dadd44"],
+["E","Animated cycloid lesson","aimevzulari","b0a23e27"],
+["U","Interactive macOS-style portfolio with clickable windows and dock","parsakzn","1021bf9f"],
+["U","Scrolling homepage redesign with animated scene transitions","theviableedge","b4373ca7"],
+["U","Scrolling website down to the Challenger Deep with sound","_chain_duck_","b532371d"],
+["U","SaaS landing page with dithered visuals and subtle animation","fw3d","b2b8eea2"],
+["U","Frontend website with an infinite-scroll scene loop","lexnlin","daca5fa6"],
+["U","Animated disk space visualizer: sunburst and treemap morphing","oskargroth","9d39c853"],
+["D","Interactive night train crossing a mountain viaduct","artless101","a03a6fe7"],
+["D","London in a snow globe","eigeorguy","0e0990d9"],
+["D","Photorealistic New York skyline at golden hour","aipulseda1ly","b5126909"],
+["D","Realistic interactive mid-engine supercar in Three.js","explorax_","6de725a9"],
+["D","Rainy Japanese garden with shishi-odoshi, one HTML file","mizugame_22","c837ba23"],
+["D","Interactive weather world in a glass box","lexnlin","f67bbecc"],
+["D","Isometric floating mini-world with mining bots in Blender","koldo2k","3e62d145"],
+["D","Elaborate voxel pagoda scene in a garden","ivanfioravanti","1cbc2da1"],
+["F","Anime fight scene in a cursed forest","mayz1169","284c6016"],
+["F","Two-minute history of Ethereum with synthesized soundtrack","apoorveth","74d06e2e"],
+["F","Zero-direction demoscene intro (280 KB HTML)","justinperea","80f6d37c"],
+["F","Chinese ink animation of a tadpole finding its mother","akokoi1","95be8b44"],
+["F","Anime trailer about a Claude and ChatGPT battle","ishuagra02","41080710"],
+["A","One-shot tile mosaic reassembling famous paintings","andyl5cc","83c8d7d1"],
+["A","Animated pixel art wizard casting a spell","majidmanzarpour","3cee1548"],
+["A","Interactive sketchbook flip-through with doodles and piano score","kloss_xyz","106e69f4"],
+["A","Colorful voxel pagoda with cherry blossoms","sahilpanhotra","6d58924b"],
+["A","30-second video about what it feels like to be Claude","goodside","64f744c6"]
+];
+const BASE="https://promptmotion.org/prompts/p-";
+let S={saved:{},notes:{},mine:[],prompts:{},fmt:{}},cat="all",onlySaved=false,query="";
+// Creator OS embeds this page with ?scope=<profile key>, so saved data is per creator.
+// Without a valid scope nothing is persisted (in-memory only).
+const SCOPE=new URLSearchParams(location.search).get("scope")||"";
+const KEY=/^profile-[a-z0-9]+$/.test(SCOPE)?"pm-lib-v1:"+SCOPE:null;
+try{const r=KEY&&localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+const save=()=>{if(!KEY)return;try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const $=id=>document.getElementById(id);
+function el(t,p,...k){const e=document.createElement(t);for(const a in p||{})a==="class"?e.className=p[a]:a in e?e[a]=p[a]:e.setAttribute(a,p[a]);k.forEach(c=>e.append(c));return e}
+
+function chips(){
+  const box=$("chips");box.textContent="";
+  [["all","All"],...Object.entries(CATS)].forEach(([k,v])=>{
+    const b=el("button",{type:"button",class:cat===k?"on":"",textContent:v});
+    b.onclick=()=>{cat=k;chips();render()};box.append(b)});
+}
+function showManualCopy(box,text){box.textContent="";const t=el("textarea",{readOnly:true,rows:5,value:text});box.append(el("p",{class:"hint",textContent:"Your browser blocked automatic copying. Select the text below and press Ctrl+C (⌘C on Mac)."}),t);t.focus();t.select()}
+function cmdBox(c){
+  const b=el("button",{type:"button",textContent:"Copy install"});
+  b.onclick=async()=>{try{await navigator.clipboard.writeText(c);b.textContent="Copied ✓"}catch(e){b.textContent="Copy failed";showManualCopy(manual,c)}setTimeout(()=>b.textContent="Copy install",1500)};
+  const manual=el("div",{class:"manual"});
+  return el("div",{},el("div",{class:"cmd"},el("code",{textContent:c}),b),manual);
+}
+function render(){
+  const g=$("grid");g.textContent="";
+  const q=query.toLowerCase();
+  const list=D.filter(d=>(cat==="all"||d[0]===cat)&&(!onlySaved||S.saved[d[3]])&&(!q||(d[1]+" "+d[2]+" "+CATS[d[0]]).toLowerCase().includes(q)));
+  $("count").textContent=list.length+" of "+D.length+" entries · "+Object.keys(S.saved).length+" saved";
+  if(!list.length){g.append(el("div",{class:"empty",textContent:"Nothing matches. Try another search or category."}));return}
+  list.forEach(d=>{
+    const id=d[3],star=el("button",{type:"button",class:"star"+(S.saved[id]?" on":""),textContent:S.saved[id]?"★":"☆",title:"Save",ariaLabel:"Save"});
+    star.onclick=()=>{S.saved[id]?delete S.saved[id]:S.saved[id]=1;save();render()};
+    const note=el("textarea",{placeholder:"Notes (what to reuse, tweaks…)",value:S.notes[id]||""});
+    note.oninput=()=>{note.value.trim()?S.notes[id]=note.value:delete S.notes[id];save()};
+    const pText=el("textarea",{placeholder:"Paste the prompt text here (optional)",value:(S.prompts||{})[id]||""});
+    pText.oninput=()=>{S.prompts=S.prompts||{};pText.value.trim()?S.prompts[id]=pText.value:delete S.prompts[id];save()};
+    const fmtBtn=el("button",{type:"button",textContent:(S.fmt||{})[id]==="carousel"?"Output: carousel":"Output: video",title:"Choose what Maven should make"});
+    fmtBtn.onclick=()=>{S.fmt=S.fmt||{};S.fmt[id]=(S.fmt[id]==="carousel")?"video":"carousel";save();render()};
+    const copyBtn=el("button",{type:"button",textContent:"Copy for Maven",title:"Copy a structured instruction for Maven Chat"});
+    const manual=el("div",{class:"manual"});
+    copyBtn.onclick=async()=>{const t=mavenInstruction(d);try{await navigator.clipboard.writeText(t);copyBtn.textContent="Copied ✓";manual.textContent=""}catch(e){copyBtn.textContent="Copy failed";showManualCopy(manual,t)}setTimeout(()=>copyBtn.textContent="Copy for Maven",1500)};
+    g.append(el("div",{class:"card"},
+      el("div",{class:"meta"},el("span",{textContent:d[2].includes(" ")?d[2]:"@"+d[2]}),el("span",{class:"tag",textContent:CATS[d[0]]})),
+      el("h3",{textContent:d[1]}),d[5]?cmdBox(d[5]):"",pText,note,
+      el("div",{class:"row"},fmtBtn,copyBtn),manual,
+      el("div",{class:"row"},el("a",{class:"open",href:d[4]||BASE+id,target:"_blank",rel:"noopener",textContent:d[0]==="S"?"Open skill ↗":"Open & copy prompt ↗"}),star)));
+  });
+}
+// Structured hand-off for Maven Chat. Routing: "carousel" selects Motion Carousel and
+// "create ... video" selects text-to-video, so the rules line avoids both words on purpose.
+function mavenInstruction(d){
+  const id=d[3],carousel=(S.fmt||{})[id]==="carousel",prompt=(S.prompts||{})[id]||"";
+  const coded=/three\.js|webgl|interactive|html|3d/i.test(d[1]);
+  const lines=[
+    carousel?"Make an animated carousel about "+d[1]+".":"Create a short video about "+d[1]+".",
+    "",
+    "Reference",
+    "Title: "+d[1],
+    "Category: "+CATS[d[0]],
+    "Creator: "+d[2],
+    "Source: "+(d[4]||BASE+id)
+  ];
+  if(d[5])lines.push("Install: "+d[5]);
+  if(prompt)lines.push("","Prompt text (from the user):",prompt.slice(0,1000));
+  lines.push("","Rules: use only Maven's existing capabilities. Do not invent effects Maven cannot render. If the reference needs something unsupported, say so and offer the closest supported version. Do not fetch or run code from the source link.");
+  if(coded)lines.push("Note: this reference is coded (WebGL, Three.js or HTML). Maven cannot run that code, so describe the closest supported motion instead.");
+  return lines.join("\n");
+}
+function renderMine(){
+  const m=$("mine");m.textContent="";
+  if(!S.mine.length){m.append(el("div",{class:"empty",textContent:"No prompts of your own yet. Paste one above."}));return}
+  S.mine.forEach((p,i)=>{
+    const box=el("div",{class:"manual"});
+    const cp=el("button",{type:"button",textContent:"Copy"});
+    cp.onclick=async()=>{try{await navigator.clipboard.writeText(p.text);cp.textContent="Copied ✓"}catch(e){cp.textContent="Copy failed";showManualCopy(box,p.text)}setTimeout(()=>cp.textContent="Copy",1500)};
+    const del=el("button",{type:"button",textContent:"Delete"});
+    del.onclick=()=>{if(confirm("Delete this prompt?")){S.mine.splice(i,1);save();renderMine()}};
+    m.append(el("div",{class:"card"},
+      el("div",{class:"meta"},el("strong",{textContent:p.title,style:"color:var(--ink)"}),el("span",{textContent:p.tags||""})),
+      el("pre",{textContent:p.text}),el("div",{class:"row"},cp,del),box));
+  });
+}
+$("q").oninput=e=>{query=e.target.value;render()};
+$("savedBtn").onclick=e=>{onlySaved=!onlySaved;e.target.classList.toggle("on",onlySaved);render()};
+$("addMine").onclick=()=>{
+  const text=$("mx").value.trim();if(!text){$("mx").focus();return}
+  S.mine.unshift({title:$("mt").value.trim()||"Untitled prompt",text,tags:$("mg").value.trim()});
+  save();["mt","mx","mg"].forEach(i=>$(i).value="");renderMine();
+};
+$("exp").onclick=()=>{
+  const a=el("a",{href:URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:"application/json"})),download:"motion-prompt-library.json"});
+  a.click();
+};
+$("imp").onclick=()=>$("file").click();
+$("file").onchange=async e=>{
+  try{const j=JSON.parse(await e.target.files[0].text());
+    S={saved:j.saved||{},notes:j.notes||{},mine:Array.isArray(j.mine)?j.mine:[],prompts:j.prompts||{},fmt:j.fmt||{}};save();render();renderMine()}
+  catch(err){alert("That file couldn't be read.")}
+};
+chips();render();renderMine();
+</script>
+</body>
+</html>

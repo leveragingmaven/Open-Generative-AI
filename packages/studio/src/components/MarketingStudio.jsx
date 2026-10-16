@@ -893,6 +893,7 @@ export default function MarketingStudio({ apiKey, droppedFiles, onFilesHandled, 
           apiKey={apiKey}
           motionTarget={motionTarget}
           onExit={() => setView("ads")}
+          onOpenMavenChat={() => setView("ads")}
         />
       ) : (
       <>
