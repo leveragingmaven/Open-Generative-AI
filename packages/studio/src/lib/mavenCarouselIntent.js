@@ -8,6 +8,7 @@
 // approves before anything renders locally.
 
 import { CAROUSEL_RECIPE_ID, CAROUSEL_SKILL_ID } from "./motion/carousel/CarouselConstants.js";
+import { libraryOutputChoice } from "./mavenVideoIntent.js";
 
 const CAROUSEL_WORD = /\bcarousel\b/i;
 const ANIMATED_SLIDES = /\b(animated|live|moving)\s+slides?\b/i;
@@ -19,6 +20,10 @@ const SLIDE_DECK = /\bslide\s*deck\b/i;
 export function isCarouselRequest(text = "") {
   const value = String(text || "");
   if (!value.trim()) return false;
+  // A Motion Prompt Library instruction names its output on the first line; that choice
+  // wins over keywords that appear later in a pasted prompt.
+  const libraryChoice = libraryOutputChoice(value);
+  if (libraryChoice) return libraryChoice === "carousel";
   return CAROUSEL_WORD.test(value) || ANIMATED_SLIDES.test(value) || SLIDE_DECK.test(value);
 }
 

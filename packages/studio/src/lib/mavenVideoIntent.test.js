@@ -1,6 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isVideoGenerationRequest, parseVideoRequestOptions, extractGeneratedVideoUrls } from './mavenVideoIntent.js';
+import { isVideoGenerationRequest, parseVideoRequestOptions, extractGeneratedVideoUrls, libraryOutputChoice } from './mavenVideoIntent.js';
+
+const libraryVideo = [
+  'Create a short video about One orange dot drives every scene (15s 2D film).',
+  '',
+  'Reference',
+  'Title: One orange dot drives every scene (15s 2D film)',
+  'Category: Motion graphics',
+  'Creator: rossaxbt',
+  'Source: https://promptmotion.org/prompts/p-f6775974',
+  '',
+  'Prompt text (from the user):',
+  'Make an animated carousel of three slides with a camera pan and a traveling dot.',
+  '',
+  "Rules: use only Maven's existing capabilities. Do not fetch or run code from the source link.",
+].join('\n');
+
+test('a Motion Prompt Library video instruction routes to video even when the pasted prompt says carousel', () => {
+  assert.equal(libraryOutputChoice(libraryVideo), 'video');
+  assert.equal(isVideoGenerationRequest(libraryVideo), true);
+  assert.equal(isVideoGenerationRequest(libraryVideo.replace(/\n/g, '\r\n')), true);
+  // An attached image still keeps the request out of text-to-video, as before.
+  assert.equal(isVideoGenerationRequest(libraryVideo, { hasImageReference: true }), false);
+});
+
+test('a Motion Prompt Library carousel instruction is not routed to video', () => {
+  const carousel = libraryVideo.replace('Create a short video about', 'Make an animated carousel about')
+    .replace('Make an animated carousel of three slides', 'Create a video of three slides');
+  assert.equal(libraryOutputChoice(carousel), 'carousel');
+  assert.equal(isVideoGenerationRequest(carousel), false);
+});
+
+test('ordinary multi-line messages keep keyword detection across the whole message', () => {
+  const ordinary = 'Create a short video about the launch.\nThen add a carousel later.';
+  assert.equal(libraryOutputChoice(ordinary), null);
+  assert.equal(isVideoGenerationRequest(ordinary), true);
+  assert.equal(isVideoGenerationRequest('Please help.\nCreate a video of a red fox.'), true);
+  assert.equal(isVideoGenerationRequest('Explain this.\nWhat makes a good video prompt?'), false);
+});
 
 test('detects text-to-video requests, including duration and model settings', () => {
   assert.equal(isVideoGenerationRequest('Create a five-second 9:16 video of a red fox at 720p.'), true);

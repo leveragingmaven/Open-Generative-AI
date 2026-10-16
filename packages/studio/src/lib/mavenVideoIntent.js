@@ -18,10 +18,31 @@ export function isImageToVideoRequest(message) {
   return I2V_INTENT.test(text) || EXPLICIT_I2V_MODEL.test(text);
 }
 
+// Instructions copied from My Motion Prompt Library state the output on their first line
+// and carry a fixed "Reference / Title:" block. Only that exact structure is treated as
+// explicit, so ordinary multi-line messages keep the keyword-based detection.
+const LIBRARY_VIDEO_LINE = /^Create a short video about .+\.$/;
+const LIBRARY_CAROUSEL_LINE = /^Make an animated carousel about .+\.$/;
+const LIBRARY_REFERENCE_BLOCK = /\nReference\nTitle: /;
+
+/** 'video' or 'carousel' when the message is a Motion Prompt Library instruction with an
+ *  explicit first-line output request; null for every other message. */
+export function libraryOutputChoice(message) {
+  if (typeof message !== 'string') return null;
+  const text = message.replace(/\r\n/g, '\n').trim();
+  if (!LIBRARY_REFERENCE_BLOCK.test(text)) return null;
+  const firstLine = text.split('\n', 1)[0].trim();
+  if (LIBRARY_VIDEO_LINE.test(firstLine)) return 'video';
+  if (LIBRARY_CAROUSEL_LINE.test(firstLine)) return 'carousel';
+  return null;
+}
+
 export function isVideoGenerationRequest(message, { hasImageReference = false } = {}) {
   if (typeof message !== 'string') return false;
   const text = message.trim();
   if (!text || text.length > 2000 || ANALYSIS_START.test(text)) return false;
+  const libraryChoice = libraryOutputChoice(text);
+  if (libraryChoice) return libraryChoice === 'video' && !hasImageReference;
   if (hasImageReference || IMAGE_EDIT_WORDS.test(text) || isImageToVideoRequest(text)) return false;
   return CREATE_VIDEO_VERB.test(text) && VIDEO_NOUN.test(text);
 }

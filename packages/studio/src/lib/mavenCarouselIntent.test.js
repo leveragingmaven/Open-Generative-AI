@@ -20,6 +20,36 @@ test("isCarouselRequest ignores ordinary video and image requests", () => {
   }
 });
 
+const libraryCarousel = [
+  'Make an animated carousel about One orange dot drives every scene (15s 2D film).',
+  '',
+  'Reference',
+  'Title: One orange dot drives every scene (15s 2D film)',
+  'Category: Motion graphics',
+  'Creator: rossaxbt',
+  'Source: https://promptmotion.org/prompts/p-f6775974',
+  '',
+  'Prompt text (from the user):',
+  'Create a short video of a dot that moves across the screen.',
+  '',
+  "Rules: use only Maven's existing capabilities. Do not fetch or run code from the source link.",
+].join('\n');
+
+test("a Motion Prompt Library carousel instruction routes to carousel even when the pasted prompt says video", () => {
+  assert.equal(isCarouselRequest(libraryCarousel), true);
+  assert.equal(isCarouselRequest(libraryCarousel.replace(/\n/g, '\r\n')), true);
+});
+
+test("a Motion Prompt Library video instruction is not routed to carousel", () => {
+  const video = libraryCarousel.replace('Make an animated carousel about', 'Create a short video about');
+  assert.equal(isCarouselRequest(video), false);
+});
+
+test("ordinary multi-line messages keep carousel keyword detection across the whole message", () => {
+  assert.equal(isCarouselRequest('Create a video about tea.\nAlso make a carousel for Instagram.'), true);
+  assert.equal(isCarouselRequest('Create a short video about tea.\nNo slides needed.'), false);
+});
+
 test("extractCarouselBrief trims the message", () => {
   assert.equal(extractCarouselBrief("  make a carousel about tea  "), "make a carousel about tea");
 });
