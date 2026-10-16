@@ -8,7 +8,8 @@
 
 import crypto from 'node:crypto';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
-import { creativeObjectKey, ownedCreativeObjectKey } from './creativeMediaStorage.js';
+import { copyProviderMedia, creativeObjectKey, ownedCreativeObjectKey } from './creativeMediaStorage.js';
+import { mavenLibraryReferenceId } from './mavenChatCreativeAsset.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
 import { maxBytesFor, validateUploadFile } from './uploadSecurity.js';
 import { createServerVisionTextIntelligence } from './serverVisionTextIntelligence.js';
@@ -216,6 +217,130 @@ export function ownedCarouselImageKey(reference, accountId) {
   } catch {
     return null;
   }
+}
+
+const SESSION_ASSET_ID = /^asset_[A-Za-z0-9_-]{1,190}$/;
+const CREATIVE_ASSET_ID = /^asset_[a-f0-9]{64}$/;
+const LIBRARY_REFERENCE_ID = /^asset_library_[a-f0-9]{64}$/;
+
+function isImageAsset(asset) {
+  const modality = String(asset?.metadata?.modality || asset?.kind || asset?.type || '').toLowerCase();
+  return modality.includes('image');
+}
+
+function emptyLayerAssets() {
+  return { background: null, foreground: null, images: [], attachedImageCount: 0, needsSelection: false, message: null };
+}
+
+/** The account-scoped asset id for a session-only upload, content addressed by its source URL. */
+function sessionImageAssetId(accountId, url) {
+  return `asset_${crypto.createHash('sha256').update(JSON.stringify([accountId, 'motion-carousel-session-image', String(url)])).digest('hex')}`;
+}
+
+function ownedImageFromAsset(asset, accountId, attachment) {
+  if (!asset || String(asset.accountId) !== accountId || !isImageAsset(asset)) return null;
+  const key = ownedCreativeObjectKey(asset, accountId);
+  if (!key) return null;
+  return {
+    assetId: asset.id,
+    name: String(attachment?.filename || asset.title || 'photo'),
+    storageReference: `${STORAGE_SCHEME}${key}`,
+    contentType: String(asset.metadata?.contentType || '') || null,
+    origin: 'library',
+  };
+}
+
+async function findOwnedAssetByLibraryReference(repository, accountId, creatorIdentityKey, referenceId) {
+  if (!repository || typeof repository.list !== 'function') return null;
+  let assets = [];
+  try { assets = await repository.list({ accountId }); } catch { return null; }
+  return (Array.isArray(assets) ? assets : []).find((asset) => String(asset?.accountId) === accountId
+    && String(asset?.creatorIdentityKey || '') === creatorIdentityKey
+    && mavenLibraryReferenceId(asset) === referenceId) || null;
+}
+
+/**
+ * Turn a conversation's image attachments into Continuous Layers references.
+ *
+ * An image this account already owns in the Creative Library is reused by
+ * recomputing its owned `storage://` key. A session-only upload (an image the
+ * customer attached in chat but never saved) is copied into the account's own
+ * object namespace with the existing secure provider-media copy path, so the
+ * native renderer only ever reads account-owned objects, never an external URL.
+ *
+ * Roles stay conservative: a single image is the background. A PNG content type is
+ * not proof of an alpha channel, so with more than one image the foreground is left
+ * empty and the customer is asked to choose rather than guessing which image is the
+ * transparent overlay.
+ */
+export async function resolveConversationImageAssets(identity, attachments, {
+  repository = null,
+  storage = null,
+  copyMedia = copyProviderMedia,
+} = {}) {
+  const accountId = accountIdOf(identity);
+  const creatorIdentityKey = identityKeyOf(identity);
+  if (!accountId || !creatorIdentityKey) return emptyLayerAssets();
+
+  let repositoryInstance = repository;
+  const getRepository = () => {
+    repositoryInstance ||= new MySqlCreativeAssetRepository();
+    return repositoryInstance;
+  };
+
+  const images = [];
+  const seen = new Set();
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (!attachment || attachment.kind !== 'image' || attachment.temporaryUrl === true) continue;
+    const id = typeof attachment === 'string' ? attachment : attachment.attachmentId;
+    if (typeof id !== 'string' || !SESSION_ASSET_ID.test(id)) continue;
+    let image = null;
+    try {
+      if (CREATIVE_ASSET_ID.test(id)) {
+        const asset = await getRepository().get(id, { accountId });
+        image = ownedImageFromAsset(asset, accountId, attachment);
+      } else if (LIBRARY_REFERENCE_ID.test(id)) {
+        const asset = await findOwnedAssetByLibraryReference(getRepository(), accountId, creatorIdentityKey, id);
+        image = ownedImageFromAsset(asset, accountId, attachment);
+      } else {
+        const url = typeof attachment.url === 'string' ? attachment.url : '';
+        if (!/^https:\/\//i.test(url)) continue;
+        const assetId = sessionImageAssetId(accountId, url);
+        const stored = await copyMedia({ accountId, assetId, url, kind: 'image', ...(storage ? { storage } : {}) });
+        const storageReference = String(stored?.storageReference || '');
+        if (!ownedCarouselImageKey(storageReference, accountId)) continue;
+        image = {
+          assetId,
+          name: String(attachment.filename || 'attached photo'),
+          storageReference,
+          contentType: String(stored?.contentType || '') || null,
+          origin: 'session',
+        };
+      }
+    } catch {
+      image = null;
+    }
+    if (!image?.storageReference || seen.has(image.storageReference)) continue;
+    seen.add(image.storageReference);
+    images.push(image);
+  }
+  return assignLayerRoles(images);
+}
+
+function assignLayerRoles(images) {
+  const base = { background: null, foreground: null, images, attachedImageCount: images.length, needsSelection: false, message: null };
+  if (!images.length) {
+    return { ...base, message: 'No images were attached to this storyboard. Add a background photo, and a transparent PNG foreground, below.' };
+  }
+  if (images.length === 1) return { ...base, background: images[0] };
+  // A PNG file type is not evidence of an alpha channel, so a lone PNG beside other
+  // images is not assumed to be the transparent foreground. Ask the customer instead.
+  return {
+    ...base,
+    background: images[0],
+    needsSelection: true,
+    message: 'More than one image was attached, so Maven did not guess which is the transparent PNG foreground. Choose the foreground below.',
+  };
 }
 
 async function readBodyBytes(body, maxBytes) {

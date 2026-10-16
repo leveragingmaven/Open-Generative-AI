@@ -8,6 +8,7 @@ import {
 } from "../../lib/motion/carousel/CarouselConstants.js";
 import { CAROUSEL_VISUAL_STYLES, CAROUSEL_DEFAULT_VISUAL_STYLE } from "../../lib/motion/carousel/CarouselVisualStyles.js";
 import { resolveSceneMode } from "../../lib/motion/carousel/CarouselPlanner.js";
+import { transferredLayerAssets, carouselRenderDeck } from "../../lib/motion/carousel/CarouselLayerAssets.js";
 import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 import { readStoredDashboardSessionId } from "design-agent";
@@ -79,6 +80,9 @@ export default function MavenCarouselPanel({ onExit }) {
   const [photos, setPhotos] = useState([]);
   // Continuous Layers: storage references for an optional background photo and transparent PNG.
   const [layerAssets, setLayerAssets] = useState({ background: null, foreground: null });
+  // What Maven did with the images attached in chat: a hint when it could not
+  // confidently assign a role, or that none were attached at all.
+  const [layerAssetNotice, setLayerAssetNotice] = useState(null);
   const [soundtrack, setSoundtrack] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [layoutNote, setLayoutNote] = useState(null);
@@ -139,6 +143,14 @@ export default function MavenCarouselPanel({ onExit }) {
         // The selector starts on the mode the customer approved in chat.
         setSceneMode(resolveSceneMode(data.deck.sceneMode));
         setStoryboard(data.storyboard || null);
+        // Images attached in chat arrive as account-owned references. Fill the
+        // Continuous Layers fields automatically; a manual upload still replaces them.
+        const transferred = transferredLayerAssets(data.assets);
+        setLayerAssets((current) => ({
+          background: current.background ?? transferred.layerAssets.background,
+          foreground: current.foreground ?? transferred.layerAssets.foreground,
+        }));
+        setLayerAssetNotice(transferred.notice);
         setClarifications(data.clarifications || []);
         setWarnings(data.warnings || []);
         setApproved(true);
@@ -336,7 +348,7 @@ export default function MavenCarouselPanel({ onExit }) {
       // worker hands to the renderer. The sheet's visual style sets the frame.
       const data = await post({
         action: "render",
-        deck: { ...deck, sceneMode, ...(sceneMode === "layers" ? { layers: { ...layerAssets }, audio: soundtrack } : {}) },
+        deck: carouselRenderDeck(deck, { sceneMode, layerAssets, soundtrack }),
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -559,6 +571,7 @@ export default function MavenCarouselPanel({ onExit }) {
           {sceneMode === "layers" ? (
             <div className="mt-3 space-y-2 text-xs text-[var(--ms-color-text-secondary)]">
               <p>One camera-panned scene across the deck. Add an optional background photo and a transparent PNG that stays on screen across slides.</p>
+              {layerAssetNotice ? <p className="rounded border border-[var(--ms-color-border-subtle)] bg-[var(--ms-color-background-elevated)] px-2 py-1 text-[11px] text-[var(--ms-color-text-muted)]">{layerAssetNotice}</p> : null}
               <label className="block">Background photo
                 <input type="file" accept="image/jpeg,image/png,image/webp" className="mt-1 block w-full" disabled={uploading} onChange={(e) => { uploadLayer("background", e.target.files?.[0]); e.target.value = ""; }} aria-label="Add a background photo for Continuous Layers" />
               </label>

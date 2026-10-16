@@ -27,7 +27,7 @@ function approvedMessages({ identity = IDENTITY, conversationId = CONVERSATION, 
   ];
 }
 
-function services({ messages, owned = true } = {}) {
+function services({ messages, owned = true, attachments = [] } = {}) {
   return {
     ownershipService: {
       verifyOwnedSession: async () => {
@@ -35,7 +35,7 @@ function services({ messages, owned = true } = {}) {
         return { ok: true };
       },
     },
-    conversationReader: { read: async () => ({ messages }) },
+    conversationReader: { read: async () => ({ messages, attachments }) },
   };
 }
 
@@ -94,4 +94,41 @@ test("a cancellation after approval returns 404", async () => {
 test("a conversation that is not owned by this caller returns 404", async () => {
   const response = await get({ messages: approvedMessages(), owned: false });
   assert.equal(response.status, 404);
+});
+
+test("the approved storyboard carries typed layer assets resolved from the conversation", async () => {
+  const seen = [];
+  const response = await handleApprovedCarouselGet({
+    identity: IDENTITY,
+    conversationId: CONVERSATION,
+    deps: {
+      services: services({ messages: approvedMessages(), attachments: [{ attachmentId: "asset_x", kind: "image", url: "https://cdn.muapi.ai/x.jpg" }] }),
+      resolveConversationImageAssets: async (identity, attachments) => {
+        seen.push({ identity, attachments });
+        return { background: { storageReference: "storage://owned/bg" }, foreground: { storageReference: "storage://owned/fg" }, message: null };
+      },
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.assets.background.storageReference, "storage://owned/bg");
+  assert.equal(body.assets.foreground.storageReference, "storage://owned/fg");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].identity.accountId, "1");
+  assert.equal(seen[0].attachments[0].attachmentId, "asset_x");
+});
+
+test("an asset-resolution failure never blanks the approved storyboard", async () => {
+  const response = await handleApprovedCarouselGet({
+    identity: IDENTITY,
+    conversationId: CONVERSATION,
+    deps: {
+      services: services({ messages: approvedMessages() }),
+      resolveConversationImageAssets: async () => { throw new Error("boom"); },
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.assets, null);
 });

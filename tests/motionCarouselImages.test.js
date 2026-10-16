@@ -15,8 +15,10 @@ import {
   matchesImageSignature,
   ownedCarouselImageKey,
   planCarouselWithImages,
+  resolveConversationImageAssets,
   saveCarouselImage,
 } from '../src/lib/motionCarouselImages.js';
+import { mavenLibraryReferenceId } from '../src/lib/mavenChatCreativeAsset.js';
 import { creativeObjectKey } from '../src/lib/creativeMediaStorage.js';
 
 const ACCOUNT = 'acct_1';
@@ -299,4 +301,119 @@ test('a Motion Carousel photo saves to the Creative Library with a non-null conv
 test('a deck without uploaded photos is passed to the renderer unchanged', async () => {
   const deck = { slides: [{ role: 'hook', headline: 'H', visual: { type: 'icon' } }] };
   assert.equal(await materializeCarouselImages({ deck, outDir: '/tmp/out', accountId: ACCOUNT }), deck);
+});
+
+// ── Maven Chat image handoff: conversation attachments → owned layer references ──
+
+function ownedImageAsset(id, { accountId = ACCOUNT, contentType = 'image/jpeg', title = 'Desk' } = {}) {
+  return {
+    id,
+    accountId,
+    creatorIdentityKey: IDENTITY.identityKey,
+    title,
+    storageReference: `storage://${creativeObjectKey(accountId, id)}`,
+    metadata: { modality: 'image', contentType },
+  };
+}
+
+test('an owned Creative Library image is reused as an owned layer reference without any copy', async () => {
+  const reads = [];
+  const repository = { async get(id, { accountId }) { reads.push({ id, accountId }); return id === ASSET && accountId === ACCOUNT ? ownedImageAsset(id) : null; } };
+  const copyMedia = async () => { throw new Error('an owned asset must never be re-downloaded'); };
+  const result = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: ASSET, kind: 'image', url: 'https://signed.example/desk.jpg' }], { repository, copyMedia });
+  assert.equal(result.background.storageReference, `storage://${creativeObjectKey(ACCOUNT, ASSET)}`);
+  assert.equal(result.background.origin, 'library');
+  assert.equal(result.attachedImageCount, 1);
+  assert.equal(result.foreground, null);
+  assert.deepEqual(reads, [{ id: ASSET, accountId: ACCOUNT }]);
+});
+
+test("another account's asset id is never resolved into this account's layers", async () => {
+  const repository = { async get() { return ownedImageAsset(ASSET, { accountId: 'acct_2' }); } };
+  const copyMedia = async () => { throw new Error('must not copy an untrusted reference'); };
+  const result = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: ASSET, kind: 'image' }], { repository, copyMedia });
+  assert.equal(result.background, null);
+  assert.equal(result.attachedImageCount, 0);
+  assert.equal(result.needsSelection, false);
+});
+
+test('a Creative Library reference is mapped back to the owned asset by its library id', async () => {
+  const asset = ownedImageAsset(ASSET);
+  const repository = { async list({ accountId }) { return accountId === ACCOUNT ? [asset] : []; } };
+  const reference = mavenLibraryReferenceId(asset);
+  const result = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: reference, kind: 'image' }], { repository });
+  assert.equal(result.background.storageReference, `storage://${creativeObjectKey(ACCOUNT, ASSET)}`);
+  assert.equal(result.background.origin, 'library');
+});
+
+test('a session-only upload is copied through the secure provider path into an owned reference', async () => {
+  const copies = [];
+  const copyMedia = async ({ accountId, assetId, url, kind }) => {
+    copies.push({ accountId, assetId, url, kind });
+    return { key: creativeObjectKey(accountId, assetId), storageReference: `storage://${creativeObjectKey(accountId, assetId)}`, contentType: 'image/jpeg' };
+  };
+  const result = await resolveConversationImageAssets(
+    IDENTITY,
+    [{ attachmentId: 'asset_session_1', kind: 'image', url: 'https://cdn.muapi.ai/uploads/desk.jpg', filename: 'desk.jpg' }],
+    { copyMedia },
+  );
+  assert.equal(copies.length, 1);
+  assert.equal(copies[0].accountId, ACCOUNT);
+  assert.equal(copies[0].kind, 'image');
+  assert.equal(copies[0].url, 'https://cdn.muapi.ai/uploads/desk.jpg');
+  assert.equal(result.background.origin, 'session');
+  assert.match(result.background.storageReference, new RegExp(`^storage://${creativeObjectKey(ACCOUNT, copies[0].assetId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+});
+
+test('a copy that does not yield an owned storage reference is discarded rather than attached', async () => {
+  const copyMedia = async () => ({ storageReference: 'https://not-owned.example/desk.jpg', contentType: 'image/jpeg' });
+  const result = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: 'asset_session_1', kind: 'image', url: 'https://cdn.muapi.ai/x.jpg' }], { copyMedia });
+  assert.equal(result.background, null);
+  assert.equal(result.attachedImageCount, 0);
+});
+
+test('no image attachments leaves the layers empty and asks the customer to upload', async () => {
+  const result = await resolveConversationImageAssets(IDENTITY, [], {});
+  assert.deepEqual({ background: result.background, foreground: result.foreground }, { background: null, foreground: null });
+  assert.equal(result.attachedImageCount, 0);
+  assert.match(result.message, /Add a background photo/);
+});
+
+test('one image becomes the background; a PNG beside a photo is not assumed transparent and asks for a choice', async () => {
+  const jpeg = ownedImageAsset(ASSET, { contentType: 'image/jpeg', title: 'Photo' });
+  const png = ownedImageAsset(OTHER_ASSET, { contentType: 'image/png', title: 'Cutout' });
+  const repository = { async get(id) { return id === ASSET ? jpeg : id === OTHER_ASSET ? png : null; } };
+  const single = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: ASSET, kind: 'image' }], { repository });
+  assert.equal(single.background.storageReference, `storage://${creativeObjectKey(ACCOUNT, ASSET)}`);
+  assert.equal(single.foreground, null);
+  assert.equal(single.needsSelection, false);
+
+  // A PNG content type is not proof of an alpha channel, so the pair is not split by guesswork.
+  const pair = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: ASSET, kind: 'image' }, { attachmentId: OTHER_ASSET, kind: 'image' }], { repository });
+  assert.equal(pair.background.storageReference, `storage://${creativeObjectKey(ACCOUNT, ASSET)}`);
+  assert.equal(pair.foreground, null);
+  assert.equal(pair.needsSelection, true);
+  assert.match(pair.message, /transparent PNG foreground/);
+});
+
+test('two images whose roles are ambiguous are not silently split, and a choice is requested', async () => {
+  const first = ownedImageAsset(ASSET, { contentType: 'image/jpeg', title: 'One' });
+  const second = ownedImageAsset(OTHER_ASSET, { contentType: 'image/jpeg', title: 'Two' });
+  const repository = { async get(id) { return id === ASSET ? first : id === OTHER_ASSET ? second : null; } };
+  const result = await resolveConversationImageAssets(IDENTITY, [{ attachmentId: ASSET, kind: 'image' }, { attachmentId: OTHER_ASSET, kind: 'image' }], { repository });
+  assert.equal(result.background.storageReference, `storage://${creativeObjectKey(ACCOUNT, ASSET)}`);
+  assert.equal(result.foreground, null);
+  assert.equal(result.needsSelection, true);
+  assert.match(result.message, /foreground/);
+});
+
+test('the same owned image attached under two labels resolves to a single layer reference', async () => {
+  const asset = ownedImageAsset(ASSET);
+  const repository = { async get() { return asset; }, async list() { return [asset]; } };
+  const result = await resolveConversationImageAssets(IDENTITY, [
+    { attachmentId: ASSET, kind: 'image' },
+    { attachmentId: mavenLibraryReferenceId(asset), kind: 'image' },
+  ], { repository });
+  assert.equal(result.attachedImageCount, 1);
+  assert.equal(result.images.length, 1);
 });

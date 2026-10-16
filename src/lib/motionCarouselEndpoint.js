@@ -27,7 +27,7 @@ import { describeRenderer } from './motionCarouselRendererSelection.js';
 import { carouselContentType, ownedCarouselFile, safeCarouselFileName, resolveCarouselStorageMode } from './motionCarouselStorage.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
 import { publishMotionCarouselSlides } from './motionCarouselPublishing.js';
-import { CarouselImageError, handleCarouselImageUpload, loadCarouselImages, planCarouselWithImages } from './motionCarouselImages.js';
+import { CarouselImageError, handleCarouselImageUpload, loadCarouselImages, planCarouselWithImages, resolveConversationImageAssets } from './motionCarouselImages.js';
 import {
   assertApprovedStyleSheet,
   assertDeckStyleSheetApproved,
@@ -225,6 +225,20 @@ export async function handleApprovedCarouselGet({ identity, conversationId, deps
     const plan = resolveCarouselApprovedPlan(approval);
     // The approved sheet and its fingerprint travel on the deck, so render validates the same approval.
     const deck = attachApprovedStyleSheet(plan.deck, approval.sheet, approval.sheetFingerprint);
+    // Continuous Layers: resolve the conversation's image attachments into account-owned
+    // background/foreground references. A resolution failure must never blank the approved
+    // storyboard, so it degrades to "no assets attached".
+    const resolveAssets = deps.resolveConversationImageAssets || resolveConversationImageAssets;
+    let assets = null;
+    try {
+      assets = await resolveAssets(identity, read?.attachments || [], {
+        repository: deps.repository || null,
+        storage: deps.storage || null,
+        ...(deps.copyMedia ? { copyMedia: deps.copyMedia } : {}),
+      });
+    } catch {
+      assets = null;
+    }
     return Response.json({
       ok: true,
       action: 'approved',
@@ -236,6 +250,7 @@ export async function handleApprovedCarouselGet({ identity, conversationId, deps
       warnings: plan.warnings,
       preset: plan.preset,
       brand: plan.brand,
+      assets,
     });
   } catch {
     // Unowned or unreadable conversations fail closed to the same answer as a missing approval.
