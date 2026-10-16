@@ -121,7 +121,7 @@ const CREATIVE_DIRECTION_RULES = Object.freeze([
   { label: "named brand colours", status: "partial", note: "colour names in the brief are not read; set the colours in Motion Design", pattern: /\b(?:charcoal|champagne|gold|pink|palette|colou?rs?)\b/i },
 ]);
 
-export const CAROUSEL_SCENE_MODES = Object.freeze(["standard", "continuous"]);
+export const CAROUSEL_SCENE_MODES = Object.freeze(["standard", "continuous", "layers"]);
 export const CAROUSEL_DEFAULT_SCENE_MODE = "standard";
 
 /** Any value that is not a known scene mode becomes Standard. */

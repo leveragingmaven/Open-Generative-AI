@@ -136,7 +136,8 @@ export function buildNativeSpec({
 
   // `continuous` draws one world-space scene across the deck (background and camera carry over
   // slide boundaries). Any other value keeps the standard per-slide look.
-  const look = String(deck.sceneMode || '').trim() === 'continuous' ? 'continuous' : 'standard';
+  const mode = String(deck.sceneMode || '').trim();
+  const look = mode === 'continuous' ? 'continuous' : mode === 'layers' ? 'layers' : 'standard';
   const frames = Math.round(fps * durationSeconds);
   return {
     width,

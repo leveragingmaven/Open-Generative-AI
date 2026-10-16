@@ -20,7 +20,8 @@ import { loadFontRegistry, buildFontContext, fontFaceCss, allFaceAliases, preset
 import { buildNativeSpec, NativeSpecError } from './spec.js';
 import { composeSlideFrame, thumbnailFrameIndex, slideOutputName } from './timeline.js';
 import { CONTINUOUS_SCENE, composeContinuousFrame } from './continuousScene.js';
-import { createRasterizer, imageDataUriFromFile } from './raster.js';
+import { createRasterizer, imageDataUriFromFile, imageDataUri, sharp } from './raster.js';
+import { LAYERED_SCENE, composeLayeredFrame } from './layeredScene.js';
 import { createRenderCache, CACHE_DIR } from './renderCache.js';
 import { buildAudioTimeline, writeWav, MOODS } from './audio.js';
 import { nativeRenderRevision } from './renderRevision.js';
@@ -45,6 +46,7 @@ export function safeExportPreset(presetId) {
  * timeline and the camera and background carry across the slide boundary.
  */
 function composeFor(spec, slideIndex, frameIndex, fontStyle, imageResolver) {
+  if (spec.look === LAYERED_SCENE) return composeLayeredFrame({ spec, slideIndex, frameIndex });
   if (spec.look !== CONTINUOUS_SCENE) return composeSlideFrame({ spec, slideIndex, frameIndex, fontStyle, imageResolver });
   return composeContinuousFrame({ spec, slideIndex, frameIndex, fontStyle, imageResolver });
 }
@@ -126,6 +128,56 @@ export async function resolveDeckAudio({ deck, outDir, loadFs = null } = {}) {
 }
 
 /** The cache key for one slide: content, renderer revision, style and geometry. */
+/**
+ * Loads the Continuous Layers assets the deck names beside it. The background is fitted to the
+ * full deck width once (so the camera can pan it), and the foreground keeps its alpha channel.
+ * Missing or unreadable files become warnings; the scene then renders without them.
+ */
+export async function prepareLayerAssets({ deck, outDir, spec, loadFs = null } = {}) {
+  const fs = loadFs || { readFile };
+  const warnings = [];
+  const refs = deck?.layers || {};
+  const load = async (label, ref) => {
+    if (!ref) return null;
+    const name = safeImageName(ref);
+    if (!name) {
+      warnings.push(`${label} "${ref}" is not a file beside the deck; ignored`);
+      return null;
+    }
+    try {
+      return await fs.readFile(join(outDir, name));
+    } catch {
+      warnings.push(`${label} "${name}" could not be read`);
+      return null;
+    }
+  };
+
+  let background = null;
+  const backgroundBytes = await load('background', refs.background);
+  if (backgroundBytes) {
+    try {
+      const worldWidth = spec.width * spec.slides.length;
+      const jpeg = await sharp(backgroundBytes).resize(worldWidth, spec.height, { fit: 'cover' }).jpeg({ quality: 85 }).toBuffer();
+      background = { dataUri: await imageDataUri(jpeg, { mime: 'image/jpeg' }) };
+    } catch {
+      warnings.push('background photo could not be decoded; ignored');
+    }
+  }
+
+  let foreground = null;
+  const foregroundBytes = await load('foreground', refs.foreground);
+  if (foregroundBytes) {
+    try {
+      const png = await sharp(foregroundBytes).resize(360, 360, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+      const meta = await sharp(png).metadata();
+      foreground = { dataUri: await imageDataUri(png), width: meta.width, height: meta.height };
+    } catch {
+      warnings.push('foreground PNG could not be decoded; ignored');
+    }
+  }
+  return { background, foreground, warnings };
+}
+
 export function slideCacheKey({ fingerprint, presetId, theme, fps, frames, width, height, revision = NATIVE_RENDERER_VERSION }) {
   return hashString([
     revision, fingerprint, presetId, theme?.surface || '', theme?.accent || '',
@@ -272,6 +324,11 @@ export function createNativeMotionRenderer({
     });
 
     const { map: imageMap, warnings: imageWarnings } = await prepareDeckImages({ deck, outDir });
+    if (spec.look === LAYERED_SCENE) {
+      // Continuous Layers: the background and foreground are loaded once, before the frame loop.
+      spec.layerAssets = await prepareLayerAssets({ deck, outDir, spec });
+      imageWarnings.push(...spec.layerAssets.warnings);
+    }
     // A track supplied with the deck replaces the synthesized bed for the full-deck
     // video; individually downloaded slides stay video-only in that case, which is
     // what an Instagram carousel actually is.
@@ -301,7 +358,10 @@ export function createNativeMotionRenderer({
     const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     // A continuous scene is one timeline: an edit to any slide moves the camera and background of
     // every slide, so every slide's key covers the whole deck. Standard keys are unchanged.
-    const sceneKey = spec.look === CONTINUOUS_SCENE
+    const layerNames = `${deck.layers?.background || ''}|${deck.layers?.foreground || ''}`;
+    const sceneKey = spec.look === LAYERED_SCENE
+      ? `layers|${hashString(spec.slides.map((_, i) => fingerprints?.[i] || String(i)).join('|'))}|${hashString(layerNames)}`
+      : spec.look === CONTINUOUS_SCENE
       ? `continuous|${hashString(spec.slides.map((_, i) => fingerprints?.[i] || String(i)).join('|'))}`
       : null;
     const slideKeys = spec.slides.map((slide, index) => slideCacheKey({

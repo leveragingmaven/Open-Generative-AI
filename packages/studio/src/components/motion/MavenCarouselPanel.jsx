@@ -77,6 +77,8 @@ export default function MavenCarouselPanel({ onExit }) {
   // "standard" keeps one scene per slide; "continuous" draws one camera-panned scene across the deck.
   const [sceneMode, setSceneMode] = useState("standard");
   const [photos, setPhotos] = useState([]);
+  // Continuous Layers: storage references for an optional background photo and transparent PNG.
+  const [layerAssets, setLayerAssets] = useState({ background: null, foreground: null });
   const [uploading, setUploading] = useState(false);
   const [layoutNote, setLayoutNote] = useState(null);
   const [deck, setDeck] = useState(null);
@@ -156,6 +158,24 @@ export default function MavenCarouselPanel({ onExit }) {
   }, []);
 
   // Uploads one photo into the Creative Library and keeps its asset id for planning.
+  // Uploads a Continuous Layers background or PNG foreground through the same secure upload.
+  const uploadLayer = useCallback(async (kind, file) => {
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/motion-carousel", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Upload failed (${response.status})`);
+      setLayerAssets((current) => ({ ...current, [kind]: data.image?.storageReference || null }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   const uploadPhoto = useCallback(async (file) => {
     if (!file) return;
     setUploading(true); setError(null);
@@ -296,7 +316,7 @@ export default function MavenCarouselPanel({ onExit }) {
       // worker hands to the renderer. The sheet's visual style sets the frame.
       const data = await post({
         action: "render",
-        deck: { ...deck, sceneMode },
+        deck: { ...deck, sceneMode, ...(sceneMode === "layers" ? { layers: { ...layerAssets } } : {}) },
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -307,7 +327,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, sceneMode, lastFingerprints]);
+  }, [post, deck, approved, presetId, sceneMode, lastFingerprints, layerAssets]);
 
   // Registers the finished slides as library assets (server, in order) and opens one
   // carousel draft in Publishing. The existing composer handles accounts and scheduling.
@@ -513,8 +533,22 @@ export default function MavenCarouselPanel({ onExit }) {
             <select value={sceneMode} onChange={(e) => setSceneMode(resolveSceneMode(e.target.value))} className="mt-1 w-full rounded bg-[var(--ms-color-background-elevated)] border border-[var(--ms-color-border-subtle)] px-2 py-1.5 text-white">
               <option value="standard">Standard — one scene per slide</option>
               <option value="continuous">Continuous — one camera-panned scene across the deck</option>
+              <option value="layers">Continuous Layers — camera scene with a persistent foreground</option>
             </select>
           </label>
+          {sceneMode === "layers" ? (
+            <div className="mt-3 space-y-2 text-xs text-[var(--ms-color-text-secondary)]">
+              <p>One camera-panned scene across the deck. Add an optional background photo and a transparent PNG that stays on screen across slides.</p>
+              <label className="block">Background photo
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="mt-1 block w-full" disabled={uploading} onChange={(e) => { uploadLayer("background", e.target.files?.[0]); e.target.value = ""; }} aria-label="Add a background photo for Continuous Layers" />
+              </label>
+              <p>{layerAssets.background ? "Background added" : "No background yet: a dark gradient is used."}</p>
+              <label className="block">Transparent PNG foreground
+                <input type="file" accept="image/png" className="mt-1 block w-full" disabled={uploading} onChange={(e) => { uploadLayer("foreground", e.target.files?.[0]); e.target.value = ""; }} aria-label="Add a transparent PNG foreground for Continuous Layers" />
+              </label>
+              <p>{layerAssets.foreground ? "Foreground added" : "No foreground yet."}</p>
+            </div>
+          ) : null}
           <button type="button" onClick={planStoryboard} disabled={busy !== null || !sheetApproval} className="mt-3 w-full rounded bg-[var(--ms-color-pink-primary)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
             {busy === "plan" ? "Planning…" : "Plan storyboard"}
           </button>

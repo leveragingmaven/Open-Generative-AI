@@ -244,11 +244,20 @@ async function readBodyBytes(body, maxBytes) {
  * native renderer reads images from there. Returns the deck unchanged when no
  * slide uses an uploaded photo.
  */
+/** Layer photos map to names beside the deck only when they were copied from this account's storage. */
+function withLayerNames(deck, names) {
+  if (!deck?.layers) return deck;
+  return { ...deck, layers: { background: names.get(deck.layers.background) || null, foreground: names.get(deck.layers.foreground) || null } };
+}
+
 export async function materializeCarouselImages({ deck, outDir, accountId, storage = null, fs = null }) {
   const references = [...new Set((deck?.slides || [])
     .map((slide) => slide?.visual?.image)
     .filter((value) => typeof value === 'string' && value.startsWith(STORAGE_SCHEME)))];
-  if (!references.length) return deck;
+  for (const ref of [deck?.layers?.background, deck?.layers?.foreground]) {
+    if (typeof ref === 'string' && ref.startsWith(STORAGE_SCHEME) && !references.includes(ref)) references.push(ref);
+  }
+  if (!references.length) return withLayerNames(deck, new Map());
   if (!storage) throw new CarouselImageError('carousel_image_unavailable', 503);
 
   const io = fs || await import('node:fs/promises');
@@ -268,7 +277,7 @@ export async function materializeCarouselImages({ deck, outDir, accountId, stora
     names.set(reference, name);
   }
   return {
-    ...deck,
+    ...withLayerNames(deck, names),
     slides: deck.slides.map((slide) => {
       const name = names.get(slide?.visual?.image);
       return name ? { ...slide, visual: { ...slide.visual, image: name } } : slide;

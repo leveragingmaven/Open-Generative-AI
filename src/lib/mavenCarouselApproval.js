@@ -72,6 +72,7 @@ function sceneModeFromPayload(payload) {
 }
 
 function sceneModeLabel(mode) {
+  if (mode === 'layers') return 'Continuous Layers — one camera-panned scene with a persistent foreground';
   return mode === 'continuous'
     ? 'Continuous — one camera-panned scene across the deck'
     : 'Standard — one scene per slide';

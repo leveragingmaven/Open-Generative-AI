@@ -80,7 +80,8 @@ function approvedMessagesFor(brief) {
 }
 
 test("scene mode is continuous only on an explicit request, otherwise standard", () => {
-  assert.deepEqual(CAROUSEL_SCENE_MODES, ["standard", "continuous"]);
+  // "layers" is chosen only from the Motion Carousel UI, never inferred from a brief.
+  assert.deepEqual(CAROUSEL_SCENE_MODES, ["standard", "continuous", "layers"]);
   assert.equal(detectSceneMode("connected scenes across the deck"), "continuous");
   assert.equal(detectSceneMode("use continuous backgrounds"), "continuous");
   assert.equal(detectSceneMode("slow camera pan into the product"), "continuous");
