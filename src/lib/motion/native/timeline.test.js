@@ -89,7 +89,7 @@ test('a [[keyword]] is drawn as an accent pill, in the brand accent', () => {
   const spec = specFor();
   const frame = composeSlideFrame({ spec, slideIndex: 0, frameIndex: spec.frames - 1, fontStyle }).svg;
   assert.ok(frame.includes(spec.theme.accent), 'the accent colour is used');
-  assert.ok(frame.includes('own'), 'the keyword text is drawn');
+  assert.match(frame, new RegExp(`<rect[^>]*fill="${spec.theme.accent}"`), 'the keyword is drawn as an accent pill');
   assert.ok(!frame.includes('[['), 'the marker syntax is not drawn literally');
 });
 
