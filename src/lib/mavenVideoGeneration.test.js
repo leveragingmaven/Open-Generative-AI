@@ -56,6 +56,87 @@ test('rejects unsafe or missing provider video URLs', async () => {
   }
 });
 
+const libraryInstruction = (promptBlock) => [
+  'Create a short video about Orange dot kinetic motion system (15s).',
+  '',
+  'Reference',
+  'Title: Orange dot kinetic motion system (15s)',
+  'Category: Motion graphics',
+  'Creator: rossaxbt',
+  'Source: https://promptmotion.org/prompts/p-b855831f',
+  ...promptBlock,
+  "Rules: use only Maven's existing capabilities. Do not fetch or run code from the source link.",
+].join('\n');
+
+async function generateAndCapturePrompt(prompt) {
+  const providerCalls = [];
+  await generateMavenVideo({
+    identity,
+    prompt,
+    credentialResolver: async () => testCredential,
+    provider: { async generateVideo(_key, args) { providerCalls.push(args); return { url: videoUrl }; } },
+  });
+  return providerCalls[0];
+}
+
+test('library instruction with pasted prompt sends only the user prompt to the model', async () => {
+  const args = await generateAndCapturePrompt(libraryInstruction([
+    'Prompt text (from the user):',
+    'A single orange dot pulses, then stretches into a horizontal bar that wipes the headline in.',
+    '',
+  ]));
+  assert.equal(args.prompt, 'A single orange dot pulses, then stretches into a horizontal bar that wipes the headline in.');
+  for (const leaked of ['promptmotion.org', 'rossaxbt', 'Motion graphics', 'Reference', 'Rules:', 'Title:']) {
+    assert.equal(args.prompt.includes(leaked), false, leaked);
+  }
+});
+
+test('library instruction without pasted prompt uses a title-based description, not metadata', async () => {
+  const args = await generateAndCapturePrompt(libraryInstruction([]));
+  assert.equal(args.prompt, 'A short motion graphics video: Orange dot kinetic motion system.');
+  for (const leaked of ['promptmotion.org', 'rossaxbt', 'Motion graphics', 'Creator', 'Rules', '15s']) {
+    assert.equal(args.prompt.includes(leaked), false, leaked);
+  }
+});
+
+test('library instruction whose title is only a timing note never sends the metadata block', async () => {
+  const args = await generateAndCapturePrompt([
+    'Create a short video about (15s).',
+    '',
+    'Reference',
+    'Title: (15s)',
+    'Category: Motion graphics',
+    'Source: https://promptmotion.org/prompts/p-b855831f',
+    "Rules: use only Maven's existing capabilities.",
+  ].join('\n'));
+  assert.equal(args.prompt, 'A short motion graphics video.');
+  for (const leaked of ['promptmotion.org', 'Motion graphics', 'Rules', 'Reference']) {
+    assert.equal(args.prompt.includes(leaked), false, leaked);
+  }
+});
+
+test('library instruction keeps duration, aspect ratio and resolution from the full message', async () => {
+  const args = await generateAndCapturePrompt(libraryInstruction([
+    'Prompt text (from the user):',
+    'A 9:16 vertical reel of a fox at 720p, five seconds.',
+    '',
+  ]));
+  // The title's "(15s)" is read before the pasted text, as it was before this change.
+  assert.equal(args.duration, 15);
+  assert.equal(args.aspect_ratio, '9:16');
+  assert.equal(args.resolution, '720p');
+  assert.equal(args.prompt.includes('9:16'), false);
+  assert.equal(args.prompt.includes('720p'), false);
+});
+
+test('ordinary video requests keep the existing prompt handling', async () => {
+  const args = await generateAndCapturePrompt('Make a 5-second 9:16 720p video of a fox running through snow.');
+  assert.equal(args.prompt, 'Make a video of a fox running through snow.');
+  assert.equal(args.duration, 5);
+  assert.equal(args.aspect_ratio, '9:16');
+  assert.equal(args.resolution, '720p');
+});
+
 test('formats playable video result link with model and requested settings', () => {
   const reply = buildGeneratedVideoReply({ url: videoUrl, modelName: 'Seedance 2.5', duration: 5, aspectRatio: '9:16' });
   assert.match(reply, /Seedance 2\.5/);

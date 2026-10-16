@@ -1,5 +1,5 @@
 import { muApiProvider } from '../../packages/studio/src/lib/providers/MuApiProvider.js';
-import { extractVideoPrompt } from '../../packages/studio/src/lib/mavenVideoIntent.js';
+import { extractVideoPrompt, libraryVideoPrompt } from '../../packages/studio/src/lib/mavenVideoIntent.js';
 import { resolveProviderCredential } from './providerCredentialResolver.js';
 import { selectMavenVideoRoute, stripVideoRoutingFromPrompt } from './mavenVideoModelRouter.js';
 import {
@@ -66,7 +66,10 @@ export async function generateMavenVideo({
   }
   if (!apiKey) throw videoError('video_provider_credential_required', 'Connect your MuAPI API key in Settings to generate videos.', 400);
 
-  const promptText = stripVideoRoutingFromPrompt(safePrompt, route.model) || safePrompt;
+  // Model selection and settings above still read the full message. Only the text sent to the
+  // model changes, and only for recognized Motion Prompt Library instructions.
+  const generationSource = libraryVideoPrompt(prompt) || safePrompt;
+  const promptText = stripVideoRoutingFromPrompt(generationSource, route.model) || generationSource;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onCallerAbort = () => controller.abort();

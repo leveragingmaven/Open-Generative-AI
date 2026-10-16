@@ -37,6 +37,30 @@ export function libraryOutputChoice(message) {
   return null;
 }
 
+const LIBRARY_VIDEO_TITLE = /^Create a short video about (.+)\.$/;
+const LIBRARY_PROMPT_LABEL = '\nPrompt text (from the user):\n';
+const LIBRARY_RULES_LINE = '\n\nRules: ';
+
+/** Visual prompt for a recognized Motion Prompt Library video instruction, or null for every
+ *  other message. Uses the user's pasted prompt when there is one, otherwise a short description
+ *  built from the title. The reference URL, creator, category and rules are never included. */
+export function libraryVideoPrompt(message) {
+  if (libraryOutputChoice(message) !== 'video') return null;
+  const text = String(message).replace(/\r\n/g, '\n').trim();
+  const title = LIBRARY_VIDEO_TITLE.exec(text.split('\n', 1)[0].trim())?.[1] || '';
+  const labelAt = text.indexOf(LIBRARY_PROMPT_LABEL);
+  if (labelAt !== -1) {
+    const start = labelAt + LIBRARY_PROMPT_LABEL.length;
+    const rulesAt = text.indexOf(LIBRARY_RULES_LINE, start);
+    const pasted = text.slice(start, rulesAt === -1 ? undefined : rulesAt).replace(/\s+/g, ' ').trim();
+    if (pasted) return pasted.slice(0, 1000);
+  }
+  // Drop parenthetical notes such as "(15s 2D film)" so timing words do not read as creative direction.
+  const cleanTitle = title.replace(/\s*\([^)]*\d[^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+  // A recognized instruction never falls back to the raw message, even when the title is only a timing note.
+  return cleanTitle ? `A short motion graphics video: ${cleanTitle}.` : 'A short motion graphics video.';
+}
+
 export function isVideoGenerationRequest(message, { hasImageReference = false } = {}) {
   if (typeof message !== 'string') return false;
   const text = message.trim();
