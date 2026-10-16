@@ -26,7 +26,7 @@ import { createRenderCache, CACHE_DIR } from './renderCache.js';
 import { buildAudioTimeline, writeWav, MOODS } from './audio.js';
 import { nativeRenderRevision } from './renderRevision.js';
 import { buildImagePdf } from './pdf.js';
-import { encodeFramesToVideo, muxAudio, muxLoopedAudio, concatVideos, reFrame, probeVideo, FfmpegError } from './ffmpeg.js';
+import { encodeFramesToVideo, muxAudio, muxSoundtrack, concatVideos, reFrame, probeVideo, FfmpegError } from './ffmpeg.js';
 import { hashString } from '../../../../packages/studio/src/lib/motion/carousel/CarouselDeck.js';
 import { getCarouselExportPreset } from '../../../../packages/studio/src/lib/motion/carousel/CarouselConstants.js';
 
@@ -463,7 +463,7 @@ export function createNativeMotionRenderer({
     await writeFile(join(outDir, 'slides-still.pdf'), buildImagePdf(pages, { title: deck.handle || 'Carousel' }));
 
     // Full-deck video: concat when anything changed, otherwise reuse the cached one.
-    const fullDeckKey = hashString(`${slideKeys.join(',')}|${revision}|full`);
+    const fullDeckKey = hashString(`${slideKeys.join(',')}|${revision}|${uploadedAudio.path ? deck.audio : ''}|full`);
     const cachedFullDeck = await cache?.getFullDeck(fullDeckKey);
     let fullDeckPath = join(outDir, 'full-deck.mp4');
     if (cachedFullDeck && renderedSlides.length === 0) {
@@ -477,7 +477,8 @@ export function createNativeMotionRenderer({
       });
       const fullAudio = buildAudioTimeline({ mood, slideCount: spec.slides.length, slideSeconds: spec.durationSeconds, accents });
       if (uploadedAudio.path && options.audio !== false) {
-        await muxLoopedAudio(ffmpegPath, {
+        await muxSoundtrack(ffmpegPath, {
+          trackSeconds: (await probeVideo(ffmpegPath, uploadedAudio.path)).audioDuration,
           videoPath: rawFull,
           audioPath: uploadedAudio.path,
           outPath: fullDeckPath,

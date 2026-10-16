@@ -79,6 +79,7 @@ export default function MavenCarouselPanel({ onExit }) {
   const [photos, setPhotos] = useState([]);
   // Continuous Layers: storage references for an optional background photo and transparent PNG.
   const [layerAssets, setLayerAssets] = useState({ background: null, foreground: null });
+  const [soundtrack, setSoundtrack] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [layoutNote, setLayoutNote] = useState(null);
   const [deck, setDeck] = useState(null);
@@ -155,6 +156,25 @@ export default function MavenCarouselPanel({ onExit }) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
     return data;
+  }, []);
+
+  // Uploads an optional MP3, WAV or M4A soundtrack for Continuous Layers through the same secure upload.
+  const uploadSoundtrack = useCallback(async (file) => {
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("kind", "soundtrack");
+      const response = await fetch("/api/motion-carousel", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Upload failed (${response.status})`);
+      setSoundtrack(data.soundtrack?.storageReference || null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
   }, []);
 
   // Uploads one photo into the Creative Library and keeps its asset id for planning.
@@ -316,7 +336,7 @@ export default function MavenCarouselPanel({ onExit }) {
       // worker hands to the renderer. The sheet's visual style sets the frame.
       const data = await post({
         action: "render",
-        deck: { ...deck, sceneMode, ...(sceneMode === "layers" ? { layers: { ...layerAssets } } : {}) },
+        deck: { ...deck, sceneMode, ...(sceneMode === "layers" ? { layers: { ...layerAssets }, audio: soundtrack } : {}) },
         presetId,
         previousFingerprints: lastFingerprints,
         idempotencyKey: `ui-${Date.now()}-${idempotency.current}`,
@@ -327,7 +347,7 @@ export default function MavenCarouselPanel({ onExit }) {
     } finally {
       setBusy(null);
     }
-  }, [post, deck, approved, presetId, sceneMode, lastFingerprints, layerAssets]);
+  }, [post, deck, approved, presetId, sceneMode, lastFingerprints, layerAssets, soundtrack]);
 
   // Registers the finished slides as library assets (server, in order) and opens one
   // carousel draft in Publishing. The existing composer handles accounts and scheduling.
@@ -547,6 +567,10 @@ export default function MavenCarouselPanel({ onExit }) {
                 <input type="file" accept="image/png" className="mt-1 block w-full" disabled={uploading} onChange={(e) => { uploadLayer("foreground", e.target.files?.[0]); e.target.value = ""; }} aria-label="Add a transparent PNG foreground for Continuous Layers" />
               </label>
               <p>{layerAssets.foreground ? "Foreground added" : "No foreground yet."}</p>
+              <label className="block">Soundtrack (optional, MP3, WAV or M4A)
+                <input type="file" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,.mp3,.wav,.m4a" className="mt-1 block w-full" disabled={uploading} onChange={(e) => { uploadSoundtrack(e.target.files?.[0]); e.target.value = ""; }} aria-label="Add an optional soundtrack for Continuous Layers" />
+              </label>
+              <p>{soundtrack ? "Soundtrack added: one track across the whole video, trimmed or silent at the end." : "No soundtrack: the video stays silent."}</p>
             </div>
           ) : null}
           <button type="button" onClick={planStoryboard} disabled={busy !== null || !sheetApproval} className="mt-3 w-full rounded bg-[var(--ms-color-pink-primary)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">

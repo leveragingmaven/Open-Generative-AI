@@ -257,12 +257,18 @@ export async function materializeCarouselImages({ deck, outDir, accountId, stora
   for (const ref of [deck?.layers?.background, deck?.layers?.foreground]) {
     if (typeof ref === 'string' && ref.startsWith(STORAGE_SCHEME) && !references.includes(ref)) references.push(ref);
   }
-  if (!references.length) return withLayerNames(deck, new Map());
+  const audioRef = typeof deck?.audio === 'string' && deck.audio.startsWith(STORAGE_SCHEME) ? deck.audio : null;
+  // Only an owned soundtrack reference is copied; any other `audio` value is dropped.
+  if (!references.length && !audioRef) {
+    const unchanged = withLayerNames(deck, new Map());
+    return deck?.audio === undefined || deck.audio === null ? unchanged : { ...unchanged, audio: null };
+  }
   if (!storage) throw new CarouselImageError('carousel_image_unavailable', 503);
 
   const io = fs || await import('node:fs/promises');
   await io.mkdir(outDir, { recursive: true });
   const names = new Map();
+  const audio = audioRef ? await copyCarouselSoundtrack({ reference: audioRef, accountId, storage, io, outDir }) : null;
   for (const reference of references) {
     const key = ownedCarouselImageKey(reference, accountId);
     if (!key) throw new CarouselImageError('carousel_image_not_found', 404);
@@ -278,11 +284,113 @@ export async function materializeCarouselImages({ deck, outDir, accountId, stora
   }
   return {
     ...withLayerNames(deck, names),
+    audio,
     slides: deck.slides.map((slide) => {
       const name = names.get(slide?.visual?.image);
       return name ? { ...slide, visual: { ...slide.visual, image: name } } : slide;
     }),
   };
+}
+
+export const CAROUSEL_SOUNDTRACK_TYPES = Object.freeze({
+  mp3: { contentType: 'audio/mpeg', extension: 'mp3' },
+  wav: { contentType: 'audio/wav', extension: 'wav' },
+  m4a: { contentType: 'audio/mp4', extension: 'm4a' },
+});
+
+/**
+ * Identifies the real container from its bytes. The browser-reported type is never
+ * trusted: MP3 (ID3 tag or frame sync), WAV (RIFF/WAVE) and M4A (ftyp M4A/M4B brand).
+ * A generic MP4 video is rejected so a renamed video cannot pass as a soundtrack.
+ */
+export function sniffSoundtrack(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  if (bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WAVE') return 'wav';
+  if (bytes.subarray(4, 8).toString('latin1') === 'ftyp' && ['M4A ', 'M4B '].includes(bytes.subarray(8, 12).toString('latin1'))) return 'm4a';
+  if (bytes.subarray(0, 3).toString('latin1') === 'ID3') return 'mp3';
+  if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return 'mp3';
+  return null;
+}
+
+/**
+ * Saves one uploaded soundtrack to the account's Creative Library and R2, content
+ * addressed like a photo. Size and real format are checked; the reported type is not.
+ */
+export async function saveCarouselSoundtrack(identity, file, {
+  repository = new MySqlCreativeAssetRepository(),
+  storage = null,
+} = {}) {
+  const accountId = accountIdOf(identity);
+  const creatorIdentityKey = identityKeyOf(identity);
+  if (!accountId || !creatorIdentityKey) throw new CarouselImageError('carousel_image_unauthorized', 401);
+  if (!file || typeof file.arrayBuffer !== 'function') throw new CarouselImageError('carousel_audio_content_invalid', 415);
+  if (typeof file.size === 'number' && file.size > maxBytesFor('audio')) throw new CarouselImageError('carousel_audio_too_large', 413);
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  if (!bytes.length || bytes.length > maxBytesFor('audio')) throw new CarouselImageError('carousel_audio_too_large', 413);
+  const format = sniffSoundtrack(bytes);
+  if (!format) throw new CarouselImageError('carousel_audio_content_invalid', 415);
+  const { contentType } = CAROUSEL_SOUNDTRACK_TYPES[format];
+
+  const checksum = crypto.createHash('sha256').update(bytes).digest('hex');
+  const id = `asset_${crypto.createHash('sha256').update(JSON.stringify([accountId, 'motion-carousel-audio', checksum])).digest('hex')}`;
+  const key = creativeObjectKey(accountId, id);
+  const target = storage || getR2MediaStorage();
+  if (!(await target.getMetadata(key))) {
+    await target.putObject({ key, body: bytes, contentType, sizeBytes: bytes.length, metadata: { sha256: checksum } });
+  }
+
+  const name = cleanName(file.name);
+  const storageReference = `${STORAGE_SCHEME}${key}`;
+  const asset = {
+    id,
+    accountId,
+    creatorIdentityKey,
+    jobId: id,
+    attemptId: id,
+    requestId: id,
+    authorizationId: id,
+    agentId: 'motion-carousel',
+    conversationId: 'motion-carousel',
+    campaignId: null,
+    title: `Carousel soundtrack · ${name}`,
+    prompt: null,
+    type: 'audio',
+    kind: 'audio',
+    url: storageReference,
+    generatedFiles: [storageReference],
+    provider: 'upload',
+    model: null,
+    providerOutputReference: null,
+    storageReference,
+    createdAt: new Date().toISOString(),
+    metadata: {
+      assetType: 'audio', modality: 'audio', studio: 'motion-carousel', status: 'completed',
+      operation: 'upload', provider: 'upload', sessionAssetId: null, sourceAssetId: null,
+      storageStatus: 'r2', retentionVerified: true,
+      contentType, sizeBytes: bytes.length, checksum, originalName: name, audioFormat: format,
+    },
+  };
+  await repository.saveOnConnection(repository.db, asset);
+  return { assetId: id, name, contentType, sizeBytes: bytes.length, format, storageReference };
+}
+
+/**
+ * Worker side: copies the owned soundtrack beside the deck under a plain name. The
+ * copy is verified by its bytes, so a non-audio object can never be attached.
+ */
+async function copyCarouselSoundtrack({ reference, accountId, storage, io, outDir }) {
+  const key = ownedCarouselImageKey(reference, accountId);
+  if (!key) throw new CarouselImageError('carousel_audio_not_found', 404);
+  const object = await storage.getObject(key);
+  if (!object?.Body) throw new CarouselImageError('carousel_audio_content_invalid', 415);
+  const bytes = await readBodyBytes(object.Body, maxBytesFor('audio'));
+  const format = sniffSoundtrack(bytes);
+  if (!format) throw new CarouselImageError('carousel_audio_content_invalid', 415);
+  const assetId = /(asset_[a-f0-9]{64})\/primary$/.exec(key)[1];
+  const name = `carousel-audio-${assetId}.${CAROUSEL_SOUNDTRACK_TYPES[format].extension}`;
+  await io.writeFile(`${outDir}/${name}`, bytes);
+  return name;
 }
 
 /** HTTP handler for a multipart photo upload. The route stays a thin wrapper. */
@@ -294,10 +402,18 @@ export async function handleCarouselImageUpload(request, { identity, repository,
     return Response.json({ error: 'A multipart image upload is required.', code: 'invalid_upload_target' }, { status: 400 });
   }
   const file = form.get('file');
+  const kind = String(form.get('kind') || '');
   if (!file || typeof file.arrayBuffer !== 'function') {
     return Response.json({ error: 'An image file is required.', code: 'invalid_upload_target' }, { status: 400 });
   }
   try {
+    if (kind === 'soundtrack') {
+      const soundtrack = await saveCarouselSoundtrack(identity, file, {
+        ...(repository ? { repository } : {}),
+        ...(storage ? { storage } : {}),
+      });
+      return Response.json({ ok: true, action: 'upload', soundtrack }, { status: 201 });
+    }
     const image = await saveCarouselImage(identity, file, {
       ...(repository ? { repository } : {}),
       ...(storage ? { storage } : {}),

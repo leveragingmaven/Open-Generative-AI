@@ -231,6 +231,36 @@ export async function encodeFramesToVideo(binPath, {
   }
 }
 
+/** Fade-out at the end of the soundtrack, in seconds. Short enough to never eat the music. */
+export const SOUNDTRACK_FADE_SECONDS = 1.5;
+
+/**
+ * Attaches one soundtrack to the full-deck video as a single master timeline.
+ *
+ * - Longer than the video: trimmed to `seconds` (the picture is never cut).
+ * - Shorter than the video: played once from the start, then silence to the end.
+ *   It is never looped, so the music does not restart partway through.
+ * - A short fade-out ends at the earlier of the track's end and the video's end.
+ *
+ * The video stream is copied untouched; the audio is encoded to AAC.
+ */
+export function muxSoundtrack(binPath, { videoPath, audioPath, outPath, seconds, trackSeconds = null, fadeSeconds = SOUNDTRACK_FADE_SECONDS, signal = null, timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS } = {}) {
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new FfmpegError('Soundtrack needs a positive video duration.', { code: 'soundtrack_duration_invalid' });
+  const music = Number.isFinite(trackSeconds) && trackSeconds > 0 ? Math.min(trackSeconds, seconds) : seconds;
+  const fade = Math.min(fadeSeconds, music);
+  const fadeStart = Math.max(0, music - fade);
+  const filter = `[1:a]afade=t=out:st=${fadeStart.toFixed(3)}:d=${fade.toFixed(3)},apad[a]`;
+  return runFfmpeg(binPath, [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', videoPath, '-i', audioPath,
+    '-filter_complex', filter,
+    '-map', '0:v:0', '-map', '[a]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+    '-t', seconds.toFixed(3),
+    '-movflags', '+faststart', outPath,
+  ], { signal, timeoutMs });
+}
+
 /** Stream-copies the video track and attaches an audio file. */
 export function muxAudio(binPath, { videoPath, audioPath, outPath, signal = null, timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS } = {}) {
   return runFfmpeg(binPath, [
