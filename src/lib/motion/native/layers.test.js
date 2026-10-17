@@ -81,6 +81,23 @@ test("text content is XML-escaped in the frame", () => {
   assert.doesNotMatch(frame, /<B>/);
 });
 
+test("a text layer given a render face is drawn as glyph outlines, not a system <text>", () => {
+  const face = {
+    alias: "MS-Test",
+    outlines: {
+      unitsPerEm: 1000,
+      outlineForCode: () => ({ d: "M0 0 L500 0 L500 700 Z", advance: 600, bbox: { xMin: 0, xMax: 500, yMin: 0, yMax: 700 } }),
+    },
+  };
+  const [layer] = normaliseLayers(
+    [{ id: "t", type: "text", content: "Hi", face, start: 0, duration: 1, x: 100, y: 100 }],
+    { width: W, height: H },
+  );
+  const frame = composeLayerFrame({ width: W, height: H, layers: [layer], t: 0.5 });
+  assert.match(frame, /<path /, "a face draws the run as glyph outlines");
+  assert.doesNotMatch(frame, /<text/, "no <text> element is emitted when a face is supplied");
+});
+
 test("a transparent PNG overlay keeps its alpha over an opaque background", async () => {
   // Opaque red background, plus a 40x40 green square whose surround is fully transparent.
   const background = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 200, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
@@ -103,6 +120,16 @@ test("a transparent PNG overlay keeps its alpha over an opaque background", asyn
   };
   assert.deepEqual(at(100, 100).slice(0, 3).map((v) => v > 200), [false, true, false], "overlay centre is green");
   assert.ok(at(10, 10)[0] > 150 && at(10, 10)[3] === 255, "background shows through where the overlay is transparent");
+});
+
+test("drift.scale zooms a layer linearly over its lifetime, so a hold never sits perfectly still", () => {
+  const [layer] = normaliseLayers(
+    [{ id: "bg", type: "shape", shape: "circle", x: 50, y: 50, start: 0, duration: 4, drift: { scale: 1.5 } }],
+    { width: W, height: H },
+  );
+  assert.equal(layerStateAt(layer, 0).scale, 1);
+  assert.ok(Math.abs(layerStateAt(layer, 2).scale - 1.25) < 1e-9);
+  assert.ok(layerStateAt(layer, 3.9).scale > 1.48);
 });
 
 test("path keyframes move a layer on the master timeline and hold at both ends", () => {

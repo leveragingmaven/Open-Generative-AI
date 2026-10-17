@@ -91,7 +91,7 @@ export function normaliseLayers(layers, { width, height } = {}) {
       duration,
       enter,
       exit,
-      drift: { dx: numberField(raw.drift || {}, "dx", id, 0), dy: numberField(raw.drift || {}, "dy", id, 0) },
+      drift: { dx: numberField(raw.drift || {}, "dx", id, 0), dy: numberField(raw.drift || {}, "dy", id, 0), scale: numberField(raw.drift || {}, "scale", id, 1, { min: 0.0001 }) },
       x: numberField(raw, "x", id, (width ?? 0) / 2),
       y: numberField(raw, "y", id, (height ?? 0) / 2),
       scale: numberField(raw, "scale", id, 1, { min: 0.0001 }),
@@ -114,6 +114,9 @@ export function normaliseLayers(layers, { width, height } = {}) {
       normal.size = numberField(raw, "size", id, 64, { min: 1 });
       normal.weight = numberField(raw, "weight", id, 700, { min: 100, max: 900 });
       normal.fill = typeof raw.fill === "string" ? raw.fill : "#ffffff";
+      // An optional render face from the font registry. When present the run is drawn as
+      // glyph outlines, so it never depends on a system font the container does not ship.
+      normal.face = raw.face && typeof raw.face === "object" && raw.face.outlines ? raw.face : null;
     } else {
       if (!SHAPE_KINDS.includes(raw.shape)) {
         throw new LayerSpecError(`Shape layer "${id}" needs shape "line" or "circle".`, { code: "unsupported_shape", layerId: id });
@@ -162,7 +165,7 @@ export function layerStateAt(layer, t) {
   return {
     dx: lerp(layer.enter.dx, 0, enterP) + lerp(0, layer.exit.dx, exitQ) + layer.drift.dx * life + path.dx,
     dy: lerp(layer.enter.dy, 0, enterP) + lerp(0, layer.exit.dy, exitQ) + layer.drift.dy * life + path.dy,
-    scale: layer.scale * lerp(layer.enter.scale, 1, enterP) * lerp(1, layer.exit.scale, exitQ),
+    scale: layer.scale * lerp(layer.enter.scale, 1, enterP) * lerp(1, layer.exit.scale, exitQ) * lerp(1, layer.drift.scale, life),
     opacity: layer.opacity * enterP * (1 - exitQ),
     reveal: enterP,
   };
@@ -175,7 +178,7 @@ function composeLayer(layer, state) {
     const preserve = layer.fit === "slice" ? "xMidYMid slice" : "xMidYMid meet";
     children = `<image href="${escapeXml(layer.src)}" x="${-layer.width / 2}" y="${-layer.height / 2}" width="${layer.width}" height="${layer.height}" preserveAspectRatio="${preserve}"/>`;
   } else if (layer.type === "text") {
-    children = text({ x: 0, y: 0, content: layer.content, size: layer.size, weight: layer.weight, fill: layer.fill, anchor: "middle", baseline: "middle" });
+    children = text({ x: 0, y: 0, content: layer.content, family: layer.face || undefined, size: layer.size, weight: layer.weight, fill: layer.fill, anchor: "middle", baseline: "middle" });
   } else if (layer.shape === "line") {
     const drawn = layer.length * state.reveal;
     children = line({ x1: -layer.length / 2, y1: 0, x2: -layer.length / 2 + drawn, y2: 0, stroke: layer.stroke, strokeWidth: layer.strokeWidth });

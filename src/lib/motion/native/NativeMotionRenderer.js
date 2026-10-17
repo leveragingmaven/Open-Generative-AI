@@ -129,9 +129,10 @@ export async function resolveDeckAudio({ deck, outDir, loadFs = null } = {}) {
 
 /** The cache key for one slide: content, renderer revision, style and geometry. */
 /**
- * Loads the Continuous Layers assets the deck names beside it. The background is fitted to the
- * full deck width once (so the camera can pan it), and the foreground keeps its alpha channel.
- * Missing or unreadable files become warnings; the scene then renders without them.
+ * Loads the Continuous Layers assets the deck names beside it. The background is cover-fitted to
+ * **one slide** (its natural composition kept, not stretched across the whole deck), and the
+ * foreground keeps its alpha channel. Missing or unreadable files become warnings; the scene then
+ * renders without them.
  */
 export async function prepareLayerAssets({ deck, outDir, spec, loadFs = null } = {}) {
   const fs = loadFs || { readFile };
@@ -156,9 +157,8 @@ export async function prepareLayerAssets({ deck, outDir, spec, loadFs = null } =
   const backgroundBytes = await load('background', refs.background);
   if (backgroundBytes) {
     try {
-      const worldWidth = spec.width * spec.slides.length;
-      const jpeg = await sharp(backgroundBytes).resize(worldWidth, spec.height, { fit: 'cover' }).jpeg({ quality: 85 }).toBuffer();
-      background = { dataUri: await imageDataUri(jpeg, { mime: 'image/jpeg' }) };
+      const jpeg = await sharp(backgroundBytes).resize(spec.width, spec.height, { fit: 'cover' }).jpeg({ quality: 85 }).toBuffer();
+      background = { dataUri: await imageDataUri(jpeg, { mime: 'image/jpeg' }), width: spec.width, height: spec.height };
     } catch {
       warnings.push('background photo could not be decoded; ignored');
     }

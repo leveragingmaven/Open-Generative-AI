@@ -5,6 +5,7 @@ import { buildNativeSpec } from './spec.js';
 import { LAYERED_SCENE, composeLayeredFrame, layeredLayers } from './layeredScene.js';
 import { prepareLayerAssets } from './NativeMotionRenderer.js';
 import { buildFontContext, loadFontRegistry, presetFacesFor, fontFaceCss, allFaceAliases } from './fontRegistry.js';
+import { sharp } from './raster.js';
 
 const DECK = {
   brand: 'mavensync',
@@ -88,6 +89,48 @@ test('each slide headline is timed from its own slide start on the shared timeli
   const headline = (k) => world.find((layer) => layer.id === `headline-${k}`);
   assert.ok(Math.abs(headline(0).start - 0.5) < 1e-9);
   assert.ok(Math.abs(headline(3).start - (18 + 0.5)) < 1e-9);
+});
+
+test('copy is drawn as glyph outlines, never a system-font <text> fallback', () => {
+  const spec = specFor({ deck: { ...DECK, sceneMode: 'layers' } });
+  spec.layerAssets = { background: null, foreground: null };
+  const { svg } = composeLayeredFrame({ spec, slideIndex: 0, frameIndex: 60 });
+  assert.ok(svg.includes('<path'), 'the headline should be drawn as glyph outlines');
+  assert.doesNotMatch(svg, /<text\b/, 'no <text> fallback, which would need a system font');
+});
+
+test('copy uses the deck theme palette and the preset type scale, not hard-coded colours', () => {
+  const spec = specFor({ deck: { ...DECK, sceneMode: 'layers' } });
+  spec.layerAssets = { background: null, foreground: null };
+  const { svg } = composeLayeredFrame({ spec, slideIndex: 0, frameIndex: 60 });
+  assert.ok(svg.includes(`fill="${spec.theme.ink}"`), 'the headline uses the theme ink');
+  assert.ok(svg.includes(`fill="${spec.theme.muted}"`), 'the sub uses the theme muted ink');
+  assert.doesNotMatch(svg, /#f5c542/i, 'the hard-coded gold is gone');
+  const headline = layeredLayers(spec).world.find((layer) => layer.id === 'headline-0');
+  assert.equal(headline.size, spec.type.displaySize, 'short headlines keep the preset display size');
+});
+
+test('the frame keeps moving through the camera hold', () => {
+  const spec = specFor({ deck: { ...DECK, sceneMode: 'layers' } });
+  spec.layerAssets = { background: null, foreground: null };
+  const a = composeLayeredFrame({ spec, slideIndex: 0, frameIndex: 30 }).svg;
+  const b = composeLayeredFrame({ spec, slideIndex: 0, frameIndex: 90 }).svg;
+  assert.notEqual(a, b, 'two frames inside one slide must differ so the render is not frozen');
+});
+
+test('a portrait background is fitted to one slide, not stretched across the deck', async () => {
+  const source = await sharp({ create: { width: 600, height: 1000, channels: 3, background: { r: 40, g: 50, b: 60 } } }).png().toBuffer();
+  const spec = specFor({ deck: { ...DECK, sceneMode: 'layers' } });
+  const result = await prepareLayerAssets({
+    deck: { ...DECK, layers: { background: 'bg.png' } },
+    outDir: '/tmp/deck',
+    spec,
+    loadFs: { readFile: async () => source },
+  });
+  assert.ok(result.background, 'the background should be prepared');
+  assert.equal(result.background.width, spec.width);
+  assert.equal(result.background.height, spec.height);
+  assert.notEqual(result.background.width, spec.width * spec.slides.length, 'never a deck-wide plate');
 });
 
 test('a layer name that is not a plain file beside the deck is ignored, with a warning', async () => {
