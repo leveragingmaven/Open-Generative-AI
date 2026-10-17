@@ -6,11 +6,23 @@ function isAgencyModeEnabled() {
     return TRUE_VALUES.has((process.env.AGENCY_MODE || '').trim().toLowerCase());
 }
 
-function addSecurityHeaders(response) {
+// The Motion Prompt Library is embedded as a same-origin iframe inside the
+// studio. `X-Frame-Options: DENY` blocks that framing even for the same origin,
+// so this one path is allowed to be framed — by this origin only — while every
+// other response keeps DENY.
+const SAME_ORIGIN_FRAMING_PATH = '/motion-prompt-library';
+
+function allowsSameOriginFraming(pathname) {
+    const path = String(pathname || '');
+    return path === SAME_ORIGIN_FRAMING_PATH || path.startsWith(`${SAME_ORIGIN_FRAMING_PATH}/`);
+}
+
+function addSecurityHeaders(response, { sameOriginFraming = false } = {}) {
     // Prevent MIME type sniffing (CWE-693)
     response.headers.set('X-Content-Type-Options', 'nosniff');
-    // Prevent clickjacking (CWE-1021)
-    response.headers.set('X-Frame-Options', 'DENY');
+    // Prevent clickjacking (CWE-1021). Only the same-origin Prompt Library path
+    // is frameable, and only by this origin; all other responses forbid framing.
+    response.headers.set('X-Frame-Options', sameOriginFraming ? 'SAMEORIGIN' : 'DENY');
     // Enable XSS filter in legacy browsers
     response.headers.set('X-XSS-Protection', '1; mode=block');
     // Referrer policy
@@ -19,9 +31,11 @@ function addSecurityHeaders(response) {
     // connect-src covers *.muapi.ai (not just api.muapi.ai) because generated
     // media, model thumbnails, and other assets are served from cdn.muapi.ai
     // and other muapi subdomains that the renderer fetches directly.
+    // frame-ancestors mirrors X-Frame-Options so modern browsers enforce the same
+    // rule: the Prompt Library path may be framed by this origin, others by none.
     response.headers.set(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://muapi.ai https://*.muapi.ai https://hub.mavensync.space; font-src 'self' data:;"
+        `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://muapi.ai https://*.muapi.ai https://hub.mavensync.space; font-src 'self' data:; frame-ancestors ${sameOriginFraming ? "'self'" : "'none'"};`
     );
     return response;
 }
@@ -52,7 +66,7 @@ export function middleware(request) {
     }
 
     // Add security headers to all responses
-    return addSecurityHeaders(NextResponse.next());
+    return addSecurityHeaders(NextResponse.next(), { sameOriginFraming: allowsSameOriginFraming(url.pathname) });
 }
 
 // Match all paths for security headers. Exclude Next.js internal paths.
