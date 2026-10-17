@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authorizeMotionCarousel } from "./route.js";
+import { authorizeMotionCarousel, isCarouselMediaGet } from "./route.js";
 import { MOTION_CAROUSEL_ACCESS_ENV_VAR } from "../../../src/lib/motionCarouselAccess.js";
 
 const OWNER = { email: "owner@mavensync.space", identityKey: "ai-gency:abc123", accountId: "42", role: "owner" };
@@ -23,6 +23,8 @@ function harness({ identity = CUSTOMER, authResponse = null, limitResponse = nul
     },
   };
 }
+
+const mediaGet = (name = "full-deck.mp4") => new Request(`https://example.test/api/motion-carousel?file=${name}&jobId=mcar-1`);
 
 test("an unauthenticated caller is refused before the rollout gate", async () => {
   const authResponse = Response.json({ code: "creator_os_auth_required" }, { status: 401 });
@@ -60,4 +62,46 @@ test("rate limiting still applies to an allowlisted account", async () => {
   const { options } = harness({ identity: OWNER, env: allow("owner@mavensync.space"), limitResponse });
   const result = await authorizeMotionCarousel(request, options);
   assert.equal(result.response.status, 429);
+});
+
+test("only a GET that names a file is a carousel media request", () => {
+  assert.equal(isCarouselMediaGet(mediaGet()), true);
+  assert.equal(isCarouselMediaGet(new Request("https://example.test/api/motion-carousel?jobId=mcar-1")), false);
+  assert.equal(isCarouselMediaGet(new Request("https://example.test/api/motion-carousel?jobs=20")), false);
+  assert.equal(isCarouselMediaGet(new Request("https://example.test/api/motion-carousel?file=full-deck.mp4", { method: "POST" })), false);
+  assert.equal(isCarouselMediaGet(request), false);
+});
+
+test("an allowlisted media GET streams without spending the mutation rate-limit budget", async () => {
+  const { options, seen } = harness({ identity: OWNER, env: allow("42") });
+  const result = await authorizeMotionCarousel(mediaGet(), options);
+  assert.equal(result.response, null);
+  assert.equal(result.identity.accountId, "42");
+  assert.deepEqual(seen.rateLimited, [], "a read-only, owned media GET must not be metered like a mutation");
+});
+
+test("a media GET from an unallowlisted account is still refused and never reaches the limiter", async () => {
+  const { options, seen } = harness({ identity: CUSTOMER, env: allow("owner@mavensync.space") });
+  const result = await authorizeMotionCarousel(mediaGet(), options);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.identity, null);
+  assert.deepEqual(seen.rateLimited, [], "the allowlist gate runs before any rate-limit exemption");
+});
+
+test("a media GET from an unauthenticated caller is still refused", async () => {
+  const authResponse = Response.json({ code: "creator_os_auth_required" }, { status: 401 });
+  const { options, seen } = harness({ authResponse });
+  const result = await authorizeMotionCarousel(mediaGet(), options);
+  assert.equal(result.response.status, 401);
+  assert.deepEqual(seen.rateLimited, []);
+});
+
+test("status/list GETs and mutations keep their rate limit", async () => {
+  const status = harness({ identity: OWNER, env: allow("42") });
+  await authorizeMotionCarousel(new Request("https://example.test/api/motion-carousel?jobId=mcar-1"), status.options);
+  assert.deepEqual(status.seen.rateLimited, [OWNER]);
+
+  const mutation = harness({ identity: OWNER, env: allow("42") });
+  await authorizeMotionCarousel(new Request("https://example.test/api/motion-carousel", { method: "POST" }), mutation.options);
+  assert.deepEqual(mutation.seen.rateLimited, [OWNER]);
 });

@@ -312,6 +312,27 @@ test('a finished carousel is served to its owner from object storage', async () 
   assert.equal(ranged.headers.get('content-range'), 'bytes 0-3/12');
   assert.equal((await bytes(ranged)).toString(), 'stor');
 
+  // The exact shapes a browser `<video>` sends: Chromium opens with an open-ended `bytes=0-`, and a
+  // seek or a second request comes back as `bytes=<n>-`. Both must answer 206 with the partial length
+  // and a matching `Content-Range`, or the element stalls before it can initialise the MP4 demuxer.
+  const browserOpen = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { headers: { range: 'bytes=0-' } }),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(browserOpen.status, 206);
+  assert.equal(browserOpen.headers.get('content-range'), 'bytes 0-11/12');
+  assert.equal(browserOpen.headers.get('content-length'), '12');
+  assert.equal((await bytes(browserOpen)).toString(), 'stored-video');
+
+  const seek = await handleMotionCarouselGet(
+    new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { headers: { range: 'bytes=5-' } }),
+    { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
+  );
+  assert.equal(seek.status, 206);
+  assert.equal(seek.headers.get('content-range'), 'bytes 5-11/12');
+  assert.equal(seek.headers.get('content-length'), '7');
+  assert.equal((await bytes(seek)).toString(), 'd-video');
+
   const head = await handleMotionCarouselGet(
     new Request(`https://example.test/api/motion-carousel?file=slide-01.mp4&jobId=mcar-1`, { method: 'HEAD' }),
     { identity: IDENTITY, store, env: ENV, storage: fixture.storage },
