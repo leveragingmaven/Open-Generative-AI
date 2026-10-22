@@ -48,8 +48,71 @@ import {
   isCarouselRenderRequest,
   isCarouselApprovalConfirmation,
   isCarouselApprovalCancellation,
+  resolveCarouselApprovedPlan,
 } from './mavenCarouselApproval.js';
 import { persistMavenChatAsset, ownedMavenChatReferences } from './mavenChatCreativeAsset.js';
+import { canUseMotionCarousel } from './motionCarouselAccess.js';
+import { attachApprovedStyleSheet } from './motionCarouselStyleSheet.js';
+import { createHash } from 'node:crypto';
+
+/**
+ * Starts the approved storyboard's render from Maven Chat. The deck is re-derived from
+ * the approved brief and carries the approved style sheet, so the render only runs
+ * on what the customer confirmed. The idempotency key is bound to the conversation,
+ * the approved sheet and the brief, so a repeated or retried message returns the same
+ * job instead of a second render. Accounts outside the owner allowlist keep the
+ * Motion Design handoff.
+ */
+/**
+ * The chat's view of a render job. A finished deck links the full-deck MP4 through the
+ * owner-scoped file route, so the download stays under the same authorization.
+ */
+export function buildCarouselRenderStatusReply({ job, deduped = false }) {
+  const header = deduped ? '**Carousel render already started for this storyboard.**' : '**Carousel render started.**';
+  if (job.status === 'completed') {
+    const deck = (job.result?.storage?.files || []).find((file) => file.kind === 'deck' && file.name === 'full-deck.mp4');
+    const link = `/api/motion-carousel?file=full-deck.mp4&jobId=${encodeURIComponent(job.jobId)}`;
+    return [
+      '**Your carousel is ready.**',
+      '',
+      deck ? `[Download the full-deck MP4](${link})` : 'The finished files are ready in Motion Design → Carousel.',
+    ].join('\n');
+  }
+  if (job.status === 'failed') {
+    return ['**The carousel render failed.**', '', 'Open Motion Design → Carousel to see the failure and retry the render.'].join('\n');
+  }
+  return [
+    header,
+    '',
+    `Status: ${job.status} (${job.progress || 0}%). Job: ${job.jobId}`,
+    'Rendering runs locally and can take a few minutes. Open Motion Design → Carousel to follow progress.',
+  ].join('\n');
+}
+
+export async function startApprovedCarouselRender({ approval, identity, conversationId, deps = {} } = {}) {
+  if (!canUseMotionCarousel(identity)) return buildCarouselRenderHandoffReply();
+  const plan = resolveCarouselApprovedPlan(approval);
+  const deck = attachApprovedStyleSheet(plan.deck, approval.sheet, approval.sheetFingerprint);
+  const idempotencyKey = createHash('sha256')
+    .update(`${conversationId}\n${approval.sheetFingerprint}\n${approval.brief}`)
+    .digest('hex');
+  const enqueue = deps.enqueueCarouselRender || (async (args) => {
+    const { enqueueMotionCarouselRender } = await import('./motionCarouselJobService.js');
+    const { MySqlMotionCarouselJobStore } = await import('./motionCarouselJobStore.js');
+    const { startMotionCarouselWorker } = await import('./motionCarouselWorkerRuntime.js');
+    const store = new MySqlMotionCarouselJobStore();
+    startMotionCarouselWorker({ store });
+    return enqueueMotionCarouselRender({ store, ...args });
+  });
+  const { job, deduped } = await enqueue({
+    identity,
+    deck,
+    presetId: approval.presetId,
+    brief: approval.brief,
+    idempotencyKey,
+  });
+  return buildCarouselRenderStatusReply({ job, deduped });
+}
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -775,9 +838,12 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // messages return null and route as before.
     // Once approved, the approval marker hides the pending draft; a render request then gets the same handoff.
     const approvedCarousel = pendingCarousel ? null : readApprovedCarouselApproval(trustedSessionReadResult.messages, { identity, conversationId });
+    const approvedRenderReply = approvedCarousel && isCarouselRenderRequest(message)
+      ? await startApprovedCarouselRender({ approval: approvedCarousel, identity, conversationId, deps })
+      : null;
     const pendingFollowUpReply = pendingCarousel
       ? buildCarouselFollowUpReply({ message, pending: pendingCarousel, identity, conversationId })
-      : (approvedCarousel && isCarouselRenderRequest(message) ? buildCarouselRenderHandoffReply() : null);
+      : approvedRenderReply;
     if (pendingFollowUpReply) {
       const reply = pendingFollowUpReply;
       if (wantsStream) {

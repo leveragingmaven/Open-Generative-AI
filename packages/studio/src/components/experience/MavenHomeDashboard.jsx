@@ -157,11 +157,126 @@ function QuickActionButton({ item }) {
   );
 }
 
+const CAROUSEL_POLL_MS = 4000;
+const CAROUSEL_TERMINAL = new Set(["completed", "failed", "canceled"]);
+
+// The chat reply names the job in its download link, e.g. `jobId=mcar-...`.
+export function extractCarouselJobId(content) {
+  if (typeof content !== "string") return null;
+  const match = content.match(/\/api\/motion-carousel\?file=full-deck\.mp4&jobId=(mcar-[A-Za-z0-9-]+)/);
+  return match ? match[1] : null;
+}
+
+// Tracks one carousel render inside the chat: polls the owner-scoped status route
+// until a terminal state, shows the finished MP4 inline, and offers an in-chat retry.
+function CarouselRenderCard({ jobId }) {
+  const [job, setJob] = useState(null);
+  const [error, setError] = useState("");
+  const [retrying, setRetrying] = useState(false);
+  // Bumped on each retry so polling restarts after a terminal (failed) state.
+  const [pollRound, setPollRound] = useState(0);
+  const retryingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    let timer = null;
+    let controller = null;
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        const response = await fetch(`/api/motion-carousel?jobId=${encodeURIComponent(jobId)}`, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => null);
+        if (!mountedRef.current) return;
+        if (!response.ok || !data?.job) {
+          setError(data?.error || "Unable to check this render.");
+          return;
+        }
+        setJob(data.job);
+        setError("");
+        if (!CAROUSEL_TERMINAL.has(data.job.status)) timer = window.setTimeout(poll, CAROUSEL_POLL_MS);
+      } catch (err) {
+        if (err?.name === "AbortError" || !mountedRef.current) return;
+        setError("Unable to check this render. Retrying shortly.");
+        timer = window.setTimeout(poll, CAROUSEL_POLL_MS);
+      }
+    };
+    poll();
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [jobId, pollRound]);
+
+  const handleRetry = async () => {
+    if (retryingRef.current) return;
+    retryingRef.current = true;
+    setRetrying(true);
+    setError("");
+    try {
+      const response = await fetch("/api/motion-carousel", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retry", jobId }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!mountedRef.current) return;
+      if (!response.ok || !data?.job) {
+        setError(data?.error || "This render could not be retried.");
+        return;
+      }
+      setJob(data.job);
+      setPollRound((round) => round + 1);
+    } catch {
+      if (mountedRef.current) setError("This render could not be retried. Please try again.");
+    } finally {
+      retryingRef.current = false;
+      if (mountedRef.current) setRetrying(false);
+    }
+  };
+
+  if (!job) {
+    return <p className={styles.messageIdentity}>{error || "Checking carousel render…"}</p>;
+  }
+
+  const videoUrl = `/api/motion-carousel?file=full-deck.mp4&jobId=${encodeURIComponent(jobId)}`;
+  return (
+    <div className={styles.videoResultActions} aria-live="polite">
+      {job.status === "completed" ? (
+        <div className={styles.videoResult}>
+          <video controls playsInline preload="metadata" src={videoUrl} aria-label="Finished carousel" />
+          <a className={styles.imageAction} href={videoUrl} download="maven-carousel-full-deck.mp4">
+            <Icon type="download" size={13} /><span>Download carousel MP4</span>
+          </a>
+        </div>
+      ) : job.status === "failed" || job.status === "canceled" ? (
+        <div>
+          <p className={styles.messageIdentity}>{job.status === "failed" ? "The carousel render failed." : "The carousel render was canceled."}</p>
+          {job.status === "failed" ? (
+            <button type="button" className={styles.imageAction} onClick={() => void handleRetry()} disabled={retrying}>
+              <span>{retrying ? "Retrying…" : "Retry render"}</span>
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <p className={styles.messageIdentity}>{`Rendering carousel… ${job.progress || 0}%`}</p>
+      )}
+      {error ? <span className={styles.imageActionError} role="alert">{error}</span> : null}
+    </div>
+  );
+}
+
 function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onRefine }) {
   const isUser = message.role === "user";
   const imageUrls = isUser ? [] : extractGeneratedImageUrls(message.content || "");
   const videoUrls = isUser ? [] : extractGeneratedVideoUrls(message.content || "");
   const audioUrls = isUser ? [] : extractGeneratedAudioUrls(message.content || "");
+  const carouselJobId = isUser ? null : extractCarouselJobId(message.content || "");
   const referenceIds = !isUser && Array.isArray(message.attachments)
     ? message.attachments.map((attachment) => typeof attachment === "string" ? attachment : attachment?.attachmentId).filter((id) => typeof id === "string" && /^asset_[A-Za-z0-9_-]{1,190}$/.test(id))
     : [];
@@ -232,6 +347,7 @@ function MavenBubble({ message, streaming, previousPrompt = "", onVariation, onR
             </button>
           </div>
         ) : null}
+        {!isUser && !streaming && carouselJobId ? <CarouselRenderCard jobId={carouselJobId} /> : null}
         {!isUser && !streaming && audioUrls.length ? (
           <div className={styles.videoResultActions}>
             {audioUrls.map((url, index) => (
