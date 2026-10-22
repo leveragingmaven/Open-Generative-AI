@@ -191,6 +191,19 @@ export function detectKeyword(brief) {
   return "LINK";
 }
 
+/**
+ * The button text for a CTA action. It only restates the action the brief asks for
+ * (comment a keyword, follow, save, DM, or use the link), so it makes no claim about
+ * the product.
+ */
+export function ctaLabelFor(action, keyword) {
+  if (action === "comment" && keyword && keyword !== "LINK") return `Comment ${keyword}`;
+  if (action === "dm") return "Send a DM";
+  if (action === "follow") return "Follow for more";
+  if (action === "save") return "Save this post";
+  return "Link in bio";
+}
+
 function detectCtaAction(keyword, brief) {
   const text = String(brief || "").toLowerCase();
   if (/\bdm\b/.test(text)) return "dm";
@@ -218,6 +231,10 @@ const GLOBAL_LABEL_LINE = /^(?:global|format|design|visual|motion|style|animatio
 const GLOBAL_BARE_LINE = /^(?:no (?:background )?music|no voice ?over|mavensync branding|preserve\b)/i;
 // Creative direction written after the numbered copy, e.g. "Use Instagram portrait 4:5 format."
 const DIRECTION_LINE = /^(?:use|keep|make|add|set|apply|format|animate)\b.*\b(?:format|portrait|landscape|square|music|voice ?over|animat\w*|camera|renderer|colou?rs?|palette|fonts?|wording|exactly|style|branding)\b/i;
+// A sentence describing how a slide should look ("Open with dramatic typography, a sleek dark
+// background...", "Show an artistic composition..."). It must start with a direction verb AND name a
+// visual element, so ordinary copy is left alone. Such lines are production direction, never copy.
+const VISUAL_DESCRIPTION_LINE = /^(?:open|start|show|reveal|animate|fade|transition|transform|place|display|feature|zoom|pan|scatter|build)\b.*\b(?:background|backgrounds|typography|light|lighting|composition|workspace|interfaces?|circle|camera|gradient|glow|shadow|texture|layout|shot|scene|visual|motion|transition)\b/i;
 const CTA_LINE = /^(?:cta|call to action|button)\s*:\s*(.+)$/i;
 const QUOTED = /["“”]([^"“”]+)["“”]/;
 const HIGHLIGHT_LINE = /^highlights?\s+(.+?)\.?$/i;
@@ -308,7 +325,7 @@ export function parseExplicitSlides(brief) {
       blocks.push(current);
       continue;
     }
-    if (GLOBAL_LABEL_LINE.test(line) || GLOBAL_BARE_LINE.test(line) || DIRECTION_LINE.test(line)) {
+    if (GLOBAL_LABEL_LINE.test(line) || GLOBAL_BARE_LINE.test(line) || DIRECTION_LINE.test(line) || VISUAL_DESCRIPTION_LINE.test(line)) {
       current = null;
       continue;
     }
@@ -364,7 +381,7 @@ function explicitSkeleton(parsedSlides, action, keyword, { slideLabels = false }
     const highlight = parsed.body ? parsed.body.match(HIGHLIGHT_LINE) : null;
     let visual;
     if (isLast) {
-      visual = { type: "cta", action, keyword, ...(parsed.cta ? { ctaLabel: parsed.cta } : {}) };
+      visual = { type: "cta", action, keyword, ctaLabel: parsed.cta || ctaLabelFor(action, keyword) };
     } else if (highlight) {
       visual = { type: "list", items: highlight[1].split(LIST_SPLIT).map((item) => item.trim()).filter(Boolean) };
     } else {
@@ -456,7 +473,7 @@ function buildStorySkeleton(topic, count, keyword, action, facts = {}) {
     role: "cta",
     kicker: "NEXT STEP",
     headline: `Comment ${keyword} to get the details`,
-    visual: { type: "cta", action, keyword, reward: `${shortTopic} details`.slice(0, 24), icon: "gift" },
+    visual: { type: "cta", action, keyword, ctaLabel: ctaLabelFor(action, keyword), reward: `${shortTopic} details`.slice(0, 24), icon: "gift" },
   };
   return [...body, cta];
 }

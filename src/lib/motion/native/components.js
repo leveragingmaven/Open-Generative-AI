@@ -583,14 +583,20 @@ export const ctaCard = {
       lineHeight: Math.round(ctx.type.displaySize * ctx.type.displayLeading),
     });
     const { lineHeight } = layout;
+    // When the scene already drew the headline (continuous look), the card leaves the
+    // headline out and places the button straight below the box top.
     const top = box.y + 96;
-    const { body, fitted } = displayBlock(ctx, {
-      headline, box, layout, top, fill: theme.ink,
-      pillInk: theme.dark ? theme.surface : "#FFFFFF",
-      tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
-    });
+    const { body, fitted } = ctx.headlineDrawn
+      ? { body: [], fitted: layout.fitted }
+      : displayBlock(ctx, {
+        headline, box, layout, top, fill: theme.ink,
+        pillInk: theme.dark ? theme.surface : "#FFFFFF",
+        tracking: ctx.type.displayTracking, staggerWindow: ctx.motion.stagger,
+      });
 
-    const buttonY = top + layout.fitted.lines.length * lineHeight + 88;
+    const buttonY = ctx.headlineDrawn
+      ? box.y + 88
+      : top + layout.fitted.lines.length * lineHeight + 88;
     const buttonW = Math.min(box.w, ctx.measureBody(label, 40) + 132);
     const buttonP = easeOutBack(progress(t, 0.44, 0.8));
     const pulse = 1 + Math.sin(clamp01((t - 0.62) / 0.38) * Math.PI * 2) * 0.02;
@@ -662,6 +668,16 @@ export const listReveal = {
       .filter(Boolean)
       .slice(0, 5);
     const rows = items.length ? items : [String(slide.sub || "").trim()].filter(Boolean);
+    // A slide with no rows and no copy still gets its icon: a sparkle glyph in the box.
+    if (!rows.length && visual.icon) {
+      const p = easeOutBack(progress(t, 0.1, 0.7));
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      const r = Math.min(box.w, box.h) * 0.3 * p;
+      const k = r * 0.22;
+      const d = `M ${n(cx)} ${n(cy - r)} Q ${n(cx + k)} ${n(cy - k)} ${n(cx + r)} ${n(cy)} Q ${n(cx + k)} ${n(cy + k)} ${n(cx)} ${n(cy + r)} Q ${n(cx - k)} ${n(cy + k)} ${n(cx - r)} ${n(cy)} Q ${n(cx - k)} ${n(cy - k)} ${n(cx)} ${n(cy - r)} Z`;
+      return { body: [group({ opacity: clamp01(p * 1.5), children: path({ d, fill: theme.accent, stroke: "none" }) })] };
+    }
     const rowHeight = Math.min(136, Math.floor(box.h / Math.max(1, rows.length)));
     const railP = easeOutExpo(progress(t, 0.14, 0.92));
     const body = [

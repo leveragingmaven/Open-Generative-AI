@@ -178,6 +178,16 @@ export async function prepareLayerAssets({ deck, outDir, spec, loadFs = null } =
   return { background, foreground, warnings };
 }
 
+/**
+ * The fingerprint a slide's cache key is built from. A shared scene (continuous or layered) is one
+ * timeline, so the scene key alone is identical for every slide: the slide index must be part of it,
+ * or every slide would reuse the first slide's cached file.
+ */
+export function slideFingerprint({ sceneKey, fingerprint, index, audio }) {
+  const base = sceneKey ? `${sceneKey}|slide=${index}` : (fingerprint || String(index));
+  return `${base}|audio=${audio}`;
+}
+
 export function slideCacheKey({ fingerprint, presetId, theme, fps, frames, width, height, revision = NATIVE_RENDERER_VERSION }) {
   return hashString([
     revision, fingerprint, presetId, theme?.surface || '', theme?.accent || '',
@@ -354,7 +364,9 @@ export function createNativeMotionRenderer({
     // Derived from the renderer's own source, so no cached frame can outlive the
     // drawing code that produced it.
     // Sound is part of each slide's MP4, so the audio mode must be part of its cache key.
-    const mood = MOODS[deck.music] ? deck.music : 'none';
+    // Built-in synthesized beds are disabled: they sounded like retro game music. Music now
+    // comes only from an uploaded soundtrack (see uploadedAudio below), or silence.
+    const mood = 'none';
     const accents = typeof deck.sfx === 'boolean' ? deck.sfx : mood !== 'none';
     const revision = await nativeRenderRevision({ fallback: NATIVE_RENDERER_VERSION });
     // A continuous scene is one timeline: an edit to any slide moves the camera and background of
@@ -366,7 +378,7 @@ export function createNativeMotionRenderer({
       ? `continuous|${hashString(spec.slides.map((_, i) => fingerprints?.[i] || String(i)).join('|'))}`
       : null;
     const slideKeys = spec.slides.map((slide, index) => slideCacheKey({
-      fingerprint: `${sceneKey || fingerprints?.[index] || String(index)}|audio=${mood}:${accents ? 1 : 0}`,
+      fingerprint: slideFingerprint({ sceneKey, fingerprint: fingerprints?.[index], index, audio: `${mood}:${accents ? 1 : 0}` }),
       presetId: spec.presetId,
       theme: spec.theme,
       fps: spec.fps,

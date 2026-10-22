@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planCarousel } from "../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js";
+import { detectSceneMode, planCarousel } from "../../packages/studio/src/lib/motion/carousel/CarouselPlanner.js";
 import { presetStyleSheet } from "../../packages/studio/src/lib/motion/carousel/CarouselStyleSheet.js";
 import {
   buildCarouselStoryboardReply,
@@ -131,4 +131,29 @@ test("a render request after approval gets the Motion Design handoff without reg
   assert.match(reply, /Motion Design → Carousel/);
   assert.doesNotMatch(reply, /maven-carousel-approval:/);
   assert.equal(buildCarouselFollowUpReply({ message: "tell me a joke", pending, identity: IDENTITY, conversationId: "conversation-1", now: NOW }), null);
+});
+
+const PRODUCTION_DIRECTION_BRIEF = `Create an Instagram 4:5 carousel about MavenSync Creator Suite.
+Slide 1 — The Hook
+"WAITING FOR CONFIDENCE?"
+Open with dramatic typography, a sleek dark background, and cinematic gold light revealing the headline.
+Slide 2 — The Problem
+"CONFIDENCE COMES FROM ACTION."
+Show an artistic composition of scattered creative interfaces transforming into an organized workspace.
+Slide 3 — The Close
+"BUILD IT ANYWAY."
+Visual direction: one continuous visual world, a traveling gold circle, connected backgrounds, kinetic typography, smooth camera movement.`;
+
+test("production visual-direction sentences are never rendered as slide copy", () => {
+  const plan = planCarousel({ brief: PRODUCTION_DIRECTION_BRIEF });
+  assert.deepEqual(plan.deck.slides.map((slide) => slide.headline), ["WAITING FOR CONFIDENCE?", "CONFIDENCE COMES FROM ACTION.", "BUILD IT ANYWAY."]);
+  const copy = JSON.stringify(plan.deck.slides);
+  assert.doesNotMatch(copy, /Open with dramatic typography/);
+  assert.doesNotMatch(copy, /artistic composition/);
+  assert.doesNotMatch(copy, /Visual direction/);
+  assert.equal(plan.deck.slides[1].sub, undefined);
+});
+
+test("a visual-direction brief selects the continuous scene mode for the chat path", () => {
+  assert.equal(detectSceneMode(PRODUCTION_DIRECTION_BRIEF), "continuous");
 });

@@ -210,7 +210,48 @@ function drawSlide(index, lf, ctx, { showPhoto = true } = {}) {
   });
   const out = [...drawChrome(index, lf, ctx), ...photo, ...head.nodes];
   if (slide.sub) out.push(...drawSub(index, slide.sub, ctx, { lf, y: head.lastBaseline + 110 }));
+  const visualTop = head.lastBaseline + (slide.sub ? 260 : 130);
+  out.push(...drawVisual(index, lf, ctx, { x: MARGIN, y: visualTop, w: ctx.spec.width - MARGIN * 2, h: Math.max(280, VISUAL_BOTTOM - visualTop) }));
   return out;
+}
+
+/** Lowest y a slide's visual may reach, clear of the footer baseline. */
+const VISUAL_BOTTOM = 1150;
+const VISUAL_ANIM_FRAMES = 96;
+
+/**
+ * The slide's structured visual, drawn with the same component library the standard look
+ * uses. The component gets a slide-local box and a 0→1 progress value for its own
+ * timeline, so its entrance animation runs inside this slide's segment.
+ */
+function drawVisual(index, lf, ctx, box) {
+  const { spec } = ctx;
+  const slide = spec.slides[index];
+  const component = slide.component;
+  if (!component || component.id === "headlineReveal") return [];
+  const t = clamp01(lf / VISUAL_ANIM_FRAMES);
+  const componentCtx = {
+    id: `c${index}`,
+    theme: spec.theme,
+    fonts: ctx.views,
+    type: spec.type,
+    motion: spec.motion,
+    measure: spec.measures.measure,
+    measureBody: spec.measures.measureBody,
+    measureSerif: spec.measures.measureSerif,
+    measureMono: spec.measures.measureMono,
+    slide: slide.deckSlide,
+    visual: slide.deckSlide.visual || {},
+    box,
+    t,
+    defs: ctx.defs,
+    image: ctx.image,
+    // drawSlide always draws the headline in this look, so a component that would
+    // otherwise draw its own headline (ctaCard) must not draw it a second time.
+    headlineDrawn: true,
+  };
+  const drawn = component.draw(componentCtx) || {};
+  return drawn.body || [];
 }
 
 /**
@@ -239,6 +280,7 @@ export function composeContinuousFrame({ spec, slideIndex = 0, frameIndex = 0, f
     views: fontViewsFor(spec.fonts, layout),
     reveal: (frame, start, length) => easeOutQuint(progress(frame, start, start + length)),
     image: imageResolver,
+    defs: [],
   };
 
   // Every slide is drawn in world space. The camera and the SVG viewport clip what is off screen.
@@ -256,6 +298,7 @@ export function composeContinuousFrame({ spec, slideIndex = 0, frameIndex = 0, f
   const defs = [];
   if (fontStyle) defs.push(`<style>${fontStyle}</style>`);
   defs.push(...defsFor(spec, t));
+  defs.push(...ctx.defs);
   const svg = svgDocument({
     width: spec.width,
     height: spec.height,
