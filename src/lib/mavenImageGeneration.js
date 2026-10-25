@@ -3,8 +3,41 @@ import { muApiProvider } from '../../packages/studio/src/lib/providers/MuApiProv
 import { extractImagePrompt } from '../../packages/studio/src/lib/mavenImageIntent.js';
 import { resolveProviderCredential } from './providerCredentialResolver.js';
 import { selectMavenImageRoute, selectMavenImageEditRoute, stripRoutingFromPrompt } from './mavenImageModelRouter.js';
+import { createHash } from 'node:crypto';
+import { SkillResolver } from '../../packages/studio/src/lib/skills/SkillResolver.js';
+import { deriveCreativeSkillGuidance } from '../../packages/studio/src/lib/creative-brief/CreativeSkill.js';
+import { materializeExecutionInputs } from '../../packages/studio/src/lib/intelligence/ExecutionPromptMaterializer.js';
+import { unresolvedProductIdentity } from '../../packages/studio/src/lib/skills/product-hero-photography.js';
 
 export const MAVEN_IMAGE_TIMEOUT_MS = 120000;
+
+// Thin composition of the same resolver/guidance/materializer used by planning.
+// It neither routes providers nor accepts caller-supplied skill implementations.
+export function prepareMavenImageCreativeInput({ prompt, operation = 'image_generation', references = [], creativeContext = null, maxPromptCharacters = Infinity } = {}) {
+  const resolver = new SkillResolver();
+  const matches = resolver.resolve({ intent: prompt, studio: 'image' }).matches
+    .filter(match => match.reasons.includes('matches a curated creative intent'));
+  const skills = matches.map(match => match.skill);
+  const creativeSkills = deriveCreativeSkillGuidance(skills, { studio: 'image' });
+  const brandContext = typeof creativeContext?.text === 'string' ? creativeContext.text : '';
+  // Missing essential identity is a clarification, never a fabricated package.
+  const missing = skills.some(skill => skill.skillId === 'product-hero-photography')
+    ? unresolvedProductIdentity({ intent: prompt, references, inputs: { brandContext } }) : null;
+  if (missing) throw imageError('creative_input_required', missing.question, 422);
+  const materialized = materializeExecutionInputs({
+    plan: { request: { operation, intent: prompt }, creativeSkills },
+    inputs: { prompt, ...(brandContext ? { brandContext } : {}) }, references, maxPromptCharacters,
+  });
+  const contextReferences = brandContext && materialized.inputs.prompt.includes(brandContext) ? [{
+    type: 'project-context', id: creativeContext.projectId || null,
+    revision: createHash('sha256').update(brandContext).digest('hex'),
+  }] : [];
+  return { prompt: materialized.inputs.prompt, creativeIntelligence: {
+    skillReferences: materialized.metadata.skillReferences,
+    contextReferences, usedCreativeGuidance: materialized.metadata.usedCreativeGuidance,
+    qaRequirements: skills.flatMap(skill => skill.qaRequirements || skill.validation?.qualityGates || []),
+  } };
+}
 
 function imageError(code, message, status) {
   return Object.assign(new Error(message), { code, status });
@@ -46,6 +79,7 @@ function isHttpsUrl(value) {
 export async function generateMavenImage({
   identity,
   prompt,
+  creativeContext = null,
   signal,
   credentialResolver = resolveProviderCredential,
   provider = falProvider,
@@ -91,7 +125,8 @@ export async function generateMavenImage({
     if (!target) throw credentialRequiredError(null);
   }
 
-  const brief = stripRoutingFromPrompt(safePrompt, route) || safePrompt;
+  const enriched = prepareMavenImageCreativeInput({ prompt: stripRoutingFromPrompt(prompt, route, { preserveFormatting: true }) || prompt, creativeContext, maxPromptCharacters: target.model.inputs?.prompt?.maxLength });
+  const brief = enriched.prompt;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -145,6 +180,7 @@ export async function generateMavenImage({
   return {
     url,
     prompt: brief,
+    creativeIntelligence: enriched.creativeIntelligence,
     model: target.model.id,
     modelName: target.model.name,
     transport: target.transport,
@@ -165,7 +201,7 @@ const PRESERVATION_ATTRIBUTES = Object.freeze([
 
 /** Deterministic preservation language; explicitly requested subject changes are omitted, not contradicted. */
 export function enhanceMavenImageEditPrompt(prompt) {
-  const text = String(prompt || '').replace(/\s+/g, ' ').trim();
+  const text = String(prompt || '').trim();
   if (!text || !LOCALIZED_CHANGE.test(text)) return text;
   const preserve = PRESERVATION_ATTRIBUTES.filter((attribute) => !attribute.changed.test(text)).map((attribute) => attribute.name);
   if (!preserve.length) return text;
@@ -179,6 +215,7 @@ export function enhanceMavenImageEditPrompt(prompt) {
 export async function generateMavenImageEdit({
   identity,
   prompt,
+  creativeContext = null,
   imageUrl,
   signal,
   credentialResolver = resolveProviderCredential,
@@ -208,7 +245,8 @@ export async function generateMavenImageEdit({
   }
   if (!apiKey) throw credentialRequiredError('muapi', route.model.name);
 
-  const brief = enhanceMavenImageEditPrompt(stripRoutingFromPrompt(safePrompt, route) || safePrompt);
+  const enriched = prepareMavenImageCreativeInput({ prompt: enhanceMavenImageEditPrompt(stripRoutingFromPrompt(prompt, route, { preserveFormatting: true }) || prompt), operation: 'image_editing', references: [{ url: imageUrl, role: 'source_image' }], creativeContext, maxPromptCharacters: route.model.inputs?.prompt?.maxLength });
+  const brief = enriched.prompt;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onCallerAbort = () => controller.abort();
@@ -243,7 +281,7 @@ export async function generateMavenImageEdit({
   if (typeof url !== 'string' || !isHttpsUrl(url)) {
     throw imageError('image_generation_failed', 'Image editing returned no usable image.', 502);
   }
-  return { url, prompt: brief, model: route.model.id, modelName: route.model.name, transport: 'muapi', aspectRatio: route.aspectRatio, operation: 'image_editing' };
+  return { url, prompt: brief, model: route.model.id, modelName: route.model.name, transport: 'muapi', aspectRatio: route.aspectRatio, operation: 'image_editing', creativeIntelligence: enriched.creativeIntelligence };
 }
 
 /** Assistant reply that carries the generated image as markdown, so it streams and persists like any message. */

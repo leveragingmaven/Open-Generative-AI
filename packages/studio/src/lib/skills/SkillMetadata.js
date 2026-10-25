@@ -7,6 +7,8 @@ const ARRAY_FIELDS = [
   "compatibleContentTypes",
   "compatibleCampaignTemplates",
   "compatibleRecipes",
+  "intentPatterns",
+  "intentRequiredStudios",
 ];
 const REQUIRED_FIELDS = ["skillId", "name", "version", "category", "supportedStudios", "vocabulary", "status"];
 
@@ -44,6 +46,13 @@ export function validateSkillManifest(skill, { registryKey = null } = {}) {
   }
   if (skill.discoverable !== undefined && typeof skill.discoverable !== "boolean") {
     issues.push(issue(skill.skillId, "discoverable", "must be a boolean when provided"));
+  }
+  if (skill.intentRequired !== undefined && typeof skill.intentRequired !== 'boolean') issues.push(issue(skill.skillId, 'intentRequired', 'must be a boolean'));
+  for (const pattern of Array.isArray(skill.intentPatterns) ? skill.intentPatterns : []) {
+    try {
+      if (typeof pattern !== 'string' || pattern.length > 256) throw new Error();
+      new RegExp(pattern, 'i');
+    } catch { issues.push(issue(skill.skillId, 'intentPatterns', 'must contain bounded valid regular expressions')); }
   }
   for (const field of ARRAY_FIELDS) {
     if (skill[field] !== undefined && !Array.isArray(skill[field])) {

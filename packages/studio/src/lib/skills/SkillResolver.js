@@ -67,7 +67,8 @@ function explicitId(request) {
 }
 
 function requestedStudios(request) {
-  return uniqueNormalized(request.studios || request.studio || request.studioId || request.supportedStudio);
+  const declared = request.studios || request.studio || request.studioId || request.supportedStudio;
+  return uniqueNormalized(declared || (/^(image|video|audio)_/.exec(request.operation || '')?.[1]));
 }
 
 function isDiscoverable(skill) {
@@ -83,6 +84,11 @@ function supportsRequestedStudios(skill, studios) {
 function scoreSkill(skill, request, studios) {
   const reasons = [];
   let score = 0;
+  const intentMatch = (skill.intentPatterns || []).some(pattern => new RegExp(pattern, 'i').test(String(request.intent || '')));
+  if (intentMatch) {
+    score += 100;
+    reasons.push('matches a curated creative intent');
+  }
   const intent = normalize(request.intent);
   const searchable = normalize(metadataText(skill));
 
@@ -157,6 +163,10 @@ export class SkillResolver {
     const matches = Object.values(this.skills)
       .filter(isDiscoverable)
       .filter((skill) => supportsRequestedStudios(skill, studios))
+      .filter((skill) => {
+        const requiresIntent = skill.intentRequired || studios.some(studio => (skill.intentRequiredStudios || []).includes(studio));
+        return !requiresIntent || (skill.intentPatterns || []).some(pattern => new RegExp(pattern, 'i').test(String(requested.intent || '')));
+      })
       .map((skill) => {
         const result = scoreSkill(skill, requested, studios);
         return { skill, ...result };

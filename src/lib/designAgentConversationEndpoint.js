@@ -259,7 +259,7 @@ export function createControlledConversationIntelligence(textProvider, visionTex
 const forbiddenFields = [
   'provider', 'model', 'endpoint', 'apiKey', 'routing', 'recipe', 'operation',
   'funding', 'authorization', 'accountId', 'creatorId', 'identityKey', 'references',
-  'attachmentUrls', 'executionSettings', 'toolSettings',
+  'attachmentUrls', 'executionSettings', 'toolSettings', 'creativeContext', 'creativeSkills', 'skillInstructions',
   // Phase 7.1c: project context is server-derived from the authenticated session.
   // A browser may associate a session with a project id through
   // /api/design-agent/sessions/{id}/project and nothing else, so project content
@@ -593,6 +593,14 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     return services[name];
   };
 
+  let creativeContextPromise;
+  const readCreativeContext = () => creativeContextPromise ||= (async () => {
+    try {
+      const resolve = await getService('resolveProjectContext');
+      return typeof resolve === 'function' ? await resolve({ identity, designSessionId: conversationId }) : null;
+    } catch { return null; } // Preserve the existing optional-project behavior.
+  })();
+
   // Streaming is opt-in via the Accept header; auth, ownership, and field
   // validation below still fail with normal JSON status codes either way.
   const wantsStream = deps.wantsStream !== undefined
@@ -861,7 +869,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // Image requests without references use the existing text-to-image path.
     if (!trustedAttachments.length && isImageGenerationRequest(message)) {
       const generateImage = await getService('generateMavenImage');
-      const image = await generateImage(identity, { prompt: message, signal: request?.signal });
+      const image = await generateImage(identity, { prompt: message, creativeContext: await readCreativeContext(), signal: request?.signal });
       const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImage === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImage === undefined });
       const reply = withLibraryWarning(buildGeneratedImageReply({ ...image, referenceUnavailable: !generatedReferences.length }), generatedReferences);
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
@@ -884,6 +892,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       const image = await editImage(identity, {
         prompt: message,
         imageUrl: trustedImageUrl(trustedAttachments.find((item) => item.kind === 'image')),
+        creativeContext: await readCreativeContext(),
         signal: request?.signal,
       });
       const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImageEdit === undefined, sourceAssetId: trustedAttachments.find((item) => item.kind === 'image')?.attachmentId });
@@ -921,18 +930,7 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
     // here, never from the request body — a browser may only associate an id. The
     // resolution is fail-open by design: an unavailable or deleted project leaves
     // the turn exactly as it was before this feature existed.
-    let projectContext = '';
-    try {
-      const resolveProjectContext = deps.resolveProjectContext !== undefined
-        ? deps.resolveProjectContext
-        : await getService('resolveProjectContext');
-      if (typeof resolveProjectContext === 'function') {
-        const resolved = await resolveProjectContext({ identity, designSessionId: conversationId });
-        projectContext = typeof resolved?.text === 'string' ? resolved.text : '';
-      }
-    } catch {
-      projectContext = '';
-    }
+    const projectContext = (await readCreativeContext())?.text || '';
 
     const textProviderFactory = await getService('createTextProvider');
     const conversationServiceFactory = await getService('createConversationIntelligence');
@@ -960,6 +958,14 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments),
     };
   } catch (error) {
+    if (error?.code === 'creative_input_required') {
+      const reply = error.message;
+      if (wantsStream) return buildConversationStreamResponse({
+        service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } },
+        sessionReadResult: {}, message,
+      });
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply) };
+    }
     return conversationErrorResponse(error);
   }
 }

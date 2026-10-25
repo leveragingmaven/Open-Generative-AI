@@ -46,7 +46,7 @@ test("applyCreativeSkill carries constraints and creative principles", () => {
   assert.deepEqual(enriched.skill.creativePrinciples, SKILL.creativePrinciples);
   assert.equal(enriched.skill.skillId, "product-hero-photography");
   assert.equal(enriched.skill.name, "Product Hero Photography");
-  assert.equal(enriched.skill.version, "1.0.0");
+  assert.equal(enriched.skill.version, "1.1.0");
 });
 
 test("applyCreativeSkill records applied vocabulary with provenance", () => {
