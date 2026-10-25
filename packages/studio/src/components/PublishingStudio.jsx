@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
+import { importPublishingHandoff } from "../lib/publishing/publishingHandoff.js";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
 import { effectivePublishingDraftStatus, isActivePublishingQueueDraft, isPublishingDraftNeedsAttention, isScheduledPublishingStatus, PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
@@ -502,6 +503,13 @@ export default function PublishingStudio() {
       window.history.replaceState(window.history.state, "", cleanedUrl);
     }
     const draftId = params.get("draft");
+    const handoffId = params.get("handoff");
+    if (handoffId) void importPublishingHandoff(handoffId, center).then(draft => {
+      if (centerRef.current !== center) return;
+      setFocusedDraftId(draft.id);
+      setDrafts(center.getDrafts());
+      setNotice({ tone: "success", text: "Approved content opened as a draft. Review it and choose destinations before scheduling or publishing." });
+    }).catch(error => { if (centerRef.current === center) setNotice({ tone: "error", text: error.message }); });
     if (draftId) {
       setFocusedDraftId(draftId);
       setNotice({ tone: "success", text: "Publishing draft created from Creative Library. Add caption details, choose destinations, then publish or schedule." });

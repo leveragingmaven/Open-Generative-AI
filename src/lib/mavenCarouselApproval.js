@@ -170,7 +170,7 @@ export function buildCarouselApprovedReply({ pending, identity, conversationId }
     '**Storyboard approved.**',
     '',
     'Open Motion Design → Carousel. The approved storyboard loads there with its headlines, slide order and direction unchanged. Chat does not render carousels.',
-    'Rendering runs locally (Python + FFmpeg) — no paid API is used — and unchanged slides are reused on future edits.',
+    'Rendering uses the existing MavenSync native renderer with FFmpeg — no paid API is used — and unchanged slides are reused on future edits.',
   ];
   const canRecord = Boolean(pending?.brief && pending?.sheet && pending?.sheetFingerprint && identity && conversationId && Number.isFinite(pending?.expiresAt));
   if (!canRecord) return lines.join('\n');

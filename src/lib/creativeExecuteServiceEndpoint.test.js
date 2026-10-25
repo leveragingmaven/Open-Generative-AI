@@ -160,10 +160,12 @@ test('execute: structured Knowledge Pack is kept only when schema and Brand DNA/
   assert.equal(normalizedMetadata.knowledgePack.structured.audience, 'Founders');
 
   normalizedMetadata = undefined;
-  await run(makeProposal({
-    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: { schema: 'creator-knowledge-pack-context.v1', authorityBlueprint: { id: 'bp', version: 1, content: 'tampered', sha256 } } } },
+  const tampered = await run(makeProposal({
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { id: 'bp', version: 1, content: 'tampered', sha256 } } } },
   }), { deps });
-  assert.equal(normalizedMetadata.knowledgePack, undefined);
+  assert.equal(tampered.status, 400);
+  assert.equal((await tampered.json()).code, 'knowledge_pack_integrity_invalid');
+  assert.equal(normalizedMetadata, undefined);
 });
 
 test('execute: structured Knowledge Pack is kept only when ownerEmail matches the verified service identity', async () => {
@@ -191,22 +193,44 @@ test('execute: structured Knowledge Pack is kept only when ownerEmail matches th
   assert.equal(normalizedMetadata.knowledgePack.structured.audience, 'Founders');
   assert.equal(normalizedMetadata.knowledgePack.structured.ownerEmail, SUBJECT);
 
-  // Mismatched owner fails closed: the structured pack is dropped.
+  // Mismatched owner rejects before authorization or execution.
   normalizedMetadata = undefined;
-  await send(structuredFor('someone-else@example.com'));
-  assert.equal(normalizedMetadata.knowledgePack, undefined);
+  assert.equal((await send(structuredFor('someone-else@example.com'))).status, 403);
+  assert.equal(normalizedMetadata, undefined);
 
   // Missing owner binding fails closed.
   normalizedMetadata = undefined;
-  await send(structuredFor(undefined));
-  assert.equal(normalizedMetadata.knowledgePack, undefined);
+  assert.equal((await send(structuredFor(undefined))).status, 403);
+  assert.equal(normalizedMetadata, undefined);
 
   // Browser-supplied ownerEmail cannot override the verified identity.
   normalizedMetadata = undefined;
-  await run(makeProposal({
+  const mismatched = await run(makeProposal({
     metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: structuredFor(SUBJECT), ownerEmail: 'attacker@example.com' } },
   }), { deps, identity: { ...makeIdentity(), email: 'victim@example.com' } });
-  assert.equal(normalizedMetadata.knowledgePack, undefined);
+  assert.equal(mismatched.status, 403);
+  assert.equal(normalizedMetadata, undefined);
+});
+
+test('invalid structured packs reject before approval, durable job lookup or provider execution', async () => {
+  let sideEffects = 0;
+  const unexpected = async () => { sideEffects++; throw new Error('must not run'); };
+  const blueprint = 'Approved exact text';
+  const sha256 = crypto.createHash('sha256').update(blueprint).digest('hex');
+  for (const structured of [
+    { schema: 'unknown', ownerEmail: SUBJECT },
+    { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { content: blueprint } },
+    { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { content: blueprint, sha256: 'bad' } },
+    { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { content: `${blueprint} changed`, sha256 } },
+    { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { content: 'x'.repeat(60001), sha256 } },
+  ]) {
+    const response = await run(makeProposal({ metadata: { knowledgePack: { summary: 'Approved knowledge', structured } } }), {
+      deps: { issueApproval: unexpected, jobRepository: makeJobRepository({ getJobByIdempotencyKey: unexpected }), executionService: { executeReadyJob: unexpected } },
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, 'knowledge_pack_integrity_invalid');
+  }
+  assert.equal(sideEffects, 0);
 });
 
 test('execute-service rejects browser/session authentication even with a valid-looking payload', async () => {

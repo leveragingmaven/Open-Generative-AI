@@ -60,10 +60,12 @@ function validatedStructuredKnowledgePack(candidate) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
   if (candidate.schema !== STRUCTURED_KNOWLEDGE_SCHEMA) return undefined;
   const blueprint = candidate.authorityBlueprint && typeof candidate.authorityBlueprint === 'object' ? candidate.authorityBlueprint : null;
+  if (typeof blueprint?.content === 'string' && blueprint.content.length > STRUCTURED_TEXT_MAX) return { integrityError: true };
   const blueprintContent = boundedText(blueprint?.content);
-  // Integrity: when Hub supplies a SHA-256 for the blueprint, the text must match it.
-  if (blueprintContent && typeof blueprint.sha256 === 'string') {
-    if (createHash('sha256').update(blueprintContent, 'utf8').digest('hex') !== blueprint.sha256) return { integrityError: true };
+  // Verify the exact approved bytes; never execute with an unhashed or truncated blueprint.
+  if (blueprintContent) {
+    if (typeof blueprint.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(blueprint.sha256)
+      || createHash('sha256').update(blueprintContent, 'utf8').digest('hex') !== blueprint.sha256) return { integrityError: true };
   }
   const offer = candidate.currentOffer && typeof candidate.currentOffer === 'object' ? candidate.currentOffer : null;
   return {
@@ -104,10 +106,12 @@ function trustedServiceMetadata(payload, identity) {
     ? candidate.summary.replace(/\s+/g, ' ').trim().slice(0, 6000)
     : '';
   if (candidate?.structured !== undefined && !structuredOwnerMatches(candidate.structured, identity)) {
-    return { ...metadata, knowledgePack: undefined };
+    throw Object.assign(new Error('Knowledge Pack owner does not match the authenticated customer.'), { code: 'knowledge_pack_owner_mismatch', status: 403 });
   }
   const structured = validatedStructuredKnowledgePack(candidate?.structured);
-  if (structured?.integrityError) return { ...metadata, knowledgePack: undefined };
+  if (candidate?.structured !== undefined && (!structured || structured.integrityError)) {
+    throw Object.assign(new Error('Knowledge Pack integrity validation failed.'), { code: 'knowledge_pack_integrity_invalid', status: 400 });
+  }
   return {
     ...metadata,
     ...(summary ? { knowledgePack: { summary, source: 'hub:creator-os-knowledge-pack', trustedBy: 'maven-harness-service', ...(structured ? { structured } : {}) } } : { knowledgePack: undefined }),
@@ -219,7 +223,9 @@ export async function handleServiceExecutePost(request, { identity, preparationS
   const agentId = String(payload.agentId || 'maven-chat').trim();
   const conversationId = String(payload.conversationId || `chat:${idempotencyKey}`).trim();
   const requestId = `service-execution:${idempotencyKey}`;
-  const metadata = trustedServiceMetadata(payload, identity);
+  let metadata;
+  try { metadata = trustedServiceMetadata(payload, identity); }
+  catch (error) { return errorResponse(error); }
   const trustedPayload = { ...payload, metadata };
 
   const repo = jobRepository || new MySqlCreativeJobRepository();
