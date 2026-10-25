@@ -145,9 +145,14 @@ export function selectMavenImageEditRoute(message, catalogs = {}) {
 }
 
 /** Removes the routing words (model name, ratio) so the provider receives only the visual brief. */
-export function stripRoutingFromPrompt(message, route) {
+export function stripRoutingFromPrompt(message, route, { preserveFormatting = false } = {}) {
+  if (preserveFormatting === true) {
+    // Customer copy in quotes is data, even when it contains a model name or ratio.
+    return String(message || '').split(/([“"][^”"]*[”"])/g).map((part, index) => index % 2 ? part
+      : stripRoutingFromPrompt(part, route, { preserveFormatting: 'segment' })).join('');
+  }
   let text = String(message || '');
   if (route?.model?.name) text = text.replace(new RegExp(route.model.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
   text = text.replace(/\b\d{1,2}\s*:\s*\d{1,2}\b/g, ' ');
-  return text.replace(/\s+/g, ' ').trim();
+  return preserveFormatting === 'segment' ? text : text.replace(/\s+/g, ' ').trim();
 }

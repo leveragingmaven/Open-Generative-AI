@@ -30,6 +30,7 @@ const EXPECTED_SKILL_IDS = [
   "story-resolution",
   "creative-contracts",
   "atelier-composition",
+  "thumbnail-composition",
   "motion-direction",
   "runtime-selection",
   "intake-and-onboarding",
@@ -76,7 +77,7 @@ test("every skill follows the approved Creative Skill schema", () => {
       assert.ok(skill[field] !== undefined, `${id} is missing ${field}`);
     }
     assert.equal(skill.skillId, id);
-    assert.equal(skill.version, "1.0.0");
+    assert.equal(skill.version, ["product-hero-photography", "creative-review", "typography"].includes(id) ? "1.1.0" : "1.0.0");
     assert.equal(skill.schemaVersion, "1.0.0");
     assert.equal(skill.status, "active");
     assert.ok(Array.isArray(skill.vocabulary));

@@ -5,6 +5,7 @@
 // provides lookup. Activation, matching, routing, scoring, and request analysis
 // belong to the future Creative Skills Engine.
 
+import thumbnailComposition from './thumbnail-composition.js';
 import productHeroPhotography from "./product-hero-photography.js";
 import aiClipping from "./ai-clipping.js";
 import vibeMotion from "./vibe-motion.js";
@@ -49,6 +50,7 @@ import workflowVariants from "./workflow-variants.js";
 import { createSkillLibrary } from "./SkillMetadata.js";
 
 export const SKILL_LIBRARY = createSkillLibrary([
+  thumbnailComposition,
   productHeroPhotography,
   aiClipping,
   vibeMotion,

@@ -141,7 +141,7 @@ export function applyCreativeSkill(brief, skill) {
     ...brief,
     ...(styleParts.length ? { style: styleParts.join("; ") } : {}),
     ...(promptStyleParts.length ? { promptStyle: promptStyleParts.join("; ") } : {}),
-    constraints: Array.isArray(skill.constraints) ? [...skill.constraints] : [],
+    constraints: [...new Set([...(Array.isArray(brief.constraints) ? brief.constraints : []), ...(Array.isArray(skill.constraints) ? skill.constraints : [])])],
     ...enrichment,
   };
 }
@@ -167,8 +167,8 @@ export function applyCreativeSkills(brief, skills, { studio = null } = {}) {
   }
   if (!applied.length) return brief;
 
-  const constraints = [];
-  const seen = new Set();
+  const constraints = [...(Array.isArray(brief.constraints) ? brief.constraints : [])];
+  const seen = new Set(constraints);
   for (const skill of applied) {
     for (const constraint of Array.isArray(skill.constraints) ? skill.constraints : []) {
       if (!seen.has(constraint)) {
@@ -198,9 +198,11 @@ export function applyCreativeSkills(brief, skills, { studio = null } = {}) {
 // plan is left untouched. This keeps the separation of responsibilities:
 // recipes own execution strategy, skills own creative methodology.
 export function deriveCreativeSkillGuidance(skills, { studio = null } = {}) {
+  const seenSkills = new Set();
   const eligible = (Array.isArray(skills) ? skills : [])
     .filter((skill) => skill && skill.status === "active")
-    .filter((skill) => isSkillApplicableToStudio(skill, studio));
+    .filter((skill) => isSkillApplicableToStudio(skill, studio))
+    .filter(skill => { if (seenSkills.has(skill.skillId)) return false; seenSkills.add(skill.skillId); return true; });
   if (!eligible.length) return null;
 
   const unique = (values) => {
@@ -241,6 +243,7 @@ export function deriveCreativeSkillGuidance(skills, { studio = null } = {}) {
       name: skill.name,
       version: skill.version,
       category: skill.category,
+      provenance: skill.provenance || null,
     })),
     creativePrinciples: principles,
     craftGuidance,

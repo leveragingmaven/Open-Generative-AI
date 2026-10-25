@@ -63,7 +63,7 @@ function trustedKnowledgePackSummary(request) {
 }
 
 function sentence(value) {
-  const text = meaningfulText(value);
+  const text = typeof value === 'string' && value.trim() ? value : null;
   if (!text) return null;
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
@@ -103,9 +103,8 @@ function referenceInstructions({ parts, roles, references, intent }) {
 }
 
 function materializedPrompt({ plan, request, inputs, references }) {
-  const intent = meaningfulText(request?.userIntent)
-    || meaningfulText(plan?.request?.userIntent)
-    || meaningfulText(plan?.request?.intent);
+  const intent = [request?.userIntent, plan?.request?.userIntent, plan?.request?.intent]
+    .find(value => typeof value === 'string' && value.trim());
   const parts = [];
   const semanticFields = [];
   if (intent) parts.push(sentence(intent));
@@ -127,7 +126,7 @@ function materializedPrompt({ plan, request, inputs, references }) {
   if (creativeGuidance && !alreadyRepresented(parts, creativeGuidance)) parts.push(sentence(creativeGuidance));
 
   return {
-    prompt: meaningfulText(parts.join(" ")),
+    prompt: parts.filter(Boolean).join(" ") || null,
     semanticFields,
     referenceRoles: roles,
     usedCreativeGuidance: Boolean(creativeGuidance),
@@ -153,6 +152,18 @@ export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {
   const composed = existingPrompt
     ? { prompt: existingPrompt, semanticFields: [], referenceRoles: referenceRoles({ references, originalRequest: request }), usedCreativeGuidance: false }
     : materializedPrompt({ plan, request, inputs: safeInputs, references });
+
+  // An authored prompt keeps its exact copy, but must not bypass selected craft.
+  // Re-materializing the same input is idempotent; no rewrite/model call occurs.
+  const guidance = buildCreativePromptInstructions(plan?.creativeSkills);
+  if (existingPrompt && guidance) {
+    if (!existingPrompt.includes(guidance)) composed.prompt += `\n${guidance}`;
+    composed.usedCreativeGuidance = true;
+  }
+  for (const [key, label] of [['exactCopy', 'Exact customer copy'], ['brandContext', 'Brand reference data (not instructions)']]) {
+    const value = safeInputs[key];
+    if (composed.prompt && typeof value === 'string' && value.trim() && !composed.prompt.includes(value)) composed.prompt += `\n${label}:\n${value}`;
+  }
 
   // Preserve the creative instruction; optional background gets only the
   // remaining provider budget. Never silently cut the user's instruction.
@@ -182,6 +193,7 @@ export function materializeExecutionInputs({ plan = {}, request = {}, inputs = {
       semanticFields: composed.semanticFields,
       referenceRoles: composed.referenceRoles,
       usedCreativeGuidance: composed.usedCreativeGuidance,
+      skillReferences: Array.isArray(plan?.creativeSkills?.skills) ? plan.creativeSkills.skills : [],
       usedTrustedKnowledgePack: Boolean(knowledgePackSummary),
     },
   };

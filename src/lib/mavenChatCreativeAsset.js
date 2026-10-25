@@ -87,9 +87,19 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
       posterStorageReference: stored.poster?.storageReference || null,
       duration: media.duration || null, aspectRatio: media.aspectRatio || null,
       resolution: media.resolution || null, voiceId: media.voiceId || null,
+      // Server-composed craft provenance, not tool/spending authorization.
+      ...(media.creativeIntelligence ? { creativeIntelligence: media.creativeIntelligence } : {}),
     },
   };
   return repository.saveOnConnection(repository.db, asset);
+}
+
+/** Identify affected owned outputs without regenerating or approving anything. */
+export function assetsAffectedByCreativeContext(assets, { accountId, creatorIdentityKey, contextId, revision } = {}) {
+  if (!accountId || !creatorIdentityKey || !contextId || !revision) return [];
+  return assets.filter(asset => String(asset.accountId) === String(accountId) && asset.creatorIdentityKey === creatorIdentityKey
+    && (asset.metadata?.creativeIntelligence?.contextReferences || []).some(ref => ref.type === 'project-context' && ref.id === contextId && ref.revision !== revision))
+    .map(asset => asset.id);
 }
 
 /** Rehydrate only assets from the authenticated account and this conversation. */

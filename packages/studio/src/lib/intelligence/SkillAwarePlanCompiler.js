@@ -5,6 +5,7 @@ import { RecipeResolver } from "./RecipeResolver.js";
 import { SkillResolver } from "../skills/SkillResolver.js";
 import { SkillReferenceResolver } from "../skills/SkillReferenceResolver.js";
 import { productionInputs } from './CreativeProductionRequirements.js';
+import { unresolvedProductIdentity } from '../skills/product-hero-photography.js';
 
 const unique = (values) => [...new Set(values.filter(Boolean))];
 const asArray = (value) => Array.isArray(value) ? value : value == null ? [] : [value];
@@ -40,6 +41,7 @@ function selectedSkillRecord(skill, reason, score = null) {
     skillId: skill.skillId,
     name: skill.name || null,
     version: skill.version ?? null,
+    provenance: skill.provenance || null,
     category: skill.category || null,
     status: skill.status || null,
     discoverable: skill.discoverable !== false,
@@ -171,6 +173,7 @@ export class SkillAwarePlanCompiler {
       : this.recipeResolver.defaultRecipeIdForOperation?.(rawRequest.operation) || null;
     const request = createCreativeRequest({
       ...rawRequest,
+      studioId: rawRequest.studioId || /^(image|video|audio)_/.exec(rawRequest.operation || '')?.[1] || null,
       recipeId: explicitRecipeId || defaultRecipeId,
       inputs: {
         ...(rawRequest.inputs || {}),
@@ -314,6 +317,10 @@ export class SkillAwarePlanCompiler {
     const unresolvedRequiredInputs = [];
     const availableInputs = productionInputs(request);
     for (const name of metadata.requiredInputs) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "skill" });
+    if (rawRequest.operation?.startsWith('image_') && metadata.selectedSkills.some(skill => skill.skillId === 'product-hero-photography')) {
+      const missing = unresolvedProductIdentity({ intent: request.intent, inputs: availableInputs, references: [...request.references, ...request.attachments] });
+      if (missing) unresolvedRequiredInputs.push({ ...missing, source: 'skill' });
+    }
     for (const name of recipeReference?.inputRequirements?.required || []) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "recipe" });
     for (const name of workflowReference?.inputRequirements?.required || []) if (!valuePresent(availableInputs[name])) unresolvedRequiredInputs.push({ name, source: "workflow" });
     const dedupedMissing = unresolvedRequiredInputs.filter((item, index, all) => all.findIndex((other) => other.name === item.name) === index);
