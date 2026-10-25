@@ -22,6 +22,26 @@ function normalizeArray(value) {
 }
 
 /**
+ * Return the verbatim body of one level-2 section (`## Title`) of the approved
+ * Authority Blueprint. The section ends at the next level-2 heading. Missing or
+ * empty sections return null so nothing is fabricated.
+ */
+export function extractBlueprintSection(content, title) {
+  if (typeof content !== "string" || !content.trim()) return null;
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const target = `## ${title}`.toLowerCase();
+  const start = lines.findIndex((line) => line.trim().toLowerCase() === target);
+  if (start < 0) return null;
+  const body = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index]) && !/^###/.test(lines[index])) break;
+    body.push(lines[index]);
+  }
+  const text = body.join("\n").trim();
+  return text || null;
+}
+
+/**
  * Convert the Hub response into the existing Creator OS Knowledge Pack
  * contract. The raw Hub response is intentionally never returned.
  */
@@ -40,8 +60,8 @@ export function normalizeHubKnowledgePack(input) {
   if (ipLibrary.length) ip.ipLibrary = ipLibrary;
 
   const domains = {
-    brand: null,
-    voice: null,
+    brand: extractBlueprintSection(blueprint?.content, "Brand DNA"),
+    voice: extractBlueprintSection(blueprint?.content, "Voice Foundation"),
     audience: hasContent(input.domains?.audience) ? clone(input.domains.audience) : null,
     offer: hasContent(input.domains?.offer) ? clone(input.domains.offer) : null,
     authority: hasContent(input.domains?.authority) ? clone(input.domains.authority) : null,

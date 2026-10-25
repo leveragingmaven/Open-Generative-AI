@@ -20,12 +20,21 @@ const pack = {
   offers: { active: [{ id: "offer-a", name: "Offer A" }, { id: "offer-b", name: "Offer B" }], selectedOfferId: "offer-a" },
 };
 
+test("approved Brand DNA and Voice are always selected regardless of request wording", () => {
+  const router = new KnowledgeContextRouter();
+  for (const intent of ["draft a sales page", "write a launch email", "social post", "carousel slides", "plan the schedule"]) {
+    const context = router.select(pack, { request: { studioId: "marketing", intent } });
+    assert.deepEqual(context.brand, pack.domains.brand, intent);
+    assert.deepEqual(context.voice, pack.domains.voice, intent);
+  }
+});
+
 test("knowledge selection is deterministic and excludes irrelevant sections", () => {
   const router = new KnowledgeContextRouter();
   const image = router.select(pack, { request: { studioId: "image", intent: "branded product image" } });
   assert.deepEqual(image.brand, pack.domains.brand);
   assert.deepEqual(image.visualDirection, pack.domains.visualDirection);
-  assert.equal(image.voice, null);
+  assert.deepEqual(image.voice, pack.domains.voice);
   assert.equal(image.audience, null);
   assert.equal(image.selectedOffer, null);
 

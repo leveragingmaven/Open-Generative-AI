@@ -54,6 +54,100 @@ test("appends only the server-trusted bounded Knowledge Pack to provider creativ
   assert.equal(untrusted.metadata.usedTrustedKnowledgePack, false);
 });
 
+const BLUEPRINT = [
+  "# Authority Blueprint",
+  "",
+  "## Brand DNA",
+  "",
+  "Precise founder-led brand with calm authority.",
+  "",
+  "## Voice Foundation",
+  "",
+  "Warm, direct, zero hype.",
+  "",
+  "## Offer Foundation",
+  "",
+  "Offer clarity block.",
+].join("\n");
+
+function structuredPack(overrides = {}) {
+  return {
+    schema: "creator-knowledge-pack-context.v1",
+    authorityBlueprint: { id: "bp-1", version: 4, content: BLUEPRINT },
+    currentOffer: { id: "offer-1", title: "Launch Lab", content: "Launch Lab execution text" },
+    audience: "Solo founders",
+    authority: "Category of one",
+    offerClarity: "Membership for marketing operations",
+    frameworks: [{ title: "Diamond Method", category: "IP", summary: "Framework body" }],
+    ipLibrary: [{ title: "Method", category: "IP", summary: "Useful method" }],
+    missing: [],
+    ...overrides,
+  };
+}
+
+function materializeWithStructured(structured, maxPromptCharacters = Infinity) {
+  return materializeExecutionInputs({
+    plan: { request: { operation: "text_generation", inputs: { prompt: "Write the launch post." } } },
+    request: {
+      userIntent: "Write the launch post.",
+      metadata: { knowledgePack: { trustedBy: "maven-harness-service", summary: "Brand DNA: short", structured } },
+    },
+    inputs: { prompt: "Write the launch post." },
+    maxPromptCharacters,
+  });
+}
+
+test("passes approved Brand DNA, Voice, offer, and frameworks into the provider prompt", () => {
+  const result = materializeWithStructured(structuredPack());
+  const prompt = result.inputs.prompt;
+  assert.match(prompt, /Brand DNA: Precise founder-led brand with calm authority\./);
+  assert.match(prompt, /Voice: Warm, direct, zero hype\./);
+  assert.match(prompt, /Audience: Solo founders/);
+  assert.match(prompt, /Current offer \(Launch Lab\): Launch Lab execution text/);
+  assert.match(prompt, /Frameworks: Diamond Method: Framework body/);
+  assert.match(prompt, /IP: Method: Useful method/);
+  assert.equal(result.metadata.knowledgeContext.omittedSections.length, 0);
+});
+
+test("keeps the offer-clarity block separate from the current commercial offer", () => {
+  const prompt = materializeWithStructured(structuredPack()).inputs.prompt;
+  assert.match(prompt, /Offer clarity: Membership for marketing operations/);
+  assert.match(prompt, /Current offer \(Launch Lab\): Launch Lab execution text/);
+});
+
+test("does not invent sections for missing foundations", () => {
+  const prompt = materializeWithStructured(structuredPack({ audience: undefined, frameworks: [], ipLibrary: [], currentOffer: undefined, authorityBlueprint: { id: "bp", version: 1, content: "## Offer Foundation\n\nOnly this." } })).inputs.prompt;
+  assert.doesNotMatch(prompt, /Brand DNA:/);
+  assert.doesNotMatch(prompt, /Voice:/);
+  assert.doesNotMatch(prompt, /Audience:/);
+  assert.doesNotMatch(prompt, /Frameworks:/);
+});
+
+test("reports an explicit overflow diagnostic and never cuts a section mid-text", () => {
+  const big = "Authority ".repeat(400);
+  const result = materializeWithStructured(structuredPack({ authority: big }), 1400);
+  assert.ok(result.metadata.knowledgeContext.omittedSections.includes("authority"));
+  assert.doesNotMatch(result.inputs.prompt, /Authority Authority Authority Authority Authority Authority Authority Authority Authority Authority$/);
+  assert.match(result.inputs.prompt, /Brand DNA:/);
+});
+
+test("fails explicitly instead of generating without an oversized Brand DNA or Voice", () => {
+  const big = "Brand ".repeat(400);
+  assert.throws(
+    () => materializeWithStructured(structuredPack({ authority: undefined, audience: undefined, offerClarity: undefined, authorityBlueprint: { id: "bp-1", version: 4, content: `## Brand DNA\n\n${big}\n\n## Voice Foundation\n\nWarm.` } }), 400),
+    (error) => error.code === "essential_foundation_omitted",
+  );
+});
+
+test("rejects an untrusted structured pack", () => {
+  const result = materializeExecutionInputs({
+    plan: { request: { operation: "text_generation", inputs: { prompt: "Write." } } },
+    request: { metadata: { knowledgePack: { summary: "ATTACKER", structured: structuredPack() } } },
+    inputs: { prompt: "Write." },
+  });
+  assert.doesNotMatch(result.inputs.prompt, /ATTACKER|Brand DNA/);
+});
+
 test("materializes a native reference-driven portrait without changing reference records", () => {
   const references = [{ id: "portrait-1", role: "character_reference", url: "https://cdn.example.test/portrait.png" }];
   const request = {

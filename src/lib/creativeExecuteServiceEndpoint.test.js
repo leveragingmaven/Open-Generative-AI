@@ -138,6 +138,77 @@ test('execute: service-only Knowledge Pack is bounded, trusted, and survives aut
   assert.match(normalizedMetadata.knowledgePack.summary, /Current Offer: Launch Lab/);
 });
 
+test('execute: structured Knowledge Pack is kept only when schema and Brand DNA/Voice hash verify', async () => {
+  const { createHash } = await import('node:crypto');
+  const blueprint = '## Brand DNA\n\nPrecise.\n\n## Voice Foundation\n\nWarm.';
+  const sha256 = createHash('sha256').update(blueprint, 'utf8').digest('hex');
+  let normalizedMetadata;
+  const deps = {
+    normalizeAuthorizedRequest: async (payload, { identity }) => {
+      normalizedMetadata = payload.metadata;
+      return {
+        request: { ...payload, authenticatedIdentity: { accountId: identity.accountId, identityKey: identity.identityKey, creatorId: identity.identityKey, source: 'server' }, authorization: { authorizationId: 'auth-1', status: 'approved', source: 'server' } },
+        proof: { authorizationId: 'auth-1' },
+        context: { intentFingerprint: 'fp-1' },
+      };
+    },
+  };
+  await run(makeProposal({
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: { schema: 'creator-knowledge-pack-context.v1', ownerEmail: SUBJECT, authorityBlueprint: { id: 'bp', version: 1, content: blueprint, sha256 }, audience: 'Founders' } } },
+  }), { deps });
+  assert.equal(normalizedMetadata.knowledgePack.structured.authorityBlueprint.content, blueprint);
+  assert.equal(normalizedMetadata.knowledgePack.structured.audience, 'Founders');
+
+  normalizedMetadata = undefined;
+  await run(makeProposal({
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: { schema: 'creator-knowledge-pack-context.v1', authorityBlueprint: { id: 'bp', version: 1, content: 'tampered', sha256 } } } },
+  }), { deps });
+  assert.equal(normalizedMetadata.knowledgePack, undefined);
+});
+
+test('execute: structured Knowledge Pack is kept only when ownerEmail matches the verified service identity', async () => {
+  const { createHash } = await import('node:crypto');
+  const blueprint = '## Brand DNA\n\nPrecise.\n\n## Voice Foundation\n\nWarm.';
+  const sha256 = createHash('sha256').update(blueprint, 'utf8').digest('hex');
+  const structuredFor = (ownerEmail) => ({ schema: 'creator-knowledge-pack-context.v1', ...(ownerEmail === undefined ? {} : { ownerEmail }), authorityBlueprint: { id: 'bp', version: 1, content: blueprint, sha256 }, audience: 'Founders' });
+  let normalizedMetadata;
+  const deps = {
+    normalizeAuthorizedRequest: async (payload, { identity }) => {
+      normalizedMetadata = payload.metadata;
+      return {
+        request: { ...payload, authenticatedIdentity: { accountId: identity.accountId, identityKey: identity.identityKey, creatorId: identity.identityKey, source: 'server' }, authorization: { authorizationId: 'auth-1', status: 'approved', source: 'server' } },
+        proof: { authorizationId: 'auth-1' },
+        context: { intentFingerprint: 'fp-1' },
+      };
+    },
+  };
+  const send = (structured) => run(makeProposal({
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured } },
+  }), { deps });
+
+  // Matching owner (case and whitespace normalized) keeps the structured pack.
+  await send(structuredFor(`  ${SUBJECT.toUpperCase()} `));
+  assert.equal(normalizedMetadata.knowledgePack.structured.audience, 'Founders');
+  assert.equal(normalizedMetadata.knowledgePack.structured.ownerEmail, SUBJECT);
+
+  // Mismatched owner fails closed: the structured pack is dropped.
+  normalizedMetadata = undefined;
+  await send(structuredFor('someone-else@example.com'));
+  assert.equal(normalizedMetadata.knowledgePack, undefined);
+
+  // Missing owner binding fails closed.
+  normalizedMetadata = undefined;
+  await send(structuredFor(undefined));
+  assert.equal(normalizedMetadata.knowledgePack, undefined);
+
+  // Browser-supplied ownerEmail cannot override the verified identity.
+  normalizedMetadata = undefined;
+  await run(makeProposal({
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured: structuredFor(SUBJECT), ownerEmail: 'attacker@example.com' } },
+  }), { deps, identity: { ...makeIdentity(), email: 'victim@example.com' } });
+  assert.equal(normalizedMetadata.knowledgePack, undefined);
+});
+
 test('execute-service rejects browser/session authentication even with a valid-looking payload', async () => {
   const result = await run(makeProposal(), { identity: { ...makeIdentity(), authSource: 'session' } });
   assert.equal(result.status, 401);
@@ -274,6 +345,64 @@ test('execute: same key under a different account cannot read another user job',
   assert.equal(body.idempotent, undefined);
   assert.equal(body.executionStarted, true);
   assert.equal(minted, 1);
+});
+
+test('e2e: Hub-shaped Knowledge Pack reaches the provider prompt with approved Brand DNA and Voice intact', async () => {
+  const { materializeExecutionInputs } = await import('../../packages/studio/src/lib/intelligence/ExecutionPromptMaterializer.js');
+  // Shaped exactly like the Harness HubKnowledgePackReader output (structured contract).
+  const blueprint = ['# Authority Blueprint', '', '## Brand DNA', '', 'Precise founder-led brand with calm authority.', '', '## Voice Foundation', '', 'Warm, direct, zero hype.', '', '## Offer Foundation', '', 'Offer clarity block.'].join('\n');
+  const sha256 = crypto.createHash('sha256').update(blueprint, 'utf8').digest('hex');
+  const structured = {
+    schema: 'creator-knowledge-pack-context.v1',
+    ownerEmail: SUBJECT,
+    packVersion: 1,
+    generatedAt: '2026-08-14T12:00:00.000Z',
+    checksum: 'abc123',
+    authorityBlueprint: { id: 'bp-1', version: 4, content: blueprint, sha256 },
+    currentOffer: { id: 'offer-1', title: 'Launch Lab', content: 'Launch Lab execution text' },
+    audience: 'Solo founders',
+    authority: 'Category of one',
+    offerClarity: 'Membership for marketing operations',
+    frameworks: [{ title: 'Diamond Method', category: 'IP', summary: 'Framework body' }],
+    ipLibrary: [{ title: 'Method', category: 'IP', summary: 'Useful method' }],
+    missing: [],
+  };
+  let trustedMetadata;
+  const deps = {
+    normalizeAuthorizedRequest: async (payload, { identity }) => {
+      trustedMetadata = payload.metadata;
+      return {
+        request: { ...payload, authenticatedIdentity: { accountId: identity.accountId, identityKey: identity.identityKey, creatorId: identity.identityKey, source: 'server' }, authorization: { authorizationId: 'auth-1', status: 'approved', source: 'server' } },
+        proof: { authorizationId: 'auth-1' },
+        context: { intentFingerprint: 'fp-1' },
+      };
+    },
+  };
+  const result = await run(makeProposal({
+    operation: 'text_generation',
+    delegatedAuthority: { operation: 'text_generation', category: 'generate', costCeiling: 10 },
+    userIntent: 'Write the launch post.',
+    inputs: { prompt: 'Write the launch post.' },
+    metadata: { knowledgePack: { summary: 'Brand DNA: Precise', structured } },
+  }), { deps });
+  assert.equal(result.status, 202);
+  // Creator OS validated the structured pack and kept it (hash verified).
+  assert.equal(trustedMetadata.knowledgePack.trustedBy, 'maven-harness-service');
+  assert.equal(trustedMetadata.knowledgePack.structured.authorityBlueprint.sha256, sha256);
+
+  // The same validated metadata is what the provider-bound materializer receives.
+  const materialized = materializeExecutionInputs({
+    plan: { request: { operation: 'text_generation', inputs: { prompt: 'Write the launch post.' } } },
+    request: { userIntent: 'Write the launch post.', metadata: trustedMetadata },
+    inputs: { prompt: 'Write the launch post.' },
+  });
+  const prompt = materialized.inputs.prompt;
+  assert.match(prompt, /Brand DNA: Precise founder-led brand with calm authority\./);
+  assert.match(prompt, /Voice: Warm, direct, zero hype\./);
+  // Commercial offer stays separate from Offer Clarity.
+  assert.match(prompt, /Offer clarity: Membership for marketing operations/);
+  assert.match(prompt, /Current offer \(Launch Lab\): Launch Lab execution text/);
+  assert.equal(materialized.metadata.usedTrustedKnowledgePack, true);
 });
 
 test('execute: missing idempotencyKey fails closed', async () => {

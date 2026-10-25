@@ -29,8 +29,9 @@ export class KnowledgeContextRouter {
       packId: pack.id,
       packVersion: pack.version,
       updatedAt: pack.updatedAt,
-      brand: include("brand", BRAND_TERMS.test(text)) ? pack.domains.brand : null,
-      voice: include("voice", WRITING_TERMS.test(text)) ? pack.domains.voice : null,
+      // Approved Brand DNA and Voice always travel with a valid pack, regardless of request wording.
+      brand: include("brand", true) ? pack.domains.brand : null,
+      voice: include("voice", true) ? pack.domains.voice : null,
       audience: include("audience", WRITING_TERMS.test(text)) ? pack.domains.audience : null,
       ip: include("ip", WRITING_TERMS.test(text)) ? pack.domains.ip : null,
       approvedClaims: include("approvedClaims", WRITING_TERMS.test(text) || offerRelevant) ? pack.domains.approvedClaims : null,

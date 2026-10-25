@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { requireCreatorOsRateLimit } from './creatorOsRateLimit.js';
 import { requireCreatorIdentityOrService } from './creatorOsAuthOrService.js';
 import { issueAgentExecutionApproval } from './agentExecutionApproval.js';
@@ -39,7 +40,62 @@ function hasUnsafeField(payload) {
   return Object.keys(payload || {}).some((key) => UNSAFE_CLIENT_FIELDS.has(key));
 }
 
-function trustedServiceMetadata(payload) {
+const STRUCTURED_KNOWLEDGE_SCHEMA = 'creator-knowledge-pack-context.v1';
+const STRUCTURED_TEXT_MAX = 60000;
+
+function boundedText(value, max = STRUCTURED_TEXT_MAX) {
+  return typeof value === 'string' && value.trim() !== '' ? value.slice(0, max) : undefined;
+}
+
+function boundedEntries(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50)
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => ({ title: boundedText(item.title, 300) || '', category: boundedText(item.category, 120), summary: boundedText(item.summary, 2000) }));
+}
+
+// Accepts only the Harness structured contract. Browser-supplied values never
+// reach this path: it runs only after the service-auth identity check.
+function validatedStructuredKnowledgePack(candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+  if (candidate.schema !== STRUCTURED_KNOWLEDGE_SCHEMA) return undefined;
+  const blueprint = candidate.authorityBlueprint && typeof candidate.authorityBlueprint === 'object' ? candidate.authorityBlueprint : null;
+  const blueprintContent = boundedText(blueprint?.content);
+  // Integrity: when Hub supplies a SHA-256 for the blueprint, the text must match it.
+  if (blueprintContent && typeof blueprint.sha256 === 'string') {
+    if (createHash('sha256').update(blueprintContent, 'utf8').digest('hex') !== blueprint.sha256) return { integrityError: true };
+  }
+  const offer = candidate.currentOffer && typeof candidate.currentOffer === 'object' ? candidate.currentOffer : null;
+  return {
+    schema: STRUCTURED_KNOWLEDGE_SCHEMA,
+    packVersion: Number.isFinite(candidate.packVersion) ? candidate.packVersion : undefined,
+    generatedAt: boundedText(candidate.generatedAt, 64),
+    checksum: boundedText(candidate.checksum, 128),
+    authorityBlueprint: blueprintContent ? { id: boundedText(blueprint.id, 128), version: Number.isFinite(blueprint.version) ? blueprint.version : undefined, content: blueprintContent, sha256: boundedText(blueprint.sha256, 128) } : undefined,
+    currentOffer: offer ? { id: boundedText(offer.id, 128), title: boundedText(offer.title, 300), content: boundedText(offer.content) } : undefined,
+    audience: boundedText(candidate.audience, 4000),
+    authority: boundedText(candidate.authority, 4000),
+    offerClarity: boundedText(candidate.offerClarity, 4000),
+    frameworks: boundedEntries(candidate.frameworks),
+    ipLibrary: boundedEntries(candidate.ipLibrary),
+    missing: Array.isArray(candidate.missing) ? candidate.missing.slice(0, 20).map((item) => String(item).slice(0, 64)) : [],
+    ownerEmail: normalizeOwnerEmail(candidate.ownerEmail),
+  };
+}
+
+function normalizeOwnerEmail(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim().toLowerCase() : undefined;
+}
+
+// The structured pack must name the same owner as the verified service identity.
+// A missing or mismatched owner fails closed (the caller drops the pack).
+function structuredOwnerMatches(structuredCandidate, identity) {
+  const owner = normalizeOwnerEmail(structuredCandidate?.ownerEmail);
+  const verified = normalizeOwnerEmail(identity?.email);
+  return owner !== undefined && verified !== undefined && owner === verified;
+}
+
+function trustedServiceMetadata(payload, identity) {
   const metadata = payload?.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
     ? payload.metadata
     : {};
@@ -47,9 +103,14 @@ function trustedServiceMetadata(payload) {
   const summary = candidate && typeof candidate === 'object' && !Array.isArray(candidate) && typeof candidate.summary === 'string'
     ? candidate.summary.replace(/\s+/g, ' ').trim().slice(0, 6000)
     : '';
+  if (candidate?.structured !== undefined && !structuredOwnerMatches(candidate.structured, identity)) {
+    return { ...metadata, knowledgePack: undefined };
+  }
+  const structured = validatedStructuredKnowledgePack(candidate?.structured);
+  if (structured?.integrityError) return { ...metadata, knowledgePack: undefined };
   return {
     ...metadata,
-    ...(summary ? { knowledgePack: { summary, source: 'hub:creator-os-knowledge-pack', trustedBy: 'maven-harness-service' } } : { knowledgePack: undefined }),
+    ...(summary ? { knowledgePack: { summary, source: 'hub:creator-os-knowledge-pack', trustedBy: 'maven-harness-service', ...(structured ? { structured } : {}) } } : { knowledgePack: undefined }),
   };
 }
 
@@ -158,7 +219,7 @@ export async function handleServiceExecutePost(request, { identity, preparationS
   const agentId = String(payload.agentId || 'maven-chat').trim();
   const conversationId = String(payload.conversationId || `chat:${idempotencyKey}`).trim();
   const requestId = `service-execution:${idempotencyKey}`;
-  const metadata = trustedServiceMetadata(payload);
+  const metadata = trustedServiceMetadata(payload, identity);
   const trustedPayload = { ...payload, metadata };
 
   const repo = jobRepository || new MySqlCreativeJobRepository();

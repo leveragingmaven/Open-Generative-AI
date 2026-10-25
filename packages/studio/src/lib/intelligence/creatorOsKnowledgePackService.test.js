@@ -140,6 +140,55 @@ test("a hanging Knowledge Pack request resolves to the existing no-knowledge fal
   assert.ok(Date.now() - startedAt < 500, "Knowledge Pack timeout should be bounded");
 });
 
+const blueprintWithFoundations = [
+  "# Authority Blueprint",
+  "",
+  "## Brand DNA",
+  "",
+  "### Core Identity",
+  "We build calm, exact systems.",
+  "",
+  "## Voice Foundation",
+  "",
+  "Plain sentences. No hype.",
+  "",
+  "## Offer Foundation",
+  "",
+  "Offer details.",
+].join("\n");
+
+test("maps approved Brand DNA and Voice sections verbatim, stopping at the next level-2 heading", () => {
+  const normalized = normalizeHubKnowledgePack({
+    ...hubPack,
+    authorityBlueprint: { ...hubPack.authorityBlueprint, content: blueprintWithFoundations },
+  });
+
+  assert.equal(normalized.domains.brand, "### Core Identity\nWe build calm, exact systems.");
+  assert.equal(normalized.domains.voice, "Plain sentences. No hype.");
+  assert.equal(normalized.domains.audience, null);
+  assert.doesNotMatch(normalized.domains.voice, /Offer details/);
+});
+
+test("missing approved Brand DNA or Voice sections stay null instead of fabricating content", () => {
+  const normalized = normalizeHubKnowledgePack({
+    ...hubPack,
+    authorityBlueprint: { ...hubPack.authorityBlueprint, content: "## Brand DNA\n\nOnly brand." },
+  });
+
+  assert.equal(normalized.domains.brand, "Only brand.");
+  assert.equal(normalized.domains.voice, null);
+});
+
+test("the commercial offer stays separate from Offer Clarity and Brand DNA", () => {
+  const normalized = normalizeHubKnowledgePack({
+    ...hubPack,
+    authorityBlueprint: { ...hubPack.authorityBlueprint, content: blueprintWithFoundations },
+  });
+
+  assert.deepEqual(normalized.offers.active, [hubPack.currentOffer]);
+  assert.equal(normalized.offers.selectedOfferId, "offer-1");
+});
+
 test("router receives the normalized contract and selects the current offer", () => {
   const normalized = normalizeHubKnowledgePack(hubPack);
   const selected = new KnowledgeContextRouter().select(normalized, {
