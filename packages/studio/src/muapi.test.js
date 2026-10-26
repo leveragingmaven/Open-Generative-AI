@@ -61,6 +61,17 @@ function imageParams(signal) {
   return { model: 'ideogram-v3-t2i', prompt: 'test prompt', signal };
 }
 
+test('image submission records prediction identity durably before polling and rejects a mismatched result', async () => {
+  const order = [];
+  globalThis.fetch = async (url) => {
+    if (!String(url).includes('/predictions/')) { order.push('submit'); return response({ request_id: 'expected-prediction' }); }
+    order.push('poll');
+    return response({ status: 'completed', request_id: 'another-prediction', outputs: ['https://cdn.test/stale.png'] });
+  };
+  await assert.rejects(generateImage('test-key', { ...imageParams(), onRequestId: async id => { await Promise.resolve(); order.push(id); } }), { code: 'provider_result_request_mismatch' });
+  assert.deepEqual(order, ['submit','expected-prediction','poll']);
+});
+
 function mockSubmissionAndPolling({ submission = { request_id: 'request-1' }, polls, onFetch } = {}) {
   let pollIndex = 0;
   return async (url, options) => {

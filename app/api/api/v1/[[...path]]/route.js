@@ -110,6 +110,11 @@ async function proxyMuApiRequest(request, { params }, dependencies) {
     const rateLimit = requireCreatorOsRateLimit(request, auth.identity, { agencyFunded: agencyMode });
     if (rateLimit) return rateLimit;
     const slug = await params;
+    // Session history must use the owner-scoped, server-persisted conversation
+    // boundary; the generic provider proxy must not provide a replacement lane.
+    if (/\/creative-agent(?:\/|$)/.test(decodeURIComponent(new URL(buildTargetUrl(request, slug.path)).pathname))) {
+        return NextResponse.json({ error: 'Use the owned creative-agent endpoint.', code: 'owned_session_endpoint_required' }, { status: 403 });
+    }
     const targetUrl = buildTargetUrl(request, slug.path);
     const headers = cleanHeaders(request);
 

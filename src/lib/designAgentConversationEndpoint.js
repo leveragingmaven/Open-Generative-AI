@@ -50,6 +50,7 @@ import {
   isCarouselApprovalCancellation,
 } from './mavenCarouselApproval.js';
 import { persistMavenChatAsset, ownedMavenChatReferences } from './mavenChatCreativeAsset.js';
+import { resolveImageBrief, imageBriefPreview } from './mavenImageBrief.js';
 
 export const CONTROLLED_MESSAGE_MAX_CONTENT_LENGTH = 8000;
 
@@ -301,6 +302,8 @@ function resolveTrustedAttachments(requestedIds, sessionAttachments) {
 // Error codes whose messages are safe to surface verbatim. Everything else is
 // replaced with a generic sanitized message; codes are always safe to expose.
 const SAFE_ERROR_CODES = new Set([
+  'image_output_invalid',
+  'image_reference_unsupported',
   'conversation_not_found', 'conversation_scope_mismatch',
   'agentId_required', 'conversationId_required',
   'invalid_attachments', 'design_agent_scope_mismatch', 'design_session_scope_mismatch',
@@ -380,6 +383,14 @@ function buildSanitizedTranscript(message, reply, trustedAttachments = [], gener
 
 async function registerGeneratedReference(getService, identity, conversationId, media, { kind = 'image', allowDefault = true, persist = false, sourceAssetId = null } = {}) {
   if (!allowDefault) return [];
+  // Required image checks/storage complete before registration or a success reply.
+  if (kind === 'image' && media.imageRequirements) {
+    const save = await getService('persistMavenCreativeAsset');
+    const library = await save(identity, { conversationId, media, kind, sourceAssetId });
+    if (!library?.metadata?.imageVerification?.verified) throw Object.assign(new Error('The generated image could not be verified. No finished deliverable is available.'), { code: 'image_output_invalid', status: 422 });
+    media.deliveryUrl = library.deliveryUrl && media.deliveryOrigin ? new URL(library.deliveryUrl, media.deliveryOrigin).href : library.deliveryUrl || media.url;
+    return [{ attachmentId: library.id, kind }];
+  }
   let registered = null;
   try {
     const register = await getService(kind === 'image' ? 'registerMavenImageReference' : 'registerMavenMediaReference');
@@ -866,12 +877,26 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
       return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, [], generatedReferences) };
     }
 
-    // Image requests without references use the existing text-to-image path.
-    if (!trustedAttachments.length && isImageGenerationRequest(message)) {
+    const referencedIds = new Set((trustedSessionReadResult.messages || []).filter(item => item.role === 'user').flatMap(item => item.attachments || []).map(ref => ref.attachmentId));
+    const briefReferences = trustedAttachments.length ? trustedAttachments : (sessionReadResult.attachments || []).filter(ref => referencedIds.has(ref.attachmentId));
+    const imagePlan = resolveImageBrief({
+      messages: trustedSessionReadResult.messages || [], message, identity, conversationId,
+      references: briefReferences, creativeContext: await readCreativeContext(), editing: isImageEditRequest(message) && trustedAttachments.some(item => item.kind === 'image'), key: deps.imageBriefSecret,
+    });
+    if (imagePlan?.clarification || imagePlan?.needsPreview) {
+      const reply = imagePlan.clarification || imageBriefPreview(imagePlan, deps.imageBriefSecret);
+      if (wantsStream) return buildConversationStreamResponse({ service: { async respondStreaming({ onDelta } = {}) { onDelta?.(reply); return { reply }; } }, sessionReadResult: trustedSessionReadResult, message, attachments: trustedAttachments });
+      return { reply, role: 'assistant', status: 200, persistedMessages: buildSanitizedTranscript(message, reply, trustedAttachments) };
+    }
+    // The resolved user-owned brief, not a short conversational command, is the input.
+    if (imagePlan?.operation === 'image_generation' && (!trustedAttachments.length || imagePlan.approved) && (isImageGenerationRequest(message) || imagePlan.approved || /^(?:create|generate|render|make)\b/i.test(message))) {
       const generateImage = await getService('generateMavenImage');
-      const image = await generateImage(identity, { prompt: message, creativeContext: await readCreativeContext(), signal: request?.signal });
+      const image = await generateImage(identity, { prompt: imagePlan.prompt, creativeBrief: imagePlan.brief, briefRevision: imagePlan.revision,
+        imageRequirements: imagePlan.requirements, references: briefReferences, turnIdentity: deps.turnIdentity, onPrediction: deps.onPrediction,
+        creativeContext: await readCreativeContext(), signal: request?.signal });
+      if (request.url) image.deliveryOrigin = new URL(request.url).origin;
       const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImage === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImage === undefined });
-      const reply = withLibraryWarning(buildGeneratedImageReply({ ...image, referenceUnavailable: !generatedReferences.length }), generatedReferences);
+      const reply = withLibraryWarning(buildGeneratedImageReply({ ...image, url: image.deliveryUrl || image.url, referenceUnavailable: !generatedReferences.length }), generatedReferences);
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
         return buildConversationStreamResponse({
@@ -887,16 +912,21 @@ export async function handleDesignAgentConversationPost(request, deps = {}) {
 
     // Editing: exactly one session-verified reference image plus an explicit edit request.
     // Image analysis and questions about the image stay on the vision path below.
-    if (trustedAttachments.filter((item) => item.kind === 'image').length === 1 && isImageEditRequest(message)) {
+    const editSources = trustedAttachments.length ? trustedAttachments.filter(item => item.kind === 'image') : imagePlan?.approved ? briefReferences.filter(item => item.kind === 'image') : [];
+    const editReference = editSources.length === 1 ? editSources[0] : null;
+    if (editReference && (isImageEditRequest(message) || (imagePlan?.operation === 'image_editing' && imagePlan.approved))) {
       const editImage = await getService('generateMavenImageEdit');
       const image = await editImage(identity, {
-        prompt: message,
-        imageUrl: trustedImageUrl(trustedAttachments.find((item) => item.kind === 'image')),
+        prompt: imagePlan?.prompt || message,
+        creativeBrief: imagePlan?.brief, briefRevision: imagePlan?.revision, imageRequirements: imagePlan?.requirements,
+        turnIdentity: deps.turnIdentity, onPrediction: deps.onPrediction,
+        imageUrl: trustedImageUrl(editReference),
         creativeContext: await readCreativeContext(),
         signal: request?.signal,
       });
-      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImageEdit === undefined, sourceAssetId: trustedAttachments.find((item) => item.kind === 'image')?.attachmentId });
-      const reply = withLibraryWarning(buildGeneratedImageReply({ ...image, edited: true, referenceUnavailable: !generatedReferences.length }), generatedReferences);
+      if (request.url) image.deliveryOrigin = new URL(request.url).origin;
+      const generatedReferences = await registerGeneratedReference(getService, identity, conversationId, image, { kind: 'image', allowDefault: deps.registerMavenImageReference !== undefined || deps.generateMavenImageEdit === undefined || deps.persistMavenCreativeAsset !== undefined, persist: deps.persistMavenCreativeAsset !== undefined || deps.generateMavenImageEdit === undefined, sourceAssetId: editReference.attachmentId });
+      const reply = withLibraryWarning(buildGeneratedImageReply({ ...image, url: image.deliveryUrl || image.url, edited: true, referenceUnavailable: !generatedReferences.length }), generatedReferences);
       if (generatedReferences.length) trustedSessionReadResultWithRefs.attachments = [...(trustedSessionReadResultWithRefs.attachments || []), ...generatedReferences.map((item) => ({ ...item, url: image.url }))];
       if (wantsStream) {
         return buildConversationStreamResponse({

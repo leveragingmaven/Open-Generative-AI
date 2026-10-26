@@ -12,6 +12,23 @@ import { readFileSync } from 'node:fs';
 const routeUrl = new URL('./route.js', import.meta.url);
 const routeSource = readFileSync(routeUrl, 'utf8');
 
+test('generic proxy cannot bypass owned creative-agent session persistence, including normalized paths', async () => {
+  const source = routeSource.replace(/^import .*;\s*$/gm, '').replace(/\bexport /g, '');
+  const handler = new Function('requireCreatorIdentity', 'requireCreatorOsRateLimit', 'getMuApiBaseUrl', 'NextResponse', `${source}\nreturn proxyMuApiRequest;`)(
+    async () => ({ identity: { accountId: 'fixture', identityKey: 'fixture' } }), () => null,
+    () => 'https://provider.test', { json: (body, options) => Response.json(body, options) },
+  );
+  let calls = 0;
+  for (const path of [['creative-agent','sessions','foreign','messages'], ['x','..','creative-agent','sessions','foreign','messages'], ['creative-agent%2Fsessions','foreign','messages']]) {
+    const response = await handler(new Request('https://creator.test/api/api/v1/path', { method: 'PATCH', body: '{}' }), { params: Promise.resolve({ path }) }, {
+      agencyMode: true, getServerKey: () => { calls++; return 'fixture'; }, fetchImpl: async () => { calls++; },
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, 'owned_session_endpoint_required');
+  }
+  assert.equal(calls, 0);
+});
+
 function extractFunctionSource(name) {
   const match = new RegExp(`export (?:async )?function ${name}\\s*\\(`).exec(routeSource);
   assert.notEqual(match, null, `expected ${name} to be exported from the central proxy route`);

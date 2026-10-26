@@ -7,7 +7,7 @@
 export function unresolvedProductIdentity({ intent = '', references = [], inputs = {} } = {}) {
   if (references.length || [inputs.productIdentity, inputs.productDescription, inputs.subject].some(value => typeof value === 'string' && value.trim())
     || /\bProduct:\s*\S/i.test(inputs.brandContext || '')) return null;
-  const specified = /\b(?:called|named)\s+\S|\bof\s+(?:(?:a|an|the)\s+)?(?!(?:my|our|product|digital)\b)\S+/i.test(intent);
+  const specified = /\b(?:called|named)\s+\S|\b(?:digital\s+)?product\s*[,：:]\s*(?:\*\*|[“"])?[A-Za-z0-9][A-Za-z0-9 -]{1,80}|\bof\s+(?:(?:a|an|the)\s+)?(?!(?:my|our|product|digital)\b)\S+/i.test(intent);
   return specified ? null : { name: 'productIdentity', question: 'Which product should the image show? Share its cover or reference image, or give its name and a brief description.' };
 }
 

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { MySqlCreativeAssetRepository } from './creativeAssetRepository.js';
-import { copyProviderMedia, signedCreativeAsset, isStoredCreativeAsset } from './creativeMediaStorage.js';
+import { copyProviderMedia, signedCreativeAsset, browserCreativeAsset, isStoredCreativeAsset } from './creativeMediaStorage.js';
 
 const KINDS = new Set(['image', 'video', 'audio']);
 
@@ -35,12 +35,13 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
   if (!accountId || !creatorIdentityKey || !conversationId || !KINDS.has(kind) || !validHttpsUrl(media?.url)) {
     throw new Error('maven_asset_invalid');
   }
-  const digest = crypto.createHash('sha256').update(JSON.stringify([accountId, conversationId, kind, media.url])).digest('hex');
+  const digest = crypto.createHash('sha256').update(JSON.stringify([accountId, conversationId, kind, media.url, ...(media.trace?.requestId ? [media.trace.requestId] : [])])).digest('hex');
   const id = `asset_${digest}`;
   // A video's poster is produced here, while its own bytes are still on disk, so a library card can
   // show the frame later without ever downloading the video. A runtime without a decoder stores no
   // poster and the asset itself is saved exactly as before.
-  const stored = await copyMedia({ accountId, assetId: id, url: media.url, kind, poster: kind === 'video' });
+  const stored = await copyMedia({ accountId, assetId: id, url: media.url, kind, poster: kind === 'video', ...(media.imageRequirements ? { imageRequirements: media.imageRequirements } : {}) });
+  if (media.imageRequirements && !stored.imageVerification?.verified) throw Object.assign(new Error('The image could not be verified.'), { code: 'image_output_invalid', status: 422 });
   const provider = media.provider || media.transport || 'muapi';
   const timestamp = new Date().toISOString();
   const asset = {
@@ -48,8 +49,8 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
     accountId,
     creatorIdentityKey,
     jobId: id,
-    attemptId: id,
-    requestId: id,
+    attemptId: media.trace?.attemptId || id,
+    requestId: media.trace?.requestId || id,
     authorizationId: id,
     agentId: 'design-agent',
     conversationId,
@@ -89,9 +90,16 @@ export async function persistMavenChatAsset(identity, { conversationId, media, k
       resolution: media.resolution || null, voiceId: media.voiceId || null,
       // Server-composed craft provenance, not tool/spending authorization.
       ...(media.creativeIntelligence ? { creativeIntelligence: media.creativeIntelligence } : {}),
+      ...(media.trace ? { creativeExecution: media.trace } : {}),
+      ...(stored.imageVerification ? { imageVerification: stored.imageVerification } : {}),
     },
   };
-  return repository.saveOnConnection(repository.db, asset);
+  const saved = await repository.saveOnConnection(repository.db, asset);
+  if (media.imageRequirements?.width && media.imageRequirements?.height) {
+    const delivered = browserCreativeAsset(asset, accountId);
+    return { ...saved, deliveryUrl: delivered.url };
+  }
+  return saved;
 }
 
 /** Identify affected owned outputs without regenerating or approving anything. */

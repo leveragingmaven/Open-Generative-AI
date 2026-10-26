@@ -80,6 +80,7 @@ export async function generateMavenImage({
   identity,
   prompt,
   creativeContext = null,
+  creativeBrief = null, briefRevision = null, imageRequirements = null, references = [], turnIdentity = null, onPrediction = null,
   signal,
   credentialResolver = resolveProviderCredential,
   provider = falProvider,
@@ -91,7 +92,7 @@ export async function generateMavenImage({
   if (!safePrompt) throw imageError('image_prompt_required', 'Describe the image you want to create.', 400);
 
   // Throws typed errors for unavailable or unsupported explicit requests; never substitutes a named model.
-  const route = selectMavenImageRoute(safePrompt);
+  const route = selectMavenImageRoute(imageRequirements?.aspectRatio ? `${imageRequirements.aspectRatio}\n${prompt}` : prompt);
 
   const resolveKey = async (providerId) => {
     try {
@@ -124,8 +125,9 @@ export async function generateMavenImage({
     }
     if (!target) throw credentialRequiredError(null);
   }
+  if (references.length && target.transport === 'fal') throw imageError('image_reference_unsupported', 'This image route cannot preserve the approved references. Choose a reference-capable image route.', 422);
 
-  const enriched = prepareMavenImageCreativeInput({ prompt: stripRoutingFromPrompt(prompt, route, { preserveFormatting: true }) || prompt, creativeContext, maxPromptCharacters: target.model.inputs?.prompt?.maxLength });
+  const enriched = prepareMavenImageCreativeInput({ prompt: stripRoutingFromPrompt(prompt, route, { preserveFormatting: true }) || prompt, references, creativeContext, maxPromptCharacters: target.model.inputs?.prompt?.maxLength });
   const brief = enriched.prompt;
 
   const controller = new AbortController();
@@ -134,6 +136,7 @@ export async function generateMavenImage({
   signal?.addEventListener?.('abort', onCallerAbort, { once: true });
 
   let url = null;
+  let predictionId = null;
   try {
     if (target.transport === 'muapi') {
       const result = await muapiProvider.generateImage(target.apiKey, {
@@ -141,9 +144,12 @@ export async function generateMavenImage({
         prompt: brief,
         aspect_ratio: target.aspectRatio,
         ...(target.resolution ? { resolution: target.resolution } : {}),
+        ...(references.length ? { images_list: references.map(ref => ref.url || ref.image_url).filter(Boolean) } : {}),
+        onRequestId: async id => { predictionId = id; await onPrediction?.(id); },
         signal: controller.signal,
       });
       url = result?.url;
+      predictionId ||= result?.request_id || result?.id || null;
     } else {
       const result = await provider.execute({
         operation: 'image_generation',
@@ -158,6 +164,7 @@ export async function generateMavenImage({
         signal: controller.signal,
       });
       url = Array.isArray(result?.outputReferences) ? result.outputReferences[0] : null;
+      predictionId = result?.providerResponseRef || result?.request_id || null;
     }
   } catch (error) {
     const code = String(error?.code || '');
@@ -185,6 +192,10 @@ export async function generateMavenImage({
     modelName: target.model.name,
     transport: target.transport,
     aspectRatio: target.aspectRatio,
+    imageRequirements: imageRequirements ? { ...imageRequirements, aspectRatio: imageRequirements.aspectRatio || target.aspectRatio } : null,
+    trace: { requestId: turnIdentity?.requestId || null, attemptId: turnIdentity?.attemptId || null, providerPredictionId: predictionId,
+      briefRevision, creativeBrief, parameters: { model: target.model.id, prompt: brief, aspect_ratio: target.aspectRatio, resolution: target.resolution },
+      referenceIds: references.map(ref => ref.attachmentId || ref.id).filter(Boolean), approvalStatus: 'pending_customer_output_review' },
   };
 }
 
@@ -216,6 +227,7 @@ export async function generateMavenImageEdit({
   identity,
   prompt,
   creativeContext = null,
+  creativeBrief = null, briefRevision = null, imageRequirements = null, turnIdentity = null, onPrediction = null,
   imageUrl,
   signal,
   credentialResolver = resolveProviderCredential,
@@ -229,7 +241,7 @@ export async function generateMavenImageEdit({
     throw imageError('image_source_unavailable', 'The attached image is not available for editing.', 422);
   }
 
-  const route = selectMavenImageEditRoute(safePrompt);
+  const route = selectMavenImageEditRoute(imageRequirements?.aspectRatio ? `${imageRequirements.aspectRatio}\n${prompt}` : prompt);
 
   let apiKey = null;
   try {
@@ -252,7 +264,7 @@ export async function generateMavenImageEdit({
   const onCallerAbort = () => controller.abort();
   signal?.addEventListener?.('abort', onCallerAbort, { once: true });
 
-  let url = null;
+  let url = null, predictionId = null;
   try {
     const result = await muapiProvider.generateI2I(apiKey, {
       model: route.model.id,
@@ -260,9 +272,11 @@ export async function generateMavenImageEdit({
       image_url: imageUrl,
       ...(route.aspectRatio ? { aspect_ratio: route.aspectRatio } : {}),
       ...(route.resolution ? { resolution: route.resolution } : {}),
+      onRequestId: async id => { predictionId = id; await onPrediction?.(id); },
       signal: controller.signal,
     });
     url = result?.url;
+    predictionId ||= result?.request_id || result?.providerResponseRef || null;
   } catch (error) {
     const code = String(error?.code || '');
     if (controller.signal.aborted && !signal?.aborted) {
@@ -281,7 +295,9 @@ export async function generateMavenImageEdit({
   if (typeof url !== 'string' || !isHttpsUrl(url)) {
     throw imageError('image_generation_failed', 'Image editing returned no usable image.', 502);
   }
-  return { url, prompt: brief, model: route.model.id, modelName: route.model.name, transport: 'muapi', aspectRatio: route.aspectRatio, operation: 'image_editing', creativeIntelligence: enriched.creativeIntelligence };
+  return { url, prompt: brief, model: route.model.id, modelName: route.model.name, transport: 'muapi', aspectRatio: route.aspectRatio, operation: 'image_editing', creativeIntelligence: enriched.creativeIntelligence,
+    imageRequirements, trace: { requestId: turnIdentity?.requestId || null, attemptId: turnIdentity?.attemptId || null, providerPredictionId: predictionId, briefRevision, creativeBrief,
+      parameters: { model: route.model.id, prompt: brief, aspect_ratio: route.aspectRatio, resolution: route.resolution }, approvalStatus: 'pending_customer_output_review' } };
 }
 
 /** Assistant reply that carries the generated image as markdown, so it streams and persists like any message. */
@@ -289,7 +305,7 @@ export function buildGeneratedImageReply({ url, prompt, modelName, edited = fals
   const alt = String(prompt || 'Generated image').replace(/[[\]\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
   const credit = modelName ? ` made with ${modelName}` : '';
   return [
-    `Here's your ${edited ? 'edited ' : ''}image${credit}.`,
+    `Here's your ${edited ? 'edited ' : ''}image${credit}. Please review its wording and visual fidelity before approving it as final.`,
     '',
     `![${alt}](${url})`,
     '',

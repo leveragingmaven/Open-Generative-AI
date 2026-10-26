@@ -193,8 +193,11 @@ async function submitAndPoll(endpoint, payload, key, onRequestId, maxAttempts = 
     const submitData = await response.json();
     const requestId = submitData.request_id || submitData.id;
     if (!requestId) return submitData;
-    if (onRequestId) onRequestId(requestId);
+    if (onRequestId) await onRequestId(requestId);
     const result = await pollForResult(requestId, key, maxAttempts, 2000, signal);
+    if (result.request_id != null && String(result.request_id) !== String(requestId)) {
+        throw Object.assign(new Error('Provider result does not belong to this request.'), { code: 'provider_result_request_mismatch' });
+    }
     const outputUrl = result.outputs?.[0] || result.url || result.output?.url;
     return { ...result, url: outputUrl };
 }

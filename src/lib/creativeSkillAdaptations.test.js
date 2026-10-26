@@ -108,7 +108,7 @@ function endpointFixture() {
     registerMavenImageReference: async () => ({ attachmentId: 'asset_generated', kind: 'image' }),
     persistMavenCreativeAsset: (who, args) => persistMavenChatAsset(who, args, {
       repository: { db: {}, async saveOnConnection(_connection, asset) { saved.push(asset); return asset; } },
-      copyMedia: async () => ({ storageReference: 'storage://owned/image', contentType: 'image/png', sizeBytes: 20, checksum: 'mock-checksum' }),
+      copyMedia: async () => ({ storageReference: 'storage://owned/image', contentType: 'image/png', sizeBytes: 20, checksum: 'mock-checksum', imageVerification: { verified: true, width: 1024, height: 1024 } }),
     }),
   };
   const request = (message, extra = {}) => ({ json: async () => ({ conversationId: 'session-a', message, ...extra }) });
@@ -130,7 +130,7 @@ test('dashboard real generation path sends shared craft and owned context to moc
   assert.ok(saved[0].metadata.creativeIntelligence.skillReferences.some(ref => ref.skillId === 'thumbnail-composition'));
   assert.equal(saved[0].metadata.creativeIntelligence.contextReferences[0].id, context.projectId);
   assert.deepEqual(contextReads, [{ identity, designSessionId: 'session-a' }]);
-  assert.deepEqual(response.persistedMessages[1].attachments, [{ attachmentId: 'asset_generated', kind: 'image' }]);
+  assert.deepEqual(response.persistedMessages[1].attachments, [{ attachmentId: saved[0].id, kind: 'image' }]);
 });
 
 test('dashboard precise edit preserves trusted source, exact copy, native model route and lineage', async () => {

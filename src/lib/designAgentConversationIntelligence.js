@@ -90,7 +90,7 @@ function buildConversationMessages({ messages, newMessage, attachments, imageAtt
     .slice(-MAX_HISTORY_MESSAGES);
 
   for (const m of recent) {
-    const content = truncateText(m.content || m.text);
+    const content = truncateText(String(m.content || m.text || '').replace(/<!-- maven-turn:[A-Za-z0-9_-]+ -->/g, ''));
     if (!content) continue;
     const referenceContext = buildReferenceContext(m.attachments);
     result.push({ role: m.role, content: referenceContext ? `${content}${referenceContext}` : content });

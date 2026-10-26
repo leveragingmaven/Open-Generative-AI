@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import sharp from 'sharp';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -92,7 +93,7 @@ export async function storeVideoPoster({ accountId, assetId, sourcePath, storage
   }
 }
 
-export async function copyProviderMedia({ accountId, assetId, url, kind, poster = false, storage = getR2MediaStorage(), fetchImpl = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts() }) {
+export async function copyProviderMedia({ accountId, assetId, url, kind, poster = false, imageRequirements = null, storage = getR2MediaStorage(), fetchImpl = globalThis.fetch, lookup = dns.lookup, allowlist = configuredHosts() }) {
   if (!MIME[kind]) throw new Error('r2_media_kind_invalid');
   const source = safeUrl(url, allowlist);
   await resolveSafeAddresses(source.hostname, lookup);
@@ -100,9 +101,12 @@ export async function copyProviderMedia({ accountId, assetId, url, kind, poster 
   const existing = await storage.getMetadata(key);
   if (existing) {
     if (!MIME[kind].has(existing.contentType) || !Number.isFinite(existing.sizeBytes) || existing.sizeBytes <= 0 || existing.sizeBytes > maxBytesFor(kind)) throw new Error('r2_existing_object_invalid');
-    return { key, storageReference: await storage.createDeliveryReference(key), contentType: existing.contentType, sizeBytes: existing.sizeBytes, checksum: existing.metadata?.sha256 || null };
+    const imageVerification = imageRequirements ? JSON.parse(existing.metadata?.imageverification || existing.metadata?.imageVerification || 'null') : null;
+    if (imageRequirements && !imageVerification?.verified) throw new Error('image_output_verification_unavailable');
+    if (imageRequirements) assertImageDimensions(imageVerification, imageRequirements, true);
+    return { key, storageReference: await storage.createDeliveryReference(key), contentType: existing.contentType, sizeBytes: existing.sizeBytes, checksum: existing.metadata?.sha256 || null, imageVerification };
   }
-  const response = await fetchImpl(source, { method: 'GET', redirect: 'manual' });
+  const response = await fetchImpl(source, { method: 'GET', redirect: 'manual', ...(imageRequirements ? { signal: AbortSignal.timeout(30000) } : {}) });
   if (!response?.ok || response.status >= 300 || !response.body?.getReader) throw new Error('provider_media_unavailable');
   const contentType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   if (!MIME[kind].has(contentType)) throw new Error('provider_media_type_invalid');
@@ -122,14 +126,40 @@ export async function copyProviderMedia({ accountId, assetId, url, kind, poster 
       },
     }), createWriteStream(path, { flags: 'wx', mode: 0o600 }));
     if (!sizeBytes) throw new Error('provider_media_empty');
-    const checksum = digest.digest('hex');
-    await storage.putObject({ key, body: createReadStream(path), contentType, sizeBytes, metadata: { sha256: checksum } });
+    let imageVerification = null;
+    if (kind === 'image' && imageRequirements) {
+      try {
+        const decoded = await sharp(path, { limitInputPixels: 40000000, failOn: 'warning' }).metadata();
+        const decodedMime = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', heif: 'image/avif', avif: 'image/avif' }[decoded.format];
+        if (decodedMime !== contentType) throw new Error('image_type_mismatch');
+        assertImageDimensions(decoded, imageRequirements);
+        const { width, height } = imageRequirements;
+        const output = width && height ? await sharp(path).resize(width, height, { fit: 'fill' }).toBuffer() : await readFile(path);
+        const verified = await sharp(output, { limitInputPixels: 40000000, failOn: 'warning' }).stats();
+        if (!verified.channels?.length) throw new Error('image_output_invalid');
+        await writeFile(path, output);
+        sizeBytes = output.length;
+        if (sizeBytes > maxBytes) throw new Error('image_export_too_large');
+        imageVerification = { verified: true, width: width || decoded.width, height: height || decoded.height, originalWidth: decoded.width, originalHeight: decoded.height, semanticReview: 'pending_customer_review' };
+      } catch { throw Object.assign(new Error('The image failed dimension or media verification. No finished deliverable is available.'), { code: 'image_output_invalid', status: 422 }); }
+    }
+    const checksum = imageVerification ? crypto.createHash('sha256').update(await readFile(path)).digest('hex') : digest.digest('hex');
+    await storage.putObject({ key, body: createReadStream(path), contentType, sizeBytes, metadata: { sha256: checksum, ...(imageVerification ? { imageverification: JSON.stringify(imageVerification) } : {}) } });
     // The video is still on disk here, so its poster costs one decode and no extra download.
     const storedPoster = poster && kind === 'video' ? await storeVideoPoster({ accountId, assetId, sourcePath: path, storage }) : null;
-    return { key, storageReference: await storage.createDeliveryReference(key), contentType, sizeBytes, checksum, poster: storedPoster };
+    return { key, storageReference: await storage.createDeliveryReference(key), contentType, sizeBytes, checksum, poster: storedPoster, imageVerification };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+export function assertImageDimensions(image, requirements, exact = false) {
+  if (!image.width || !image.height) throw new Error('image_dimensions_missing');
+  const { width, height, aspectRatio } = requirements;
+  if ((width || height) && (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 16000000)) throw new Error('image_dimensions_invalid');
+  const ratio = aspectRatio ? aspectRatio.split(':').map(Number) : width && height ? [width, height] : null;
+  if (ratio && (!ratio[0] || !ratio[1] || Math.abs(image.width / image.height - ratio[0] / ratio[1]) > 0.005)) throw new Error('image_aspect_ratio_mismatch');
+  if (exact && width && (image.width !== width || image.height !== height)) throw new Error('image_dimensions_mismatch');
 }
 
 export async function signedCreativeAsset(asset, accountId, { storage = null, expiresIn = 3600 } = {}) {

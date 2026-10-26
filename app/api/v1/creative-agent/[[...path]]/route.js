@@ -1,6 +1,8 @@
 import { getMuApiBaseUrl, getServerMuApiKey, isAgencyModeEnabled } from '../../../../../src/lib/agencyMode.js';
 import { requireCreatorIdentity } from '../../../../../src/lib/creatorOsAuth.js';
 import { requireCreatorOsRateLimit } from '../../../../../src/lib/creatorOsRateLimit.js';
+import { isDesignAgentControlledExecution } from '../../../../../src/lib/designAgentControlledMode.js';
+import { acknowledgeConversationSave } from '../../../../../src/lib/conversationTurnPersistence.js';
 import {
     DesignAgentSessionOwnershipError,
     DesignAgentSessionOwnershipService,
@@ -129,6 +131,14 @@ export async function handleCreativeAgentProxyRequest(
     }
 
     if (agencyMode && !apiKey) return jsonError('MUAPI_API_KEY is not configured.', 500);
+    if (method === 'PATCH' && designSessionId && pathSegments[2] === 'messages' && isDesignAgentControlledExecution()) {
+        try {
+            const payload = await request.json();
+            const committed = await acknowledgeConversationSave(designSessionId, payload.messages);
+            return committed ? jsonResponse({ ok: true, alreadyPersisted: true }, 200)
+                : jsonError('Browser history cannot replace the server conversation.', 409, 'untrusted_conversation_history');
+        } catch { return jsonError('Conversation persistence unavailable.', 503, 'conversation_store_unavailable'); }
+    }
     const { search } = new URL(request.url);
     const targetUrl = `${String(baseUrl).replace(/\/+$/, '')}/api/v1/creative-agent/${path}${search}`;
     const headers = cleanHeaders(request);

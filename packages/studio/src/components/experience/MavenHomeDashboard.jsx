@@ -319,6 +319,7 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
   const projectRequestRef = useRef(0);
   const attachmentInputRef = useRef(null);
   const sessionCreationRef = useRef(null);
+  const pendingMavenTurnRef = useRef(null);
   const moreRef = useRef(null);
   const transcriptRef = useRef(null);
   const composerInputRef = useRef(null);
@@ -558,9 +559,19 @@ export default function MavenHomeDashboard({ apiKey = null, onOpenSettings }) {
       const saved = saveDashboardChat(window.localStorage, { id: sessionId, title: mavenMessages.find((message) => message.role === "user")?.content?.slice(0, 72) || text.slice(0, 72) });
       setSavedChats(saved);
 
+      // The same interrupted turn retains its ID across retry/reload. A changed
+      // instruction gets a new ID; this is never spending authorization.
+      const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([sessionId, text, attachmentIds]))))).map(value => value.toString(16).padStart(2, '0')).join('');
+      const turnKey = `mavensync_pending_turn_${sessionId}`;
+      let turn = pendingMavenTurnRef.current;
+      try { const savedTurn = JSON.parse(window.localStorage.getItem(turnKey) || 'null'); if (savedTurn?.fingerprint === fingerprint) turn = savedTurn; } catch {}
+      if (turn?.fingerprint !== fingerprint) turn = { fingerprint, id: crypto.randomUUID() };
+      pendingMavenTurnRef.current = turn;
+      try { window.localStorage.setItem(turnKey, JSON.stringify(turn)); } catch {}
       const result = await client.send({
         conversationId: sessionId,
         message: text,
+        headers: { 'x-mavensync-turn-id': turn.id },
         attachments: attachmentIds,
         onDelta: (delta) => {
           setMavenMessages((prev) => {
