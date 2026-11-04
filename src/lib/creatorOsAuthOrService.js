@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { readCreatorIdentity, requireCreatorIdentity } from './creatorOsAuth.js';
 import { resolveCreatorAccountId } from './creatorAccountStore.js';
 import { verifyCreatorOsServiceToken, requireCreatorOsServiceScope } from './creatorOsServiceAuth.js';
+import { verifyCreatorOsHubHandoffToken, requireCreatorOsHubScope, CREATOR_OS_HUB_SCOPE } from './creatorOsHubHandoffAuth.js';
 
 const SERVICE_HEADERS = {
   authorization: 'authorization',
@@ -89,16 +90,32 @@ export async function requireCreatorIdentityOrService(request, {
   }
 
   let verified;
+  let serviceLane = 'harness';
   try {
     verified = verifyCreatorOsServiceToken({ token });
-  } catch (error) {
-    const code = error?.code || 'service_auth_invalid_format';
-    logServiceAuth(request, { allowed: false, code });
-    return { identity: null, response: errorResponse('Service authentication failed.', code, 401) };
+  } catch (harnessError) {
+    // A Hub status token is accepted for the read-only job status surface
+    // only. It can never reach prepare/execute/publish routes, which require
+    // the Maven Harness service identity.
+    if (requiredScope === CREATOR_OS_HUB_SCOPE) {
+      try {
+        verified = verifyCreatorOsHubHandoffToken({ token });
+        requireCreatorOsHubScope(verified.scopes, CREATOR_OS_HUB_SCOPE);
+        serviceLane = 'hub';
+      } catch {
+        verified = null;
+      }
+    }
+    if (!verified) {
+      const code = harnessError?.code || 'service_auth_invalid_format';
+      logServiceAuth(request, { allowed: false, code });
+      return { identity: null, response: errorResponse('Service authentication failed.', code, 401) };
+    }
   }
 
   try {
-    requireCreatorOsServiceScope(verified.scopes, requiredScope);
+    if (serviceLane === 'hub') requireCreatorOsHubScope(verified.scopes, CREATOR_OS_HUB_SCOPE);
+    else requireCreatorOsServiceScope(verified.scopes, requiredScope);
   } catch (err) {
     const code = err?.code || 'service_auth_missing_scope';
     logServiceAuth(request, { allowed: false, serviceId: verified.serviceId, code });

@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 
 process.env.MAVENSYNC_SERVICE_AUTH_SECRET = 'creator-os-or-service-test-secret';
 process.env.MAVENSYNC_SERVICE_AUTH_SECRET_PREVIOUS = '';
+process.env.MAVENSYNC_CREATOR_HANDOFF_SECRET = 'creator-os-or-service-hub-handoff-test-secret';
+process.env.MAVENSYNC_CREATOR_HANDOFF_SECRET_PREVIOUS = '';
 
 const { requireCreatorIdentityOrService } = await import('./creatorOsAuthOrService.js');
 
@@ -34,6 +36,24 @@ function craftToken(overrides = {}, secret = process.env.MAVENSYNC_SERVICE_AUTH_
   }));
   const message = `${header}.${payload}`;
   return `${message}.${sign(message, secret)}`;
+}
+
+function craftHubToken(overrides = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({
+    iss: 'mavensync-hub',
+    aud: 'mavensync-creator-os',
+    sub: SUBJECT,
+    sid: 'mavensync-hub',
+    scp: ['creative.read'],
+    iat: now,
+    exp: now + 45,
+    jti: crypto.randomUUID(),
+    ...overrides,
+  }));
+  const message = `${header}.${payload}`;
+  return `${message}.${sign(message, process.env.MAVENSYNC_CREATOR_HANDOFF_SECRET)}`;
 }
 
 function makeRequest(headers) {
@@ -195,6 +215,34 @@ test('WHATWG Headers: no service headers still uses session path', async () => {
   );
   assert.equal(sessionCalled, true);
   assert.equal(result.identity.accountId, 'acc-1');
+});
+
+test('a Hub status token is accepted only for creative.read', async () => {
+  const accepted = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({
+      Authorization: `Bearer ${craftHubToken()}`,
+      'X-MavenSync-Service': 'mavensync-hub',
+      'X-MavenSync-User': SUBJECT,
+    }),
+    { resolveAccountId: async () => 'acc-hub' },
+  );
+  assert.equal(accepted.response, null);
+  assert.equal(accepted.identity.accountId, 'acc-hub');
+
+  const denied = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({ Authorization: `Bearer ${craftHubToken()}`, 'X-MavenSync-Service': 'mavensync-hub' }),
+    { requiredScope: 'creative.prepare', resolveAccountId: async () => 'acc-hub' },
+  );
+  assert.equal(denied.response.status, 401);
+  assert.match((await denied.response.json()).code, /^service_auth_/);
+});
+
+test('a Hub token with a non-read scope is rejected', async () => {
+  const denied = await requireCreatorIdentityOrService(
+    makeWhatwgRequest({ Authorization: `Bearer ${craftHubToken({ scp: ['creative.execute'] })}`, 'X-MavenSync-Service': 'mavensync-hub' }),
+    { resolveAccountId: async () => 'acc-hub' },
+  );
+  assert.equal(denied.response.status, 401);
 });
 
 function sha256hex(value) {
