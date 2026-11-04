@@ -25,6 +25,7 @@ const APPROVAL_FIELDS = new Set([
   'campaignId',
   'twinContext',
   'metadata',
+  'idempotencyKey',
 ]);
 
 function trustedIdentity(identity) {
