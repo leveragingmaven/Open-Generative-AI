@@ -13,6 +13,8 @@ import {
   getTenantZernioMessages,
   sendTenantZernioMessage,
   listTenantCommentAutomations,
+  getTenantCommentAutomation,
+  getTenantCommentAutomationLogs,
   createTenantCommentAutomation,
   updateTenantCommentAutomation,
   deleteTenantCommentAutomation,
@@ -42,6 +44,7 @@ function routeKey(path = []) {
   if (path.join('/') === 'inbox/conversations') return 'inbox/conversations';
   if (path.join('/') === 'analytics') return 'analytics';
   if (path.join('/') === 'automations') return 'automations';
+  if (path[0] === 'automations' && path.length === 3 && path[2] === 'logs') return 'automations/:automationId/logs';
   if (path[0] === 'automations' && path.length === 2) return 'automations/:automationId';
   if (path[0] === 'inbox' && path[1] === 'conversations' && path.length === 4 && path[3] === 'messages') return 'inbox/conversations/:conversationId/messages';
   if (path[0] === 'accounts' && path.length === 2) return 'accounts/:accountId';
@@ -160,6 +163,13 @@ export async function handleZernioPublishingRequest(request, {
     } catch (error) {
       return jsonError(error, 'Unable to load Maven Social automations.');
     }
+  }
+
+  if (request.method === 'GET' && ['automations/:automationId', 'automations/:automationId/logs'].includes(key)) {
+    try {
+      const handler = key.endsWith('/logs') ? getTenantCommentAutomationLogs : getTenantCommentAutomation;
+      return NextResponse.json(await handler({ identity: auth.identity, automationId: resolvedParams.path[1], repository, client }));
+    } catch (error) { return jsonError(error, 'Unable to load automation details.'); }
   }
 
   if (request.method === 'POST' && key === 'automations') {

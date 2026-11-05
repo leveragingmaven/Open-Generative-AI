@@ -55,6 +55,10 @@ export class ZernioPublishingProvider extends PublishingProvider {
     return Array.isArray(response.automations) ? response.automations : [];
   }
 
+  async getAutomation(id) { return this.request(`/automations/${encodeURIComponent(id)}`); }
+
+  async getAutomationLogs(id) { return this.request(`/automations/${encodeURIComponent(id)}/logs`); }
+
   async createAutomation(input) {
     return await this.request('/automations', { method: 'POST', body: input });
   }

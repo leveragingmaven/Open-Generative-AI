@@ -401,6 +401,10 @@ export class PublishingCenterMVP {
     return await this.publishingProvider.listAutomations();
   }
 
+  async getAutomation(id) { return this.publishingProvider.getAutomation(id); }
+
+  async getAutomationLogs(id) { return this.publishingProvider.getAutomationLogs(id); }
+
   async createAutomation(input) {
     if (!this.publishingProvider.createAutomation) throw new PublishingValidationError("Automations are unavailable for this account source.");
     return await this.publishingProvider.createAutomation(input);

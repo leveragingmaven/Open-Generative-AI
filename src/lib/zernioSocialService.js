@@ -570,118 +570,160 @@ export async function getTenantZernioAnalytics({
   };
 }
 
+
 const COMMENT_AUTOMATION_PLATFORMS = new Set(['instagram', 'facebook']);
-
-function automationRecord(automation = {}) {
-  return {
-    id: automation.id,
-    name: automation.name,
-    platform: automation.platform,
-    trigger: automation.trigger || 'comment',
-    accountId: automation.accountId,
-    keywords: Array.isArray(automation.keywords) ? automation.keywords : [],
-    matchMode: automation.matchMode || 'contains',
-    dmMessage: automation.dmMessage || '',
-    isActive: automation.isActive !== false,
-    stats: automation.stats || null,
-    createdAt: automation.createdAt || null,
-    updatedAt: automation.updatedAt || null,
-  };
+function automationError(message, status = 400) {
+  return Object.assign(new Error(message), { code: 'zernio_automation_invalid', status });
 }
-
-function ownedAutomationAccountIds(accounts) {
-  return new Set(accounts.accounts.map((account) => String(account.id)));
+const AUTOMATION_FIELDS = ['name', 'keywords', 'matchMode', 'dmMessage', 'alsoMatchInDms', 'isActive', 'audience', 'followGate', 'dmDelaySeconds', 'commentReplyDelaySeconds'];
+function automationRecord(a = {}) {
+  return Object.fromEntries(['id', 'accountId', 'platform', 'trigger', ...AUTOMATION_FIELDS, 'commentReply', 'buttons', 'template', 'excludeKeywords', 'typoTolerance', 'dmMessageVariations', 'commentReplyVariations', 'linkTracking', 'clickTag', 'platformPostId', 'postId', 'stats', 'createdAt', 'updatedAt'].filter(k => a[k] !== undefined).map(k => [k, a[k]]));
 }
-
-function requireCommentAutomationInput(input = {}) {
-  const name = String(input.name || '').trim();
-  const keyword = String(input.keyword || '').trim();
-  const dmMessage = String(input.dmMessage || '').trim();
-  if (!name) throw Object.assign(new Error('Automation name is required.'), { code: 'zernio_automation_name_required', status: 400 });
-  if (!keyword) throw Object.assign(new Error('Enter a keyword before saving this automation.'), { code: 'zernio_automation_keyword_required', status: 400 });
-  if (!dmMessage) throw Object.assign(new Error('Enter a DM message before saving this automation.'), { code: 'zernio_automation_message_required', status: 400 });
-  return { name, keyword, dmMessage, isActive: input.isActive !== false };
-}
-
-function assertCommentAutomationPlatform(account) {
-  if (!COMMENT_AUTOMATION_PLATFORMS.has(String(account?.platform || '').toLowerCase())) {
-    const error = new Error('Comment keyword automations are available for Instagram and Facebook accounts only.');
-    error.code = 'zernio_automation_platform_not_supported';
-    error.status = 400;
-    throw error;
+function confirmedAutomation(response, expectedId) {
+  const data = dataOf(response);
+  const a = data?.automation;
+  if (data?.success === false || !a || typeof a.id !== 'string' || !a.id || (expectedId && a.id !== expectedId) || typeof a.isActive !== 'boolean') {
+    throw automationError('Zernio did not confirm the automation ID and state. Refresh the remote list before retrying.', 502);
   }
+  return automationRecord(a);
 }
-
+function automationInput(input, platform, creating = false) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw automationError('Invalid automation settings.');
+  const allowed = new Set([...AUTOMATION_FIELDS, 'keyword', 'accountId']);
+  if (Object.keys(input).some(k => !allowed.has(k))) throw automationError('Unsupported automation setting.');
+  const out = {};
+  for (const key of AUTOMATION_FIELDS) if (Object.hasOwn(input, key)) out[key] = input[key];
+  if (Object.hasOwn(input, 'keyword')) {
+    if (Object.hasOwn(input, 'keywords')) throw automationError('Send keywords only once.');
+    out.keywords = [input.keyword];
+  }
+  for (const key of ['name', 'dmMessage']) if (key in out) {
+    if (typeof out[key] !== 'string' || !out[key].trim() || out[key].length > (key === 'name' ? 191 : 1000)) throw automationError(`${key} is required and must be within ${key === 'name' ? 191 : 1000} characters.`);
+  }
+  if ('keywords' in out && (!Array.isArray(out.keywords) || out.keywords.length > 50 || out.keywords.some(k => typeof k !== 'string' || !k.trim() || k.length > 200))) throw automationError('Keywords must be non-empty text entries (maximum 50).');
+  if ('matchMode' in out && !['contains', 'word', 'exact'].includes(out.matchMode)) throw automationError('Choose contains, word or exact keyword matching.');
+  for (const k of ['isActive', 'alsoMatchInDms']) if (k in out && typeof out[k] !== 'boolean') throw automationError(`${k} must be true or false.`);
+  for (const k of ['dmDelaySeconds', 'commentReplyDelaySeconds']) if (k in out && (!Number.isInteger(out[k]) || out[k] < 0 || out[k] > 86400)) throw automationError('Delays must be whole seconds from 0 to 86400.');
+  if ('audience' in out || 'followGate' in out) {
+    if (platform !== 'instagram') throw automationError('Follower gating is supported only for Instagram.');
+    if ('audience' in out) {
+      const a = out.audience;
+      if (!a || typeof a !== 'object' || Array.isArray(a) || Object.keys(a).some(k => !['followerStatus', 'whenUnknown', 'minFollowerCount'].includes(k)) || !['any', 'follower', 'non_follower'].includes(a.followerStatus) || !['send', 'skip', 'verify'].includes(a.whenUnknown) || ('minFollowerCount' in a && (!Number.isInteger(a.minFollowerCount) || a.minFollowerCount < 0))) throw automationError('Choose a valid follower audience and explicit unknown-status policy.');
+    }
+    if ('followGate' in out) {
+      const g = out.followGate;
+      if (!g || typeof g !== 'object' || Array.isArray(g) || Object.keys(g).some(k => !['message', 'buttonLabel', 'notFollowingMessage'].includes(k)) || Object.entries(g).some(([k,v]) => typeof v !== 'string' || v.length > (k === 'buttonLabel' ? 20 : 640))) throw automationError('Follow prompts must be non-empty text; button labels allow 20 characters and prompts 640.');
+    }
+  }
+  if (creating) {
+    if (!out.name || !out.dmMessage || !out.keywords?.length) throw automationError('Name, keyword and DM message are required.');
+    out.isActive ??= false;
+    out.matchMode ??= 'contains';
+    out.alsoMatchInDms ??= false;
+  }
+  if (!Object.keys(out).length) throw automationError('No automation changes were supplied.');
+  return out;
+}
 export async function listTenantCommentAutomations({ identity, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
   const profile = await ensureZernioProfile({ identity: owner, repository, client });
   const accounts = await listTenantZernioAccounts({ identity: owner, repository, client });
-  const ownedIds = ownedAutomationAccountIds(accounts);
-  const response = await client.commentautomations.listCommentAutomations({ query: { profileId: profile.zernioProfileId } });
-  const data = dataOf(response);
-  return {
-    automations: (Array.isArray(data?.automations) ? data.automations : [])
-      .filter((automation) => !automation.accountId || ownedIds.has(String(automation.accountId)))
-      .map(automationRecord),
-  };
+  const ids = new Set(accounts.accounts.map(a => String(a.id)));
+  const data = dataOf(await client.commentautomations.listCommentAutomations({ query: { profileId: profile.zernioProfileId } }));
+  if (data?.success === false || !Array.isArray(data?.automations)) throw automationError('Zernio returned an invalid automation list. Refresh before making changes.', 502);
+  return { automations: data.automations.filter(a => typeof a.id === 'string' && a.accountId && ids.has(String(a.accountId))).map(automationRecord) };
 }
-
+async function ownedAutomation({ identity, automationId, repository, client, details = false }) {
+  const owner = requiredIdentity(identity);
+  const id = String(automationId || '').trim();
+  if (!id) throw automationError('Automation ID is required.');
+  const existing = (await listTenantCommentAutomations({ identity: owner, repository, client })).automations.find(a => a.id === id);
+  if (!existing) throw automationError('This automation has no verified account ownership for your session.', 403);
+  if (!details) return existing;
+  const raw = dataOf(await client.commentautomations.getCommentAutomation({ path: { automationId: id } }));
+  const a = confirmedAutomation({ data: raw }, id);
+  if (a.accountId && a.accountId !== existing.accountId) throw automationError('Automation ownership changed. Refresh before editing.', 403);
+  return { ...existing, ...a, accountId: existing.accountId };
+}
+export async function getTenantCommentAutomation({ identity, automationId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  return { automation: await ownedAutomation({ identity, automationId, repository, client, details: true }) };
+}
+export async function getTenantCommentAutomationLogs({ identity, automationId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
+  await ownedAutomation({ identity, automationId, repository, client });
+  const data = dataOf(await client.commentautomations.listCommentAutomationLogs({ path: { automationId }, query: { limit: 25, skip: 0 } }));
+  if (data?.success === false || !Array.isArray(data?.logs)) throw automationError('Zernio did not return valid delivery diagnostics.', 502);
+  const logs = data.logs.map(log => ({
+    id: log.id, source: log.source, status: log.status, audienceOutcome: log.audienceOutcome,
+    commenterIsFollower: typeof log.commenterIsFollower === 'boolean' ? log.commenterIsFollower : null,
+    nextDueAt: log.nextDueAt, createdAt: log.createdAt,
+    ...(log.error ? { error: 'Delivery failed. Review connection permissions and platform messaging restrictions.' } : {}),
+    ...(log.platformError ? { platformError: { code: log.platformError.code, subcode: log.platformError.subcode } } : {}),
+    privateReplyConsumed: log.privateReplyConsumed === true, commentReplyStatus: log.commentReplyStatus,
+  }));
+  return { logs, total: data.pagination?.total ?? logs.length, misses: { total: data.misses?.total ?? 0, retentionDays: data.misses?.retentionDays } };
+}
+function canonicalAutomation(value) {
+  if (Array.isArray(value)) return value.map(canonicalAutomation);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(k => [k, canonicalAutomation(value[k])]));
+  return value;
+}
 export async function createTenantCommentAutomation({ identity, input, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
   const owner = requiredIdentity(identity);
-  const values = requireCommentAutomationInput(input);
   const accountId = String(input?.accountId || '').trim();
-  if (!accountId) throw Object.assign(new Error('Choose a connected social account.'), { code: 'zernio_automation_account_required', status: 400 });
+  if (!accountId) throw automationError('Choose a connected account.');
   const profile = await ensureZernioProfile({ identity: owner, repository, client });
   await listTenantZernioAccounts({ identity: owner, repository, client });
   const account = await getTenantZernioAccount({ identity: owner, zernioAccountId: accountId, repository, client });
-  assertCommentAutomationPlatform(account);
-  const response = await client.commentautomations.createCommentAutomation({
-    body: {
-      profileId: profile.zernioProfileId,
-      accountId: account.id,
-      trigger: 'comment',
-      name: values.name,
-      keywords: [values.keyword],
-      matchMode: 'contains',
-      dmMessage: values.dmMessage,
-      alsoMatchInDms: false,
-      isActive: values.isActive,
-    },
-  });
-  const data = dataOf(response);
-  return { automation: automationRecord(data?.automation || data) };
+  if (!COMMENT_AUTOMATION_PLATFORMS.has(account.platform)) throw Object.assign(automationError('Comment-to-DM supports Instagram and Facebook only.'), { code: 'zernio_automation_platform_not_supported' });
+  const values = automationInput(input, account.platform, true);
+  const payload = { profileId: profile.zernioProfileId, accountId, trigger: 'comment', ...values };
+  const requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalAutomation({ owner, payload }))).digest('hex');
+  const claim = await repository.claimAutomationRequest({ requestHash, ...owner });
+  if (!claim.claimed) {
+    if (claim.status === 'succeeded' && claim.response?.automation?.id) {
+      const current = await ownedAutomation({ identity: owner, automationId: claim.response.automation.id, repository, client, details: true });
+      return { automation: current, idempotent: true };
+    }
+    throw automationError('This submission is already pending or uncertain. Refresh the remote automation list before retrying; no duplicate was created.', 409);
+  }
+  try {
+    const current = await listTenantCommentAutomations({ identity: owner, repository, client });
+    if (current.automations.some(a => a.accountId === accountId && a.name === values.name)) throw automationError('A rule with this name already exists on this account. Edit it instead of creating another copy.', 409);
+    const automation = confirmedAutomation(await client.commentautomations.createCommentAutomation({ body: payload }));
+    if (automation.isActive !== values.isActive || (automation.accountId && automation.accountId !== accountId)) throw automationError('Zernio did not confirm the requested account and active state. Refresh the remote list before retrying.', 502);
+    const result = { automation: { ...automation, accountId, platform: account.platform }, idempotent: false };
+    await repository.finishAutomationRequest({ requestHash, ...owner, status: 'succeeded', response: result });
+    return result;
+  } catch (error) {
+    await repository.finishAutomationRequest({ requestHash, ...owner, status: 'unknown', response: null }).catch(() => {});
+    throw error;
+  }
 }
-
 export async function updateTenantCommentAutomation({ identity, automationId, input, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
-  const owner = requiredIdentity(identity);
-  const id = String(automationId || '').trim();
-  if (!id) throw Object.assign(new Error('Automation id is required.'), { code: 'zernio_automation_id_required', status: 400 });
-  const values = requireCommentAutomationInput(input);
-  const existing = (await listTenantCommentAutomations({ identity: owner, repository, client })).automations.find((item) => String(item.id) === id);
-  if (!existing) throw Object.assign(new Error('The requested automation is not available to this tenant.'), { code: 'zernio_automation_not_owned', status: 403 });
-  const response = await client.commentautomations.updateCommentAutomation({
-    path: { automationId: id },
-    body: {
-      name: values.name,
-      keywords: [values.keyword],
-      matchMode: 'contains',
-      dmMessage: values.dmMessage,
-      alsoMatchInDms: false,
-      isActive: values.isActive,
-    },
-  });
-  const data = dataOf(response);
-  return { automation: automationRecord({ ...existing, ...(data?.automation || data) }) };
+  const existing = await ownedAutomation({ identity, automationId, repository, client, details: true });
+  if (input?.accountId !== undefined && String(input.accountId) !== existing.accountId) throw automationError('An existing automation cannot be moved to another account.');
+  const values = automationInput(input, existing.platform);
+  if (values.isActive === true) await getTenantZernioAccount({ identity, zernioAccountId: existing.accountId, repository, client });
+  if (values.dmMessage && existing.buttons?.length && values.dmMessage.length > 640) throw automationError('Existing DM buttons limit this message to 640 characters.');
+  if ((values.alsoMatchInDms ?? existing.alsoMatchInDms) && !(values.keywords ?? existing.keywords)?.length) throw automationError('Inbound DM matching requires at least one keyword.');
+  if (values.alsoMatchInDms && existing.trigger === 'story_reply') throw automationError('Inbound DM matching is unavailable for story-reply rules.');
+  const automation = confirmedAutomation(await client.commentautomations.updateCommentAutomation({ path: { automationId }, body: values }), automationId);
+  if ('isActive' in values && automation.isActive !== values.isActive) throw automationError('Zernio did not confirm the requested active state.', 502);
+  return { automation: { ...existing, ...automation, accountId: existing.accountId } };
 }
-
 export async function deleteTenantCommentAutomation({ identity, automationId, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
-  const owner = requiredIdentity(identity);
-  const id = String(automationId || '').trim();
-  if (!id) throw Object.assign(new Error('Automation id is required.'), { code: 'zernio_automation_id_required', status: 400 });
-  const existing = (await listTenantCommentAutomations({ identity: owner, repository, client })).automations.find((item) => String(item.id) === id);
-  if (!existing) throw Object.assign(new Error('The requested automation is not available to this tenant.'), { code: 'zernio_automation_not_owned', status: 403 });
-  await client.commentautomations.deleteCommentAutomation({ path: { automationId: id } });
-  return { success: true, id };
+  await ownedAutomation({ identity, automationId, repository, client });
+  const response = await client.commentautomations.deleteCommentAutomation({ path: { automationId } });
+  const data = dataOf(response);
+  if (data?.success === false) throw automationError('Zernio did not confirm deletion. Refresh the list before retrying.', 502);
+  if (data?.success !== true) {
+    if (response?.response?.ok !== true) throw automationError('Zernio did not confirm deletion. Refresh the list before retrying.', 502);
+    const profile = await ensureZernioProfile({ identity, repository, client });
+    const rawList = dataOf(await client.commentautomations.listCommentAutomations({ query: { profileId: profile.zernioProfileId } }));
+    if (rawList?.success === false || !Array.isArray(rawList?.automations) || rawList.automations.some(a => a.id === automationId)) throw automationError('Zernio did not confirm deletion. Refresh the list before retrying.', 502);
+  }
+  await repository.forgetDeletedAutomation({ ...requiredIdentity(identity), automationId });
+  return { success: true, id: automationId };
 }
 
 export async function getTenantZernioAccount({ identity, zernioAccountId, expectedPlatform, repository = new MySqlZernioRepository(), client = getZernioClient() } = {}) {
@@ -1035,9 +1077,9 @@ export async function cancelTenantZernioScheduledPost({ identity, postId, reposi
 }
 
 export function sanitizeZernioError(error, fallback = 'Maven Social is temporarily unavailable.') {
-  const safeCodes = ['zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_update_invalid', 'zernio_engagement_account_limit', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
+  const safeCodes = ['zernio_automation_invalid', 'zernio_api_key_missing', 'zernio_identity_required', 'zernio_platform_required', 'zernio_conversation_id_required', 'zernio_conversation_not_owned', 'zernio_platform_not_supported', 'zernio_special_connection_not_available', 'zernio_account_id_required', 'zernio_message_required', 'zernio_message_too_long', 'zernio_account_not_owned', 'zernio_account_platform_mismatch', 'zernio_account_not_connected', 'zernio_automation_name_required', 'zernio_automation_keyword_required', 'zernio_automation_message_required', 'zernio_automation_account_required', 'zernio_automation_id_required', 'zernio_automation_not_owned', 'zernio_automation_platform_not_supported', 'zernio_asset_required', 'zernio_asset_not_owned', 'zernio_media_unsupported', 'zernio_media_invalid_type', 'zernio_media_too_large', 'zernio_media_unavailable', 'zernio_media_upload_failed', 'zernio_publish_invalid', 'zernio_schedule_invalid', 'zernio_update_invalid', 'zernio_engagement_account_limit', 'zernio_post_id_required', 'zernio_post_not_owned', 'zernio_invalid_redirect', 'zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'];
   const safeProviderCode = ['zernio_payment_required', 'zernio_platform_beta_restricted', 'zernio_insufficient_permissions'].includes(error?.code);
-  const safe = new Error(safeProviderCode || error?.code === 'zernio_engagement_account_limit' ? error.message : fallback);
+  const safe = new Error(safeProviderCode || ['zernio_engagement_account_limit', 'zernio_automation_invalid'].includes(error?.code) ? error.message : fallback);
   safe.code = safeCodes.includes(error?.code) ? error.code : 'zernio_upstream_error';
   safe.status = [400, 401, 402, 403, 409, 501].includes(error?.status) ? error.status : 502;
   if (error?.code === 'zernio_engagement_account_limit') safe.entitlement = error.entitlement;

@@ -44,6 +44,21 @@ export class MySqlZernioRepository extends ZernioRepository {
     this.db = db;
   }
 
+
+  async claimAutomationRequest({ requestHash, accountId, creatorIdentityKey }) {
+    const [result] = await this.db.query(`INSERT IGNORE INTO zernio_automation_requests (request_hash, account_id, creator_identity_key) VALUES (?, ?, ?)`, [requestHash, accountId, creatorIdentityKey]);
+    const [rows] = await this.db.query(`SELECT status, response_json FROM zernio_automation_requests WHERE request_hash = ? AND account_id = ? AND creator_identity_key = ?`, [requestHash, accountId, creatorIdentityKey]);
+    const row = rows[0];
+    return { claimed: result.affectedRows === 1, status: row?.status, response: typeof row?.response_json === 'string' ? JSON.parse(row.response_json) : row?.response_json };
+  }
+  async finishAutomationRequest({ requestHash, accountId, creatorIdentityKey, status, response }) {
+    await this.db.query(`UPDATE zernio_automation_requests SET status = ?, response_json = ? WHERE request_hash = ? AND account_id = ? AND creator_identity_key = ?`, [status, response ? JSON.stringify(response) : null, requestHash, accountId, creatorIdentityKey]);
+  }
+
+  async forgetDeletedAutomation({ accountId, creatorIdentityKey, automationId }) {
+    await this.db.query(`DELETE FROM zernio_automation_requests WHERE account_id = ? AND creator_identity_key = ? AND status = 'succeeded' AND JSON_UNQUOTE(JSON_EXTRACT(response_json, '$.automation.id')) = ?`, [accountId, creatorIdentityKey, automationId]);
+  }
+
   async getProfile({ accountId, creatorIdentityKey }) {
     const [rows] = await this.db.query(
       `SELECT * FROM zernio_profiles
@@ -165,6 +180,25 @@ export class InMemoryZernioRepository extends ZernioRepository {
 
   accountKey({ accountId, creatorIdentityKey, zernioProfileId, zernioAccountId }) {
     return `${accountId}:${creatorIdentityKey}:${zernioProfileId}:${zernioAccountId}`;
+  }
+
+
+  async claimAutomationRequest({ requestHash, accountId, creatorIdentityKey }) {
+    this.automationRequests ??= new Map();
+    const key = `${accountId}:${creatorIdentityKey}:${requestHash}`;
+    const existing = this.automationRequests.get(key);
+    if (existing) return { claimed: false, ...existing };
+    this.automationRequests.set(key, { status: 'pending' });
+    return { claimed: true, status: 'pending' };
+  }
+  async finishAutomationRequest({ requestHash, accountId, creatorIdentityKey, status, response }) {
+    this.automationRequests.set(`${accountId}:${creatorIdentityKey}:${requestHash}`, { status, response });
+  }
+
+  async forgetDeletedAutomation({ accountId, creatorIdentityKey, automationId }) {
+    for (const [key, record] of this.automationRequests || []) {
+      if (key.startsWith(`${accountId}:${creatorIdentityKey}:`) && record.status === 'succeeded' && record.response?.automation?.id === automationId) this.automationRequests.delete(key);
+    }
   }
 
   async getProfile(input) {
