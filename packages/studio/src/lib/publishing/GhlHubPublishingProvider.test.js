@@ -215,3 +215,26 @@ test("provider selections cannot mix MuAPI and Hub accounts", () => {
   assert.equal(registry.resolveForDraft(muDraft).id, PUBLISHING_PROVIDER_IDS.MUAPI);
   assert.notEqual(registry.resolveForDraft(hubDraft).id, registry.resolveForDraft(muDraft).id);
 });
+
+test("GHL draft submits reviewed content without publishing or scheduling", async () => {
+  let request;
+  const provider = new GhlHubPublishingProvider({ fetchFn: async (url, options) => {
+    request = { url, options };
+    return response({ success: true, post: { id: "ghl-1", status: "draft" } }, 201);
+  }});
+  const draft = provider.createDraft({ id: "local-1", caption: "Approved copy", platforms: ["facebook"], accountIds: { facebook: "fb-1" }, assets: [{ url: "https://cdn.test/image.png", type: "image" }] });
+  assert.equal(provider.supportsCapability("publishNow"), false);
+  assert.equal(provider.supportsCapability("schedulePost"), false);
+  const post = await provider.sendDraft(draft, "approved:1");
+  assert.equal(post.id, "ghl-1");
+  assert.equal(request.options.credentials, "include");
+  assert.equal(request.options.headers["Idempotency-Key"], "approved:1");
+  assert.deepEqual(JSON.parse(request.options.body), { operation: "draft", content: "Approved copy", accountIds: ["fb-1"], media: [{ url: "https://cdn.test/image.png", type: "image/png" }] });
+});
+
+test("GHL draft rejects false success, missing IDs and scheduled responses", async () => {
+  for (const body of [{ success: false, error: "Permission denied" }, { success: true, post: { status: "draft" } }, { success: true, post: { id: "x", status: "scheduled" } }]) {
+    const provider = new GhlHubPublishingProvider({ fetchFn: async () => response(body) });
+    await assert.rejects(() => provider.sendDraft({ caption: "Hello", platforms: ["facebook"], accountIds: { facebook: "fb-1" } }, "approved:2"));
+  }
+});

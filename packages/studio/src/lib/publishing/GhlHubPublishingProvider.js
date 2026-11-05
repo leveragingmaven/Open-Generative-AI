@@ -1,6 +1,6 @@
 import { PublishingProvider } from "./PublishingProvider.js";
 import { PublishingError } from "./publishingErrors.js";
-import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS } from "./publishingTypes.js";
+import { PUBLISHING_PROVIDER_IDS, PUBLISHING_STATUS, normalizePublishingDraft } from "./publishingTypes.js";
 
 export const GHL_HUB_ACCOUNTS_URL = "https://hub.mavensync.space/api/ghl/social/accounts";
 const SUPPORTED_PLATFORMS = new Set(["facebook", "instagram", "threads", "pinterest"]);
@@ -53,6 +53,35 @@ export class GhlHubPublishingProvider extends PublishingProvider {
     this.fetchFn = options.fetchFn || globalThis.fetch?.bind(globalThis);
     this.accountsUrl = options.accountsUrl || GHL_HUB_ACCOUNTS_URL;
     this.timeoutMs = options.timeoutMs || 10000;
+  }
+
+  // These methods edit the existing local composer draft; only sendDraft contacts GHL.
+  createDraft(input) { return normalizePublishingDraft({ ...input, provider: this.id }); }
+  updateDraft(input) { return this.createDraft({ ...input, updatedAt: new Date().toISOString() }); }
+
+  async sendDraft(draft, idempotencyKey) {
+    if (draft.firstComment || draft.link) throw hubError("Add links and first comments to the reviewed caption before sending this draft.", "unsupported_draft_fields");
+    if (!draft.platforms?.length) throw hubError("Choose at least one connected destination.", "missing_accounts");
+    const accountIds = draft.platforms.map((platform) => draft.accountIds?.[platform]);
+    if (accountIds.some((id) => typeof id !== "string" || !id)) throw hubError("Choose a connected account for each destination.", "missing_accounts");
+    const media = (draft.assets || []).map((asset) => {
+      const type = asset.mimeType || asset.mime_type || (/^image\//.test(asset.type) ? asset.type : null);
+      // Never guess the MIME type of extensionless generated media.
+      const extension = String(asset.url || "").split("?")[0].split(".").pop().toLowerCase();
+      const mime = type || ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", mp4: "video/mp4", mov: "video/mov", webm: "video/webm" })[extension];
+      if (!mime || !String(asset.url || "").startsWith("https://")) throw hubError("Each image or video needs a public HTTPS URL and supported MIME type.", "invalid_media");
+      return { url: asset.url, type: mime };
+    });
+    const response = await this.fetchFn(this.accountsUrl.replace(/accounts$/, "posts"), {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ operation: "draft", accountIds: [...new Set(accountIds)], content: draft.caption || "", media }),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || data?.success !== true) throw hubError(data?.error || "GHL draft was not confirmed. Check Hub before retrying.", data?.code || "hub_draft_failed", response.status);
+    if (!data.post?.id || data.post.status !== "draft") throw hubError("GHL did not confirm an unscheduled draft. Check Hub before retrying.", "hub_malformed_response");
+    return data.post;
   }
 
   async getConnectedAccounts() {

@@ -59,6 +59,24 @@ export class PublishingCenterMVP {
     return draft;
   }
 
+  async sendGhlDraft(draftId) {
+    const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
+    if (!draft || draft.provider !== PUBLISHING_PROVIDER_IDS.GHL_HUB) throw new Error("Select a GHL draft first.");
+    // Freeze the approved request before network activity. Retries replay exactly this snapshot.
+    const key = `ghl-approved:${draft.id}`;
+    let submission = JSON.parse(this.storage.getItem(key) || "null");
+    const approved = { ...draft, caption: captionWithHashtags(draft.caption, draft.hashtags) };
+    const fields = (item) => JSON.stringify([item.caption, item.assets, item.platforms, item.accountIds, item.firstComment, item.link]);
+    if (submission && fields(submission.draft) !== fields(approved)) throw new Error("This draft already has a submitted snapshot. Check GHL first; duplicate the local draft to submit revised content.");
+    if (!submission) {
+      submission = { key: `draft:${globalThis.crypto.randomUUID()}`, draft: { ...draft, caption: captionWithHashtags(draft.caption, draft.hashtags) } };
+      this.storage.setItem(key, JSON.stringify(submission));
+    }
+    const post = await this.providerForDraft(draft).sendDraft(submission.draft, submission.key);
+    savePublishingDraft({ ...draft, providerJobId: post.id, status: PUBLISHING_STATUS.DRAFT }, this.storage);
+    return post;
+  }
+
   createDraftFromAsset(asset, options = {}) {
     const campaignInfo = assetCampaignInfo(asset);
     return this.createDraft({
