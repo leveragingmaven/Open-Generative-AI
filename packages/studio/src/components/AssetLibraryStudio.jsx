@@ -13,7 +13,7 @@ import { assetPreviewKind } from "../lib/assets/assetPreview.js";
 import { useNearViewport } from "../lib/assets/useNearViewport.js";
 import { CREATIVE_LIBRARY_PAGE_SIZE, libraryPageRemaining, libraryPageWindow } from "../lib/assets/libraryPaging.js";
 import { MEDIA_CANDIDATE_TIMEOUT_MS, nextMediaSource } from "../lib/assets/assetMediaSources.js";
-import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter, fetchPublishingDrafts } from "../lib/publishing/PersistentPublishingCenter.js";
 import { isPublishableCreativeMedia } from "../lib/publishing/publishingLibraryAssets.js";
 import {
   EmptyState,
@@ -387,23 +387,17 @@ export default function AssetLibraryStudio() {
     reload();
   };
 
-  // Removes a single unreferenced asset through its existing local or durable
-  // persistence path; no new metadata or persistence system is introduced.
-  const isReferencedByDraft = (assetId) => {
-    const center = new PublishingCenterMVP({ storage: window.localStorage });
-    return isAssetReferencedByPublishingDrafts(assetId, center.getDrafts());
-  };
-
   const handleRemove = async (asset) => {
     if (!asset?.id || removingId) return;
     if (!window.confirm("Remove this asset from your library? This cannot be undone.")) return;
-    if (isReferencedByDraft(asset.id)) {
-      setAssetActionError("This asset is used by a saved publishing draft. Remove it from that draft before deleting the asset.");
-      return;
-    }
     setRemovingId(asset.id);
     setAssetActionError(null);
     try {
+      const drafts = await fetchPublishingDrafts({ includeUnimportedBrowserDrafts: true });
+      if (isAssetReferencedByPublishingDrafts(asset.id, drafts)) {
+        setAssetActionError("This asset is used by a saved publishing draft. Remove it from that draft before deleting the asset.");
+        return;
+      }
       await deleteCreativeLibraryAsset(asset.id, { service, localAssetManager, localIds, durableIds });
       setAllAssets((current) => withoutCreativeLibraryAsset(current, asset.id));
       setAssets((current) => withoutCreativeLibraryAsset(current, asset.id));
@@ -482,11 +476,11 @@ export default function AssetLibraryStudio() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewAsset]);
 
-  const createPublishingDraft = (asset) => {
+  const createPublishingDraft = async (asset) => {
     if (!asset) return;
     try {
-      const center = new PublishingCenterMVP({ storage: window.localStorage });
-      const draft = center.createDraftFromAsset(asset, {
+      const center = new PersistentPublishingCenter();
+      const draft = await center.persistDraftFromAsset(asset, {
         campaignId: activeCampaign?.id,
         campaignName: activeCampaign?.name,
       });

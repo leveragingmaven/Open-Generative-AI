@@ -21,7 +21,7 @@ import { readMotionRuns } from "../../lib/motion/MotionHistory.js";
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
-import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
@@ -53,7 +53,7 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
   const timerRef = useRef(null);
   const logoInputRef = useRef(null);
   const imagesInputRef = useRef(null);
-  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
+  const publishingCenter = useMemo(() => new PersistentPublishingCenter(), []);
 
   const templates = useMemo(() => listWorkflowTemplates(), []);
   const template = useMemo(() => {
@@ -218,9 +218,9 @@ export default function MarketingMotionPanel({ apiKey, motionTarget = null, onEx
   }, [apiKey, running, templateId, text, brandColors, logoUrl, imageUrls, duration, aspectRatio, promptRefinement, activeCampaign?.id, activeCampaign?.name, runtime]);
 
   const handleAddToPublishing = useCallback(
-    (asset) => {
+    async (asset) => {
       try {
-        const draft = publishingCenter.createDraftFromAsset(asset, {
+        const draft = await publishingCenter.persistDraftFromAsset(asset, {
           campaignId: activeCampaign?.id || null,
           campaignName: activeCampaign?.name || null,
         });

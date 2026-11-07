@@ -9,7 +9,7 @@ import {
 import { CAROUSEL_VISUAL_STYLES, CAROUSEL_DEFAULT_VISUAL_STYLE } from "../../lib/motion/carousel/CarouselVisualStyles.js";
 import { resolveSceneMode } from "../../lib/motion/carousel/CarouselPlanner.js";
 import { transferredLayerAssets, carouselRenderDeck } from "../../lib/motion/carousel/CarouselLayerAssets.js";
-import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 import { readStoredDashboardSessionId } from "design-agent";
 
@@ -111,7 +111,7 @@ export default function MavenCarouselPanel({ onExit }) {
   const carouselDraftsSentRef = useRef({});
   const idempotency = useRef(0);
   const { activeCampaign } = useActiveCampaign();
-  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
+  const publishingCenter = useMemo(() => new PersistentPublishingCenter(), []);
 
   useEffect(() => {
     let active = true;
@@ -370,7 +370,7 @@ export default function MavenCarouselPanel({ onExit }) {
     try {
       const data = await post({ action: "publish", jobId: job.jobId });
       const assets = data.assets || [];
-      const draft = publishingCenter.createDraft({
+      const draft = await publishingCenter.persistDraft({
         assetIds: assets.map((asset) => asset.id),
         assets,
         caption: brief,

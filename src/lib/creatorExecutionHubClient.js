@@ -95,6 +95,10 @@ export function configuredCreatorExecutionHub({ env = process.env, fetchImpl = f
   }
 
   return {
+    async listCommittedDrafts(subject, after) {
+      const query = after ? `?after=${checked(after)}` : '';
+      return request('GET', `/api/creator-execution/committed-drafts${query}`, subject);
+    },
     async readCommittedDraft(proposalId, subject) {
       const data = await request('GET', `/api/creator-execution/committed-drafts/${checked(proposalId)}`, subject);
       return data.draft;

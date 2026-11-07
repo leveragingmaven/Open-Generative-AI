@@ -17,7 +17,7 @@ import {
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
-import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 import { listLibraryMedia } from "../../lib/character/CharacterMediaTypes.js";
 import {
@@ -69,7 +69,7 @@ export default function CharacterTalkingAvatarPanel({
   const timerRef = useRef(null);
   const audioInputRef = useRef(null);
   const tempImageInputRef = useRef(null);
-  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
+  const publishingCenter = useMemo(() => new PersistentPublishingCenter(), []);
 
   const runtime = useMemo(
     () =>
@@ -253,9 +253,9 @@ export default function CharacterTalkingAvatarPanel({
   }, [running, selectedIdentity, audioUrl, modelId, resolution, showResolution, activeCampaign, apiKey, runtime, clearResult]);
 
   const handleAddToPublishing = useCallback(
-    (asset) => {
+    async (asset) => {
       try {
-        const draft = publishingCenter.createDraftFromAsset(asset, {
+        const draft = await publishingCenter.persistDraftFromAsset(asset, {
           campaignId: activeCampaign?.id || null,
           campaignName: activeCampaign?.name || null,
         });

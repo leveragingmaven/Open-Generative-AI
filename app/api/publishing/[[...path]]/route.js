@@ -9,7 +9,6 @@ import { fetchPostizIntegrations, fetchPostizRequest } from '@/src/lib/postizPub
 const ROUTES = {
     'accounts': { methods: ['GET'], capability: 'getConnectedAccounts', handler: 'getConnectedAccounts' },
     'accounts/connect': { methods: ['POST'], capability: 'connectAccount', handler: 'connectAccount' },
-    'drafts': { methods: ['POST'], capability: 'createDraft', localOnly: true },
     'schedule': { methods: ['POST'], capability: 'schedulePost', handler: 'publishMedia' },
     'publish-now': { methods: ['POST'], capability: 'publishNow', handler: 'publishMedia' },
     'scheduled': { methods: ['GET'], capability: 'getScheduledPosts', upstream: '/social/posts' },
@@ -64,7 +63,6 @@ function normalizeError(error, status = 500) {
 function routeKey(pathSegments = []) {
     if (ROUTES[pathSegments.join('/')]) return pathSegments.join('/');
     if (pathSegments[0] === 'accounts' && pathSegments.length === 2) return 'accounts/:accountId';
-    if (pathSegments[0] === 'drafts' && pathSegments.length === 2) return 'drafts/:draftId';
     if (pathSegments[0] === 'jobs' && pathSegments.length === 2) return 'jobs/:jobId';
     if (pathSegments[0] === 'jobs' && pathSegments.length === 3 && pathSegments[2] === 'cancel') return 'jobs/:jobId/cancel';
     if (pathSegments[0] === 'jobs' && pathSegments.length === 3 && pathSegments[2] === 'reschedule') return 'jobs/:jobId/reschedule';
@@ -74,7 +72,6 @@ function routeKey(pathSegments = []) {
 function routeDefinition(key) {
     return ROUTES[key] || {
         'accounts/:accountId': { methods: ['PATCH', 'DELETE'], capability: 'manageAccount', handler: 'accountById' },
-        'drafts/:draftId': { methods: ['PATCH', 'DELETE'], capability: 'updateDraft', localOnly: true },
         'jobs/:jobId': { methods: ['GET'], capability: 'getPublishingJob', handler: 'getPublishingJob' },
         'jobs/:jobId/cancel': { methods: ['POST'], capability: 'cancelScheduledPost', handler: 'cancelScheduledPost' },
         'jobs/:jobId/reschedule': { methods: ['POST'], capability: 'reschedulePost', upstream: null },
@@ -304,7 +301,6 @@ async function handlePublishingRequest(request, { params }) {
         return NextResponse.json({ error: 'Publishing route not found.', code: 'not_found' }, { status: 404 });
     }
 
-    if (definition.localOnly) return NextResponse.json({ ok: true, localOnly: true, capability: definition.capability });
 
     if (definition.handler === 'connectAccount') return handleConnectAccount(request, auth.identity);
     if (definition.handler === 'getConnectedAccounts') return handleGetConnectedAccounts(request, auth.identity);

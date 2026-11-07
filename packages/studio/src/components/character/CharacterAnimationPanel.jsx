@@ -12,7 +12,7 @@ import { getI2VModelById, getAspectRatiosForI2VModel, getDurationsForI2VModel } 
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
-import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 import {
   createCharacterAnimationRuntime,
@@ -71,7 +71,7 @@ export default function CharacterAnimationPanel({
   const startedAtRef = useRef(0);
   const timerRef = useRef(null);
   const tempImageInputRef = useRef(null);
-  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
+  const publishingCenter = useMemo(() => new PersistentPublishingCenter(), []);
 
   const runtime = useMemo(
     () =>
@@ -222,9 +222,9 @@ export default function CharacterAnimationPanel({
   }, [running, selectedIdentity, prompt, modelId, aspectRatio, duration, activeCampaign, apiKey, runtime, clearResult]);
 
   const handleAddToPublishing = useCallback(
-    (asset) => {
+    async (asset) => {
       try {
-        const draft = publishingCenter.createDraftFromAsset(asset, {
+        const draft = await publishingCenter.persistDraftFromAsset(asset, {
           campaignId: activeCampaign?.id || null,
           campaignName: activeCampaign?.name || null,
         });

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { localAssetManager } from "../lib/intelligence/AssetManager.js";
 import { MemoryStorageAdapter } from "../lib/intelligence/MemoryStorageAdapter.js";
-import { readPublishingDrafts, readPublishingHistory } from "../lib/publishing/publishingHistory.js";
+import { readPublishingHistory } from "../lib/publishing/publishingHistory.js";
+import { fetchPublishingDrafts } from "../lib/publishing/PersistentPublishingCenter.js";
 import { PUBLISHING_STATUS } from "../lib/publishing/publishingTypes.js";
 import { inferAssetKind } from "../lib/assets/metadataManager.js";
 import { assetCampaignInfo } from "../lib/campaigns/campaignAssetMetadata.js";
@@ -98,9 +99,9 @@ function belongsToCampaign(record, campaignId) {
   return Array.isArray(record.assets) && record.assets.some((asset) => assetCampaignInfo(asset)?.campaignId === campaignId);
 }
 
-function readSnapshot(campaign) {
+function readSnapshot(campaign, publishingDrafts) {
   const assets = listCampaignAssets(campaign.id);
-  const drafts = (() => { try { return readPublishingDrafts().filter((draft) => belongsToCampaign(draft, campaign.id)); } catch { return []; } })();
+  const drafts = publishingDrafts.filter(draft => belongsToCampaign(draft, campaign.id));
   const history = (() => { try { return readPublishingHistory().filter((job) => belongsToCampaign(job, campaign.id)); } catch { return []; } })();
   const memories = (() => {
     try {
@@ -158,7 +159,13 @@ function AssetPreview({ asset, onOpen }) {
 }
 
 export default function CampaignDashboard({ campaign, onNavigate = () => {} }) {
-  const data = useMemo(() => readSnapshot(campaign), [campaign]);
+  const [drafts, setDrafts] = useState([]);
+  useEffect(() => {
+    let active = true;
+    fetchPublishingDrafts().then(records => { if (active) setDrafts(records); }).catch(() => {});
+    return () => { active = false; };
+  }, [campaign.id]);
+  const data = useMemo(() => readSnapshot(campaign, drafts), [campaign, drafts]);
   const status = CAMPAIGN_STATUSES.includes(campaign.status) ? campaign.status : "draft";
   const statusLabel = CAMPAIGN_STATUS_LABELS[status] || status;
   const nextAction = data.assets.length === 0

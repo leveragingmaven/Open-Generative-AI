@@ -16,7 +16,7 @@ export async function GET(request, { params }) {
     const hub = configuredCreatorExecutionHub();
     const draft = await hub?.readCommittedDraft(proposalId, auth.identity.email);
     if (draft?.proposalId === proposalId && typeof draft.title === 'string' && typeof draft.content === 'string') {
-      return Response.json({ draft }, { headers });
+      return Response.json({ draft, accountId: auth.identity.accountId }, { headers });
     }
   } catch (error) {
     if (error.status === 404) {

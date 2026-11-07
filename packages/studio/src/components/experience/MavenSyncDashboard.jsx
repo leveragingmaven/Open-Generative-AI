@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { CampaignStore } from "../../lib/campaigns/CampaignStore.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
-import { readPublishingDrafts, readPublishingHistory } from "../../lib/publishing/publishingHistory.js";
+import { readPublishingHistory } from "../../lib/publishing/publishingHistory.js";
+import { fetchPublishingDrafts } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { SKILL_LIBRARY } from "../../lib/skills/index.js";
 import { listTwins } from "../../lib/twin/TwinStore.js";
 import { TABS, WORKSPACE_MENU_GROUPS, AI_WORKSPACE_IDS } from "../../studioNavigation.js";
@@ -154,8 +155,10 @@ export default function MavenSyncDashboard({ motionCarouselAllowed = false } = {
     try { setCampaigns(CampaignStore.list()); } catch { setCampaigns([]); }
     try { setAssets(localAssetManager.listAssets()); } catch { setAssets([]); }
     try { setTwins(listTwins()); } catch { setTwins([]); }
-    try { setPublishingDrafts(readPublishingDrafts()); } catch { setPublishingDrafts([]); }
+    let active = true;
+    fetchPublishingDrafts().then(records => { if (active) setPublishingDrafts(records); }).catch(() => {});
     try { setPublishingHistory(readPublishingHistory()); } catch { setPublishingHistory([]); }
+    return () => { active = false; };
   }, []);
 
   const sortedCampaigns = useMemo(() => [...campaigns].sort((a, b) => timestamp(b.updatedAt || b.createdAt) - timestamp(a.updatedAt || a.createdAt)), [campaigns]);

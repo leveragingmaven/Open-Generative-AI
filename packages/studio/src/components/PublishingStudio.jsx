@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PublishingCenterMVP } from "../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter, existingBrowserDrafts } from "../lib/publishing/PersistentPublishingCenter.js";
 import DmAutomationPanel from "./DmAutomationPanel.jsx";
 import GhlHubPublishingAccounts from "./GhlHubPublishingAccounts.jsx";
 import { publishingProviderRegistry } from "../lib/publishing/PublishingProviderRegistry.js";
@@ -359,6 +359,9 @@ export default function PublishingStudio() {
   const [drafts, setDrafts] = useState([]);
   const [proposalId, setProposalId] = useState("");
   const [importingDraft, setImportingDraft] = useState(false);
+  const [browserDrafts, setBrowserDrafts] = useState([]);
+  const [syncingDrafts, setSyncingDrafts] = useState(false);
+  const [migratingDrafts, setMigratingDrafts] = useState(false);
   const [history, setHistory] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [engagementEntitlement, setEngagementEntitlement] = useState(() => zernioEngagementEntitlement([]));
@@ -417,6 +420,10 @@ export default function PublishingStudio() {
   const reload = async (center = centerRef.current) => {
     if (!center) return;
     try {
+      await center.refreshDrafts();
+      if (centerRef.current !== center) return;
+      setBrowserDrafts(window.localStorage.getItem(`publishing-draft-imported:${center.accountId}`)
+        ? [] : existingBrowserDrafts(window.localStorage));
       const localAssets = center.getAvailableAssets();
       let durableAssets = [];
       let durableFailed = false;
@@ -427,12 +434,13 @@ export default function PublishingStudio() {
       setLibraryDegraded(durableFailed);
       let remoteHistory = [];
       try {
-        remoteHistory = await withTimeout(center.getRemoteHistory(), REMOTE_HISTORY_TIMEOUT_MS, "Maven Social scheduled posts did not respond in time.");
+        remoteHistory = await withTimeout(center.runDraftAction(() => center.getRemoteHistory()), REMOTE_HISTORY_TIMEOUT_MS, "Maven Social scheduled posts did not respond in time.");
         setRemoteHistoryError(null);
         setScheduleSyncedAt(new Date().toISOString());
       } catch (error) {
-        setRemoteHistoryError(error.message || "Maven Social scheduled posts are unavailable; showing the schedule saved in this browser.");
+        setRemoteHistoryError(error.message || "Maven Social scheduled posts are unavailable; showing the saved schedule.");
       }
+      if (centerRef.current !== center) return;
       setDrafts(center.getDrafts());
       const localHistory = center.getHistory();
       const byId = new Map();
@@ -453,7 +461,10 @@ export default function PublishingStudio() {
       }
       setLoadError(null);
     } catch (error) {
-      setLoadError(error.message || "Unable to load publishing information");
+      if (centerRef.current === center) {
+        setDrafts(center.getDrafts());
+        setLoadError(error.message || "Unable to load publishing information");
+      }
     } finally {
       setLoading(false);
     }
@@ -477,7 +488,7 @@ export default function PublishingStudio() {
 
   const switchProvider = async (nextProviderId) => {
     const provider = publishingProviderRegistry.get(nextProviderId);
-    const center = new PublishingCenterMVP({ storage: window.localStorage, publishingProvider: provider });
+    const center = new PersistentPublishingCenter({ publishingProvider: provider });
     centerRef.current = center;
     setProviderId(nextProviderId);
     if (nextProviderId !== PUBLISHING_PROVIDER_IDS.ZERNIO) setEngagementEntitlement(zernioEngagementEntitlement([]));
@@ -485,7 +496,7 @@ export default function PublishingStudio() {
   };
 
   useEffect(() => {
-    const center = new PublishingCenterMVP({ storage: window.localStorage });
+    const center = new PersistentPublishingCenter();
     centerRef.current = center;
     const returnedFromOAuth = window.sessionStorage.getItem(PUBLISHING_OAUTH_RETURN_KEY) === "1";
     if (returnedFromOAuth) window.sessionStorage.removeItem(PUBLISHING_OAUTH_RETURN_KEY);
@@ -686,9 +697,14 @@ export default function PublishingStudio() {
     ...history.flatMap((item) => item.platforms || []),
   ])], [accounts, drafts, history]);
 
-  const createDraft = (asset) => {
+  const persistDraftAction = (action, expectedDraft) => {
+    const center = centerRef.current;
+    return center.runDraftAction(() => action(center), expectedDraft);
+  };
+
+  const createDraft = async (asset) => {
     try {
-      const draft = centerRef.current.createDraftFromAsset(asset);
+      const draft = await persistDraftAction(center => center.createDraftFromAsset(asset));
       setFocusedDraftId(draft.id);
       setNotice({ tone: "success", text: `Draft created for ${assetTitle(asset)}.` });
       void reload();
@@ -699,9 +715,9 @@ export default function PublishingStudio() {
     }
   };
 
-  const createBlankDraft = () => {
+  const createBlankDraft = async () => {
     try {
-      const draft = centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
+      const draft = await persistDraftAction(center => center.createDraft({ caption: "", title: "" }));
       setFocusedDraftId(draft.id);
       setNotice({ tone: "success", text: "Blank publishing draft created. Add content, an optional asset, and a destination." });
       void reload();
@@ -726,14 +742,71 @@ export default function PublishingStudio() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to import the MCP draft.");
       const center = centerRef.current;
-      const imported = center.importCommittedDraft(result.draft);
+      if (result.accountId !== center.accountId) throw new Error("Your signed-in account changed. Reload Publishing.");
+      const counts = await center.importMcpDrafts([result.draft], result.accountId);
+      if (counts.failed) throw new Error(counts.error || "Unable to import the MCP draft.");
       setDrafts(center.getDrafts());
       setProposalId("");
-      setNotice({ tone: "success", text: imported ? "MCP draft imported into Queue." : "This MCP draft is already in Queue." });
+      setNotice({ tone: "success", text: counts.imported ? "MCP draft imported into Queue." : "This MCP draft was already synced." });
     } catch (error) {
       setNotice({ tone: "error", text: error.message || "Unable to import the MCP draft." });
     } finally {
       setImportingDraft(false);
+    }
+  };
+
+  const syncMcpDrafts = async () => {
+    if (syncingDrafts) return;
+    const center = centerRef.current;
+    const accountId = center.accountId;
+    const counts = { imported: 0, skipped: 0, failed: 0 };
+    let errorMessage;
+    setSyncingDrafts(true);
+    try {
+      let after;
+      do {
+        const query = after ? `?after=${encodeURIComponent(after)}` : "";
+        const response = await fetch(`/api/publishing/committed-drafts${query}`, { cache: "no-store" });
+        const page = await response.json();
+        if (!response.ok) throw new Error(page.error || "Unable to retrieve MCP drafts.");
+        if (page.accountId !== accountId) throw new Error("Your signed-in account changed. Reload Publishing.");
+        const result = await center.importMcpDrafts(page.drafts, accountId);
+        for (const key of Object.keys(counts)) counts[key] += result[key];
+        errorMessage ||= result.error;
+        after = page.nextCursor;
+      } while (after);
+    } catch (error) {
+      errorMessage = error.message;
+    } finally {
+      setDrafts(center.getDrafts());
+      setNotice({
+        tone: errorMessage || counts.failed ? "error" : "success",
+        text: `MCP sync: ${counts.imported} imported, ${counts.skipped} skipped, ${counts.failed} failed.${errorMessage ? ` ${errorMessage}` : ""}`,
+      });
+      setSyncingDrafts(false);
+    }
+  };
+
+  const importBrowserDrafts = async () => {
+    if (migratingDrafts || !window.confirm(`Import ${browserDrafts.length} drafts from this browser into your signed-in account? Continue only if these drafts belong to you. Original browser drafts will be kept.`)) return;
+    const center = centerRef.current;
+    const accountId = center.accountId;
+    setMigratingDrafts(true);
+    try {
+      const counts = await center.importBrowserDrafts(browserDrafts, accountId);
+      if (!counts.failed) {
+        window.localStorage.setItem(`publishing-draft-imported:${accountId}`, "1");
+        setBrowserDrafts([]);
+      }
+      setDrafts(center.getDrafts());
+      setNotice({
+        tone: counts.failed ? "error" : "success",
+        text: `Browser drafts: ${counts.imported} imported, ${counts.skipped} skipped, ${counts.failed} failed.${counts.error ? ` ${counts.error}` : ""}`,
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message || "Unable to import browser drafts." });
+    } finally {
+      setMigratingDrafts(false);
     }
   };
 
@@ -795,8 +868,7 @@ export default function PublishingStudio() {
         updateDraftEdit(focusedDraft.id, "assets", [result.asset]);
         updateDraftEdit(focusedDraft.id, "assetIds", [result.asset.id]);
       } else {
-        const draft = centerRef.current.createDraft({ caption: "", title: "", assets: [], assetIds: [] });
-        centerRef.current.attachAsset(draft.id, result.asset);
+        const draft = await persistDraftAction(center => center.createDraft({ assets: [result.asset], assetIds: [result.asset.id] }));
         setFocusedDraftId(draft.id);
       }
       setNotice({ tone: "success", text: `${file.name} attached to this post.` });
@@ -812,17 +884,19 @@ export default function PublishingStudio() {
   const scheduleIssueForDraft = (draft) => publishingScheduleIssue(draft, accounts, providerPlatformId, draftEdits[draft.id]);
 
   const updateDraftEdit = (draftId, field, value) => {
+    const base = drafts.find(draft => draft.id === draftId);
     setDraftEdits((current) => ({
       ...current,
       [draftId]: {
-        ...(current[draftId] || {}),
+        ...(current[draftId] || { base }),
         [field]: value,
       },
     }));
   };
 
   const saveDraftEdits = async (draft, options = {}) => {
-    const updates = publishingDraftUpdateFromComposer(draft, draftEdits[draft.id] || {});
+    const edits = draftEdits[draft.id];
+    const updates = publishingDraftUpdateFromComposer(draft, edits || {});
     const center = centerRef.current;
     const policy = scheduledEditPolicy(draft);
     const scheduledOnProvider = policy.contentUpdatesProvider;
@@ -832,9 +906,9 @@ export default function PublishingStudio() {
       if (policy.scheduledOnProvider && !policy.canEditContent) {
         throw new Error("this post is already scheduled and cannot be edited in place. Cancel the schedule to change it.");
       }
-      const updated = scheduledOnProvider
-        ? await center.updateScheduledDraft(draft.id, updates)
-        : center.updateDraft(draft.id, updates);
+      const updated = await persistDraftAction(active => scheduledOnProvider
+        ? active.updateScheduledDraft(draft.id, updates)
+        : active.updateDraft(draft.id, updates), edits?.base || draft);
       setDraftEdits((current) => {
         const next = { ...current };
         delete next[draft.id];
@@ -864,7 +938,7 @@ export default function PublishingStudio() {
     try {
       const saved = await saveDraftEdits(draft, { silent: true });
       if (!saved) return;
-      const post = await centerRef.current.sendGhlDraft(draft.id);
+      const post = await persistDraftAction(center => center.sendGhlDraft(draft.id), saved);
       setNotice({ tone: "success", text: `GHL draft confirmed (${post.id}). It is unscheduled. Further edits must be made in GHL.` });
       await reload();
     } catch (error) {
@@ -872,7 +946,16 @@ export default function PublishingStudio() {
     } finally { setBusyId(null); }
   };
 
-  const togglePlatform = (draft, platform) => {
+  const saveDraftDestinations = async (draft, platforms, accountIds, platformOverrides) => {
+    const base = draftEdits[draft.id]?.base || draft;
+    const saved = await persistDraftAction(center =>
+      center.updateDraftPlatforms(draft.id, platforms, { accountIds, platformOverrides }), base);
+    setDraftEdits(current => current[draft.id]
+      ? { ...current, [draft.id]: { ...current[draft.id], base: saved } }
+      : current);
+  };
+
+  const togglePlatform = async (draft, platform) => {
     try {
       if (draft.provider !== providerId) {
         setNotice({ tone: "error", text: "Choose a destination from the same publishing provider as this draft." });
@@ -908,7 +991,7 @@ export default function PublishingStudio() {
         delete accountIds[draftPlatform];
         delete platformOverrides[draftPlatform];
       }
-      centerRef.current.updateDraftPlatforms(draft.id, platforms, { accountIds, platformOverrides });
+      await saveDraftDestinations(draft, platforms, accountIds, platformOverrides);
       setNotice({ tone: "success", text: "Publishing destinations updated." });
       void reload();
     } catch (error) {
@@ -916,7 +999,7 @@ export default function PublishingStudio() {
     }
   };
 
-  const selectAccount = (draft, platform, accountId) => {
+  const selectAccount = async (draft, platform, accountId) => {
     try {
       const account = accountsForPlatform(accounts, platform).find((item) => String(item.id) === String(accountId));
       if (!account) {
@@ -936,7 +1019,7 @@ export default function PublishingStudio() {
           accountName: account.name,
         },
       };
-      centerRef.current.updateDraftPlatforms(draft.id, draft.platforms || [], { accountIds, platformOverrides });
+      await saveDraftDestinations(draft, draft.platforms || [], accountIds, platformOverrides);
       setNotice({ tone: "success", text: `${account.name || platform} selected for ${platform}.` });
       void reload();
     } catch (error) {
@@ -1100,7 +1183,7 @@ export default function PublishingStudio() {
     try {
       const saved = prepared.writeLocalFirst ? await saveDraftEdits(source, { silent: true }) : prepared.source;
       if (!saved) return;
-      const copy = centerRef.current.duplicateDraft(saved);
+      const copy = await persistDraftAction(center => center.duplicateDraft(saved));
       setFocusedDraftId(copy.id);
       setActiveView("create");
       openSchedule(copy);
@@ -1156,7 +1239,7 @@ export default function PublishingStudio() {
     setBusyId(draft.id);
     setNotice(null);
     try {
-      await centerRef.current.scheduleDraft(draft.id, scheduledFor, scheduleTimezone);
+      await persistDraftAction(center => center.scheduleDraft(draft.id, scheduledFor, scheduleTimezone), draft);
       setScheduleDraftId(null);
       setCalendarRescheduleDraftId(null);
       setSelectedCalendarDraftId(draft.id);
@@ -1196,7 +1279,7 @@ export default function PublishingStudio() {
     try {
       const savedDraft = await saveDraftEdits(draft, { silent: true });
       if (!savedDraft) return;
-      await centerRef.current.scheduleDraft(savedDraft.id, scheduledFor, scheduleTimezone);
+      await persistDraftAction(center => center.scheduleDraft(savedDraft.id, scheduledFor, scheduleTimezone), savedDraft);
       setScheduleDraftId(null);
       // The confirmation states the destination, date, time, timezone, and status, and points at the next free
       // slot so preparing the following post needs no extra navigation.
@@ -1222,7 +1305,7 @@ export default function PublishingStudio() {
     setBusyId(`cancel:${draft.id}`);
     setNotice(null);
     try {
-      await centerRef.current.cancelScheduledDraft(draft.id);
+      await persistDraftAction(center => center.cancelScheduledDraft(draft.id), draft);
       setSelectedCalendarDraftId(null);
       if (scheduleDraftId === draft.id) setScheduleDraftId(null);
       if (calendarRescheduleDraftId === draft.id) setCalendarRescheduleDraftId(null);
@@ -1235,9 +1318,9 @@ export default function PublishingStudio() {
     }
   };
 
-  const duplicateDraft = (source, label = "Draft") => {
+  const duplicateDraft = async (source, label = "Draft") => {
     try {
-      const duplicate = centerRef.current.duplicateDraft(source);
+      const duplicate = await persistDraftAction(center => center.duplicateDraft(source));
       setFocusedDraftId(duplicate.id);
       setActiveView("queue");
       setNotice({ tone: "success", text: `${label} duplicated as a new editable draft.` });
@@ -1255,7 +1338,7 @@ export default function PublishingStudio() {
       // A post the provider already holds scheduled is never resubmitted; the provider guard reports it instead.
       const savedDraft = scheduledEditPolicy(draft).scheduledOnProvider ? draft : await saveDraftEdits(draft, { silent: true });
       if (!savedDraft) return;
-      const result = await centerRef.current.publishDraft(draft.id);
+      const result = await persistDraftAction(center => center.publishDraft(draft.id), savedDraft);
       if (result.status === PUBLISHING_STATUS.PARTIALLY_PUBLISHED) {
         setNotice({ tone: "warning", text: `${savedDraft.title || "Draft"} was partially published. Review the platform results.` });
       } else if (result.status === PUBLISHING_STATUS.FAILED) {
@@ -1283,7 +1366,7 @@ export default function PublishingStudio() {
     setBusyId(`delete:${draft.id}`);
     setNotice(null);
     try {
-      const result = await centerRef.current.deleteDraftSafely(draft.id);
+      const result = await persistDraftAction(center => center.deleteDraftSafely(draft.id), draft);
       // The composer/preview must not keep pointing at a draft that no longer exists.
       if (focusedDraftId === draft.id) setFocusedDraftId(null);
       setNotice({
@@ -1650,6 +1733,10 @@ export default function PublishingStudio() {
       </WorkspaceSection>}
 
       {activeView === "queue" && <WorkspaceSection title="Queue" description="Every saved post with its media, caption, destination, schedule, and status." actions={<div className="flex flex-wrap items-center gap-2">{nextScheduled ? <StatusBadge tone="gold">Next {readableDate(nextScheduled.scheduledAt, true)}</StatusBadge> : null}<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge></div>}>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <SecondaryButton type="button" disabled={syncingDrafts || !centerRef.current?.accountId} onClick={syncMcpDrafts}>{syncingDrafts ? "Syncing…" : "Sync MCP Drafts"}</SecondaryButton>
+          {browserDrafts.length > 0 && <SecondaryButton type="button" disabled={migratingDrafts} onClick={importBrowserDrafts}>{migratingDrafts ? "Importing…" : "Import Existing Browser Drafts"}</SecondaryButton>}
+        </div>
         <form onSubmit={importCommittedDraft} className="mb-4 flex flex-wrap items-end gap-2">
           <label className="flex min-w-0 flex-col gap-1 text-xs">
             MCP proposal ID

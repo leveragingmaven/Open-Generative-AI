@@ -13,7 +13,7 @@ import { readCreativeLibrary } from "../../lib/intelligence/CreativeLibrary.js";
 import { localAssetManager } from "../../lib/intelligence/AssetManager.js";
 import { localCampaignManager } from "../../lib/intelligence/CampaignManager.js";
 import { downloadAsset } from "../../lib/assets/assetManager.js";
-import { PublishingCenterMVP } from "../../lib/publishing/PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "../../lib/publishing/PersistentPublishingCenter.js";
 import { useActiveCampaign } from "../../lib/campaigns/CampaignContext.js";
 
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
@@ -58,7 +58,7 @@ export default function VideoRepurposePanel({ apiKey, repurposeTarget = null, on
   const fileInputRef = useRef(null);
   const startedAtRef = useRef(0);
   const timerRef = useRef(null);
-  const publishingCenter = useMemo(() => new PublishingCenterMVP(), []);
+  const publishingCenter = useMemo(() => new PersistentPublishingCenter(), []);
 
   const runtime = useMemo(
     () =>
@@ -215,9 +215,9 @@ export default function VideoRepurposePanel({ apiKey, repurposeTarget = null, on
   }, [apiKey, running, sourceVideoUrl, sourceAssetId, sourceSource, urlInput, numHighlights, aspectRatio, coordinatesOnly, guidance, activeCampaign?.id, activeCampaign?.name, runtime]);
 
   const handleAddToPublishing = useCallback(
-    (asset) => {
+    async (asset) => {
       try {
-        const draft = publishingCenter.createDraftFromAsset(asset, {
+        const draft = await publishingCenter.persistDraftFromAsset(asset, {
           campaignId: activeCampaign?.id || null,
           campaignName: activeCampaign?.name || null,
         });

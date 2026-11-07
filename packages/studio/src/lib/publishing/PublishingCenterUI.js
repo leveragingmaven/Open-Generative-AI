@@ -1,11 +1,16 @@
-import { PublishingCenterMVP } from "./PublishingCenterMVP.js";
+import { PersistentPublishingCenter } from "./PersistentPublishingCenter.js";
+
+function escapeDraftText(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
 
 // Simple UI component for the Publishing Center MVP
 export class PublishingCenterUI {
   constructor(container, options = {}) {
     this.container = container;
-    this.publishingCenter = new PublishingCenterMVP(options);
+    this.publishingCenter = new PersistentPublishingCenter(options);
     this.render();
+    void this.publishingCenter.refreshDrafts().then(() => this.renderDrafts()).catch(error => alert(error.message));
   }
 
   render() {
@@ -82,19 +87,22 @@ export class PublishingCenterUI {
       return;
     }
     
-    const draftList = drafts.map(draft => `
+    const draftList = drafts.map(draft => {
+      const encodedId = encodeURIComponent(draft.id).replaceAll("'", "%27");
+      return `
       <div class="draft-item" data-id="${draft.id}">
-        <h4>${draft.title || 'Untitled Draft'}</h4>
+        <h4>${escapeDraftText(draft.title || 'Untitled Draft')}</h4>
         <p>Assets: ${draft.assets.length}</p>
-        <p>Platforms: ${draft.platforms.join(', ') || 'None'}</p>
+        <p>Platforms: ${escapeDraftText(draft.platforms.join(', ') || 'None')}</p>
         <p>Status: ${draft.status}</p>
         <div class="draft-actions">
-          <button onclick="window.publishingCenterUI.scheduleDraft('${draft.id}')">Schedule</button>
-          <button onclick="window.publishingCenterUI.publishDraft('${draft.id}')">Publish Now</button>
-          <button onclick="window.publishingCenterUI.deleteDraft('${draft.id}')">Delete</button>
+          <button onclick="window.publishingCenterUI.scheduleDraft(decodeURIComponent('${encodedId}'))">Schedule</button>
+          <button onclick="window.publishingCenterUI.publishDraft(decodeURIComponent('${encodedId}'))">Publish Now</button>
+          <button onclick="window.publishingCenterUI.deleteDraft(decodeURIComponent('${encodedId}'))">Delete</button>
         </div>
       </div>
-    `).join('');
+      `;
+    }).join('');
     
     draftsContainer.innerHTML = `
       <div class="drafts-grid">${draftList}</div>
@@ -128,7 +136,7 @@ export class PublishingCenterUI {
     `;
   }
 
-  createDraft(assetId) {
+  async createDraft(assetId) {
     if (typeof window === "undefined") {
       return;
     }
@@ -137,9 +145,13 @@ export class PublishingCenterUI {
     const asset = assets.find(a => a.id === assetId);
     
     if (asset) {
-      const draft = this.publishingCenter.createDraftFromAsset(asset);
-      alert(`Created draft: ${draft.id}`);
-      this.render();
+      try {
+        const draft = await this.publishingCenter.persistDraftFromAsset(asset);
+        alert(`Created draft: ${draft.id}`);
+        this.render();
+      } catch (error) {
+        alert(error.message);
+      }
     }
   }
 
@@ -151,7 +163,8 @@ export class PublishingCenterUI {
     const now = new Date();
     const future = new Date(now.getTime() + 24 * 60 * 60 * 1000); // Tomorrow
     
-    this.publishingCenter.scheduleDraft(draftId, future.toISOString())
+    const center = this.publishingCenter;
+    center.runDraftAction(() => center.scheduleDraft(draftId, future.toISOString()), center.getDrafts().find(draft => draft.id === draftId))
       .then(result => {
         alert(`Scheduled draft: ${result.id}`);
         this.render();
@@ -166,7 +179,8 @@ export class PublishingCenterUI {
       return;
     }
     
-    this.publishingCenter.publishDraft(draftId)
+    const center = this.publishingCenter;
+    center.runDraftAction(() => center.publishDraft(draftId), center.getDrafts().find(draft => draft.id === draftId))
       .then(result => {
         alert(`Published draft: ${result.id}`);
         this.render();
@@ -176,14 +190,19 @@ export class PublishingCenterUI {
       });
   }
 
-  deleteDraft(draftId) {
+  async deleteDraft(draftId) {
     if (typeof window === "undefined") {
       return;
     }
     
     if (confirm('Are you sure you want to delete this draft?')) {
-      this.publishingCenter.deleteDraft(draftId);
-      this.render();
+      const center = this.publishingCenter;
+      try {
+        await center.runDraftAction(() => center.deleteDraft(draftId), center.getDrafts().find(draft => draft.id === draftId));
+        this.render();
+      } catch (error) {
+        alert(error.message);
+      }
     }
   }
 }
