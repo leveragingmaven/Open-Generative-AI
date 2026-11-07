@@ -59,6 +59,17 @@ export class PublishingCenterMVP {
     return draft;
   }
 
+  importCommittedDraft({ proposalId, title, content }) {
+    const id = `mcp-${proposalId}`;
+    if (this.getDrafts().some(draft => draft.id === id)) return false;
+
+    const providerId = this.publishingProvider.supportsCapability("createDraft")
+      ? this.publishingProvider.id
+      : PUBLISHING_PROVIDER_IDS.MUAPI;
+    this.createDraft({ id, title, caption: content, status: PUBLISHING_STATUS.DRAFT }, { providerId });
+    return true;
+  }
+
   async sendGhlDraft(draftId) {
     const draft = readPublishingDrafts(this.storage).find((item) => item.id === draftId);
     if (!draft || draft.provider !== PUBLISHING_PROVIDER_IDS.GHL_HUB) throw new Error("Select a GHL draft first.");

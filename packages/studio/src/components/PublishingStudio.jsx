@@ -357,6 +357,8 @@ export default function PublishingStudio() {
   const [libraryDegraded, setLibraryDegraded] = useState(false);
   const [assets, setAssets] = useState([]);
   const [drafts, setDrafts] = useState([]);
+  const [proposalId, setProposalId] = useState("");
+  const [importingDraft, setImportingDraft] = useState(false);
   const [history, setHistory] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [engagementEntitlement, setEngagementEntitlement] = useState(() => zernioEngagementEntitlement([]));
@@ -707,6 +709,31 @@ export default function PublishingStudio() {
     } catch (error) {
       setNotice({ tone: "error", text: error.message || "Unable to create draft." });
       return null;
+    }
+  };
+
+  const importCommittedDraft = async (event) => {
+    event.preventDefault();
+    if (importingDraft) return;
+    const id = proposalId.trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(id)) {
+      setNotice({ tone: "error", text: "Enter a valid MCP proposal ID." });
+      return;
+    }
+    setImportingDraft(true);
+    try {
+      const response = await fetch(`/api/publishing/committed-drafts/${id}`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to import the MCP draft.");
+      const center = centerRef.current;
+      const imported = center.importCommittedDraft(result.draft);
+      setDrafts(center.getDrafts());
+      setProposalId("");
+      setNotice({ tone: "success", text: imported ? "MCP draft imported into Queue." : "This MCP draft is already in Queue." });
+    } catch (error) {
+      setNotice({ tone: "error", text: error.message || "Unable to import the MCP draft." });
+    } finally {
+      setImportingDraft(false);
     }
   };
 
@@ -1623,6 +1650,13 @@ export default function PublishingStudio() {
       </WorkspaceSection>}
 
       {activeView === "queue" && <WorkspaceSection title="Queue" description="Every saved post with its media, caption, destination, schedule, and status." actions={<div className="flex flex-wrap items-center gap-2">{nextScheduled ? <StatusBadge tone="gold">Next {readableDate(nextScheduled.scheduledAt, true)}</StatusBadge> : null}<StatusBadge tone={attention.length ? "warning" : "neutral"}>{attention.length} need attention</StatusBadge></div>}>
+        <form onSubmit={importCommittedDraft} className="mb-4 flex flex-wrap items-end gap-2">
+          <label className="flex min-w-0 flex-col gap-1 text-xs">
+            MCP proposal ID
+            <input value={proposalId} onChange={(event) => setProposalId(event.target.value)} required className="rounded border border-[var(--ms-color-border-subtle)] bg-transparent px-3 py-2" />
+          </label>
+          <SecondaryButton type="submit" disabled={importingDraft}>{importingDraft ? "Importing…" : "Import MCP Draft"}</SecondaryButton>
+        </form>
         {queueDrafts.length ? (
           <div className="space-y-3">
             <p className="text-[10px] text-[var(--ms-color-text-muted)]">{queueDrafts.length} {queueDrafts.length === 1 ? "post" : "posts"} in Queue · {scheduled.length} scheduled · {published.length} published · {weekSummary.scheduledCount} in the next 7 days{weekSummary.nextAvailableSlot ? ` · next free ${publishingSlotLabel(weekSummary.nextAvailableSlot)}` : ""}. Edit opens a post in the composer.</p>
