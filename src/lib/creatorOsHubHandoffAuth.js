@@ -1,17 +1,16 @@
 import crypto from 'node:crypto';
 
 /**
- * Narrow Hub -> Creator OS status delegation verifier.
+ * Narrow Hub -> Creator OS delegation verifier.
  *
  * This is NOT the Maven Harness service-auth contract and cannot approve,
- * prepare, execute, or publish. It is accepted only for the existing
- * read-only creative job status surface so Hub can report the status of a job
- * that the member already approved in the Creator OS browser.
+ * prepare, execute, or publish. Each route requires its own exact scope.
  */
 export const CREATOR_OS_HUB_ISSUER = 'mavensync-hub';
 export const CREATOR_OS_HUB_AUDIENCE = 'mavensync-creator-os';
 export const CREATOR_OS_HUB_SERVICE_ID = 'mavensync-hub';
 export const CREATOR_OS_HUB_SCOPE = 'creative.read';
+export const CREATOR_OS_HUB_IMAGE_IMPORT_SCOPE = 'creative.image.import';
 export const CREATOR_OS_HUB_ALGORITHM = 'HS256';
 export const CREATOR_OS_HUB_MAX_TTL_SECONDS = 300;
 export const CREATOR_OS_HUB_CLOCK_SKEW_SECONDS = 30;
@@ -72,7 +71,7 @@ function normalizeEmailSubject(value) {
   return normalized;
 }
 
-export function verifyCreatorOsHubHandoffToken({ token, now = Math.floor(Date.now() / 1000), env = process.env } = {}) {
+export function verifyCreatorOsHubHandoffToken({ token, now = Math.floor(Date.now() / 1000), env = process.env, requiredScope = CREATOR_OS_HUB_SCOPE } = {}) {
   const secrets = getCreatorOsHubHandoffSecrets(env);
   if (!secrets) {
     throw new CreatorOsHubHandoffAuthError('hub_handoff_not_configured', 'Hub handoff secret is not configured');
@@ -126,8 +125,8 @@ export function verifyCreatorOsHubHandoffToken({ token, now = Math.floor(Date.no
   if (typeof payload.jti !== 'string' || !payload.jti.trim()) {
     throw new CreatorOsHubHandoffAuthError('hub_handoff_invalid_format', 'token is missing a jti');
   }
-  if (!Array.isArray(payload.scp) || payload.scp.length !== 1 || payload.scp[0] !== CREATOR_OS_HUB_SCOPE) {
-    throw new CreatorOsHubHandoffAuthError('hub_handoff_missing_scope', 'token must declare only creative.read');
+  if (!Array.isArray(payload.scp) || payload.scp.length !== 1 || payload.scp[0] !== requiredScope) {
+    throw new CreatorOsHubHandoffAuthError('hub_handoff_missing_scope', `token must declare only ${requiredScope}`);
   }
 
   return {
