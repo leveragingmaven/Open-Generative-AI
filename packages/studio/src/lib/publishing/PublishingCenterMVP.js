@@ -59,14 +59,21 @@ export class PublishingCenterMVP {
     return draft;
   }
 
-  importCommittedDraft({ proposalId, title, content }) {
+  importCommittedDraft({ proposalId, title, content, assets, assetIds }) {
     const id = `mcp-${proposalId}`;
     if (this.getDrafts().some(draft => draft.id === id)) return false;
 
     const providerId = this.publishingProvider.supportsCapability("createDraft")
       ? this.publishingProvider.id
       : PUBLISHING_PROVIDER_IDS.MUAPI;
-    this.createDraft({ id, title, caption: content, status: PUBLISHING_STATUS.DRAFT }, { providerId });
+    this.createDraft({
+      id,
+      title,
+      caption: content,
+      assets: Array.isArray(assets) ? assets.filter(asset => asset && typeof asset === "object" && !Array.isArray(asset)) : [],
+      assetIds,
+      status: PUBLISHING_STATUS.DRAFT,
+    }, { providerId });
     return true;
   }
 
