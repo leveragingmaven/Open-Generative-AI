@@ -62,7 +62,10 @@ export class GhlHubPublishingProvider extends PublishingProvider {
   async sendDraft(draft, idempotencyKey) {
     if (draft.firstComment || draft.link) throw hubError("Add links and first comments to the reviewed caption before sending this draft.", "unsupported_draft_fields");
     if (!draft.platforms?.length) throw hubError("Choose at least one connected destination.", "missing_accounts");
-    const accountIds = draft.platforms.map((platform) => draft.accountIds?.[platform]);
+    const accountIds = draft.platforms.map((platform) => {
+      const id = draft.accountIds?.[platform];
+      return Number.isSafeInteger(id) ? String(id) : id;
+    });
     if (accountIds.some((id) => typeof id !== "string" || !id)) throw hubError("Choose a connected account for each destination.", "missing_accounts");
     const media = (draft.assets || []).map((asset) => {
       const type = asset.mimeType || asset.mime_type || (/^image\//.test(asset.type) ? asset.type : null);
