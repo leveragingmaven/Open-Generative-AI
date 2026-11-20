@@ -3,16 +3,27 @@ import { PUBLISHING_DRAFTS_KEY, PUBLISHING_STATUS, normalizePublishingDraft, nor
 
 const endpoint = "/api/publishing/drafts";
 const batchSize = 50;
+const draftRequestTimeoutMs = 15_000;
 
 async function requestDrafts(method = "GET", body) {
-  const response = await fetch(endpoint, {
-    method,
-    cache: "no-store",
-    ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
-  });
-  const result = await response.json().catch(() => null);
-  if (!response.ok || !result) throw new Error(result?.error || "Publishing draft storage is unavailable.");
-  return result;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error("Publishing draft storage did not respond in time."));
+  }, draftRequestTimeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method,
+      cache: "no-store",
+      signal: controller.signal,
+      ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+    });
+    const result = await response.json().catch(() => null);
+    controller.signal.throwIfAborted();
+    if (!response.ok || !result) throw new Error(result?.error || "Publishing draft storage is unavailable.");
+    return result;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function fetchPublishingDrafts({ includeUnimportedBrowserDrafts = false } = {}) {
