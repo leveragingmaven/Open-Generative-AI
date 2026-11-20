@@ -14,6 +14,19 @@ function freshDraftId() {
   return `draft-${suffix}`;
 }
 
+function committedDraftCaption(content) {
+  const lines = content.split(/\r?\n/);
+  const heading = /^(?:#{1,6}\s+)?(?:\*\*|__)?caption(?:(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*)|(?:\*\*|__)?)$/i;
+  const start = lines.findIndex(line => heading.test(line.trim()));
+  if (start === -1) return content;
+
+  const internalSection = /^(?:#{1,6}\s+)?(?:\*\*|__)?(?:image creative brief|media handoff note|qa checklist|production instructions|metadata|test notes?|handoff instructions)(?:(?:\*\*|__)?\s*:.*|(?:\*\*|__)?)$/i;
+  const metadataLine = /^(?:\*\*|__)?(?:status|platform|brand|format)\s*(?:\*\*|__)?\s*:/i;
+  const end = lines.findIndex((line, index) => index > start && (internalSection.test(line.trim()) || metadataLine.test(line.trim())));
+  const inlineCaption = heading.exec(lines[start].trim())[1] || "";
+  return [inlineCaption, ...lines.slice(start + 1, end === -1 ? lines.length : end)].join("\n").trim();
+}
+
 export class PublishingCenterMVP {
   constructor(options = {}) {
     this.storage = options.storage || localStorage;
@@ -69,7 +82,7 @@ export class PublishingCenterMVP {
     this.createDraft({
       id,
       title,
-      caption: content,
+      caption: committedDraftCaption(content),
       assets: Array.isArray(assets) ? assets.filter(asset => asset && typeof asset === "object" && !Array.isArray(asset)) : [],
       assetIds,
       status: PUBLISHING_STATUS.DRAFT,
