@@ -72,7 +72,11 @@ export async function handleMcpImageImport(request, {
   const allowedHost = downloadHosts === undefined
     ? hostAllowed(url.hostname, CHATGPT_FILE_HOSTS)
     : downloadHosts.includes(url.hostname);
-  if (!allowedHost) return failure('image_source_not_allowed', 400);
+  if (!allowedHost) {
+    const hostname = /^[a-z0-9.-]{1,253}$/i.test(url.hostname) ? url.hostname : null;
+    console.warn(JSON.stringify({ event: 'mcp_image_source_rejected', hostname, code: 'image_source_not_allowed' }));
+    return failure('image_source_not_allowed', 400);
+  }
   try {
     await resolveSafeAddresses(url.hostname, lookup);
   } catch (error) {
