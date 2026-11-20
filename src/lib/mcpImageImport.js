@@ -7,10 +7,10 @@ import { CREATOR_OS_HUB_IMAGE_IMPORT_SCOPE, verifyCreatorOsHubHandoffToken } fro
 import { requireCreatorOsRateLimit } from './creatorOsRateLimit.js';
 import { getR2MediaStorage } from './r2MediaStorage.js';
 import { maxBytesFor } from './uploadSecurity.js';
-import { resolveSafeAddresses } from './zernioMediaResolver.js';
+import { hostAllowed, resolveSafeAddresses } from './zernioMediaResolver.js';
 
 const FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' };
-const DEFAULT_DOWNLOAD_HOST = 'files.oaiusercontent.com';
+const CHATGPT_FILE_HOSTS = ['*.oaiusercontent.com'];
 
 function failure(code, status) {
   return Response.json({ code }, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -42,7 +42,7 @@ export async function handleMcpImageImport(request, {
   lookup,
   repository,
   storage,
-  downloadHosts = (process.env.CHATGPT_FILE_DOWNLOAD_HOSTS || DEFAULT_DOWNLOAD_HOST).split(',').map(host => host.trim().toLowerCase()),
+  downloadHosts = (process.env.CHATGPT_FILE_DOWNLOAD_HOSTS || undefined)?.split(',').map(host => host.trim().toLowerCase()),
 } = {}) {
   let subject;
   try {
@@ -63,12 +63,20 @@ export async function handleMcpImageImport(request, {
   let url;
   try {
     url = new URL(file.download_url);
-    if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash || !downloadHosts.includes(url.hostname)) {
-      return failure('image_source_not_allowed', 400);
-    }
-    await resolveSafeAddresses(url.hostname, lookup);
   } catch {
-    return failure('image_source_not_allowed', 400);
+    return failure('invalid_image_download_url', 400);
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) {
+    return failure('invalid_image_download_url', 400);
+  }
+  const allowedHost = downloadHosts === undefined
+    ? hostAllowed(url.hostname, CHATGPT_FILE_HOSTS)
+    : downloadHosts.includes(url.hostname);
+  if (!allowedHost) return failure('image_source_not_allowed', 400);
+  try {
+    await resolveSafeAddresses(url.hostname, lookup);
+  } catch (error) {
+    return failure(error?.code === 'zernio_media_unavailable' ? 'image_source_dns_unavailable' : 'image_source_unsafe_address', 422);
   }
 
   let bytes, declaredType;
