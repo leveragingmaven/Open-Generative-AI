@@ -10,7 +10,7 @@ import { maxBytesFor } from './uploadSecurity.js';
 import { hostAllowed, resolveSafeAddresses } from './zernioMediaResolver.js';
 
 const FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' };
-const CHATGPT_FILE_HOSTS = ['*.oaiusercontent.com'];
+const CHATGPT_FILE_HOSTS = ['*.oaiusercontent.com', 'oaisdmntprcentralus.blob.core.windows.net'];
 
 function failure(code, status) {
   return Response.json({ code }, { status, headers: { 'Cache-Control': 'no-store' } });
