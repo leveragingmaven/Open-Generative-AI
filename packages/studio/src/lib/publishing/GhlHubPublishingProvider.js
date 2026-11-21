@@ -67,7 +67,32 @@ export class GhlHubPublishingProvider extends PublishingProvider {
       return Number.isSafeInteger(id) ? String(id) : id;
     });
     if (accountIds.some((id) => typeof id !== "string" || !id)) throw hubError("Choose a connected account for each destination.", "missing_accounts");
-    const media = (draft.assets || []).map((asset) => {
+    const snapshots = draft.assets || [];
+    const assetKey = asset => asset.assetId || asset.id;
+    const libraryIds = [...new Set([
+      ...(draft.assetIds || []),
+      ...snapshots.map(assetKey).filter(Boolean),
+    ])].filter(id => /^asset_[a-f0-9]{64}$/.test(id)
+      || !snapshots.some(asset => assetKey(asset) === id && String(asset.url || "").startsWith("https://")));
+    const resolved = new Map();
+    if (libraryIds.length) {
+      const response = await this.fetchFn("/api/publishing/ghl-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetIds: libraryIds }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(data?.media)) {
+        throw hubError(data?.error || "Could not resolve the Creative Library images.", "invalid_media", response.status);
+      }
+      for (const { assetId, url, type } of data.media) resolved.set(assetId, { url, type });
+      if (libraryIds.some(id => !resolved.has(id))) {
+        throw hubError("Could not resolve every Creative Library image.", "invalid_media");
+      }
+    }
+    const media = snapshots.map((asset) => {
+      if (resolved.has(assetKey(asset))) return resolved.get(assetKey(asset));
       const type = asset.mimeType || asset.mime_type || (/^image\//.test(asset.type) ? asset.type : null);
       // Never guess the MIME type of extensionless generated media.
       const extension = String(asset.url || "").split("?")[0].split(".").pop().toLowerCase();
@@ -75,11 +100,14 @@ export class GhlHubPublishingProvider extends PublishingProvider {
       if (!mime || !String(asset.url || "").startsWith("https://")) throw hubError("Each image or video needs a public HTTPS URL and supported MIME type.", "invalid_media");
       return { url: asset.url, type: mime };
     });
+    for (const id of libraryIds) {
+      if (!snapshots.some(asset => assetKey(asset) === id)) media.push(resolved.get(id));
+    }
     const response = await this.fetchFn(this.accountsUrl.replace(/accounts$/, "posts"), {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({ operation: "draft", accountIds: [...new Set(accountIds)], content: draft.caption || "", media }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(libraryIds.length ? Math.max(this.timeoutMs, 30_000) : this.timeoutMs),
     });
     const data = await response.json().catch(() => null);
     if (!response.ok || data?.success !== true) throw hubError(data?.error || "GHL draft was not confirmed. Check Hub before retrying.", data?.code || "hub_draft_failed", response.status);

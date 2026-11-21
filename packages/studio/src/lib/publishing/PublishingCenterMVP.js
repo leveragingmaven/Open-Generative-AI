@@ -97,7 +97,7 @@ export class PublishingCenterMVP {
     const key = `ghl-approved:${draft.id}`;
     let submission = JSON.parse(this.storage.getItem(key) || "null");
     const approved = { ...draft, caption: captionWithHashtags(draft.caption, draft.hashtags) };
-    const fields = (item) => JSON.stringify([item.caption, item.assets, item.platforms, item.accountIds, item.firstComment, item.link]);
+    const fields = (item) => JSON.stringify([item.caption, item.assets, item.assetIds || [], item.platforms, item.accountIds, item.firstComment, item.link]);
     if (submission && fields(submission.draft) !== fields(approved)) throw new Error("This draft already has a submitted snapshot. Check GHL first; duplicate the local draft to submit revised content.");
     if (!submission) {
       submission = { key: `draft:${globalThis.crypto.randomUUID()}`, draft: { ...draft, caption: captionWithHashtags(draft.caption, draft.hashtags) } };
